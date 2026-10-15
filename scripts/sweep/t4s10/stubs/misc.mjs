@@ -5,7 +5,7 @@ const rec = (k, v) => { ((W.misc.log ||= []).push({ k, v })); };
 export async function logAction(panel, action, fields) { rec("logAction", { panel, action, fields }); }
 export async function recordRemoval(x) { rec("recordRemoval", x); }
 export function deviceIdFrom() { return W.misc.device ?? "dev-stub"; }
-export async function storeIssueMedia(rid, file, kind) { rec("store", { rid, kind, size: file && file.size }); if (W.misc.storeThrows) throw new Error(W.misc.storeThrows); return "https://stub/issue-media/" + rid + "/x"; }
+export async function storeIssueMedia(rid, file, kind) { rec("store", { rid, kind, size: file && file.size }); if (W.misc.storeThrows) throw new Error(W.misc.storeThrows); if (W.misc.storeThrowsValue !== undefined) throw W.misc.storeThrowsValue; return "https://stub/issue-media/" + rid + "/x"; }
 export async function getMenuBundle(rid) { rec("bundle", rid); if (W.misc.bundleThrows) throw new Error("bundle read failed"); return W.misc.bundle ?? { items: [{ id: "d1", title: "Dish" }], categories: [{ id: "c1", title: "Cat" }] }; }
 export const normTable = (v) => { const n = parseInt(String(v ?? "").trim(), 10); return Number.isFinite(n) && n > 0 ? String(n) : ""; };
 export async function affectedTables(rid, a, b, c) { rec("affected", { rid, a, b, c }); return W.misc.affected ?? { tables: [normTable(b)], unknown: false }; }

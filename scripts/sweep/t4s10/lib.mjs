@@ -15,7 +15,8 @@
 //   · DB   — one read-only, scoped, limited statement against the dev database.
 //
 // Never: a swapped id, a write to Aangan's switches, a repeat of a rate-limited action to "see the wall".
-import { readFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
@@ -70,7 +71,12 @@ export const FILES = {
   merge: "lib/tableMerge.ts",
   ts: "lib/tenantStorage.ts",
 };
-export const SRC = Object.fromEntries(Object.entries(FILES).map(([k, f]) => [k, rd(f)]));
+// ROUND 2 (2026-10-15): a deliberate-break run names ONE file and a broken copy of it —
+// T4_MUT_FILE=<repo-relative file> T4_MUT_SRC=<absolute path of the copy>. Every load of that file (bundle,
+// screen lab, or a read of its source) then gets the copy, so a check is judged against the break.
+export const MUT = process.env.T4_MUT_FILE ? { file: process.env.T4_MUT_FILE, src: readFileSync(process.env.T4_MUT_SRC, "utf8") } : null;
+export const srcOf = (rel) => (MUT && MUT.file === rel ? MUT.src : rd(rel));
+export const SRC = Object.fromEntries(Object.entries(FILES).map(([k, f]) => [k, srcOf(f)]));
 export const CODE = Object.fromEntries(Object.entries(SRC).map(([k, t]) => [k, strip(t)]));
 
 /** The brace-matched body of the first declaration starting with `head`. Throws when it has moved. */
@@ -96,7 +102,7 @@ export function nid() { if (nextN == null) throw new Error("t4s10: band() not se
 /** check(file, what, how, fn) — `file` is the SUBJECT (a FILES value); `fn` returns true/false, {ok,note}, or "skip: …". */
 export const check = (file, what, how, fn) => defs.push({ id: nid(), file, what, how, fn });
 
-export async function runAll({ ledger = false, quiet = false, only = null } = {}) {
+export async function runAll({ ledger = false, quiet = false, only = null, file = null, kinds = null, bail = false } = {}) {
   const seen = new Set();
   for (const d of defs) {
     if (seen.has(d.id)) throw new Error(`duplicate id ${d.id}`);
@@ -108,6 +114,8 @@ export async function runAll({ ledger = false, quiet = false, only = null } = {}
   const rows = [];
   for (const d of defs) {
     if (only && !only.includes(d.id)) continue;
+    if (file && d.file !== file) continue;                                   // --file=<subject>
+    if (kinds && !kinds.some((k) => String(d.how).startsWith(k))) continue;  // --kinds=STUB,LAB
     let res, note = "";
     try { res = await d.fn(); } catch (e) { res = false; note = `threw: ${(e && e.message) || e}`.slice(0, 220); }
     let mark;
@@ -115,6 +123,7 @@ export async function runAll({ ledger = false, quiet = false, only = null } = {}
     else if (res && typeof res === "object") { mark = res.ok ? "✅" : "❌"; note = res.note || note; }
     else mark = res ? "✅" : "❌";
     rows.push({ ...d, mark, note });
+    if (bail && mark === "❌") { console.log(`❌ ${d.id}  ${d.what}`); return rows; }   // --bail: first red ends the run
     if (!ledger && (!quiet || mark === "❌")) console.log(`${mark} ${d.id}  ${d.what}${note ? `   — ${note}` : ""}`);
   }
   const esc = (x) => String(x).replace(/\|/g, "¦").replace(/\n/g, " ");
@@ -165,12 +174,14 @@ export async function load(rel, { real = [], extra = {}, tag = "" } = {}) {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "stub-anon-key";
   process.env.SUPABASE_SERVICE_ROLE_KEY ||= "stub-service-key";
   mkdirSync(CACHE, { recursive: true });
-  const out = join(CACHE, `t4s10-${(rel + tag).replace(/[^A-Za-z0-9]+/g, "_")}.cjs`);
+  const stem = `t4s10-${(rel + tag).replace(/[^A-Za-z0-9]+/g, "_")}`;
   const map = { ...STANDINS, ...extra };
   for (const r of real) delete map[r];
   const esbuild = (await import("esbuild")).default;
-  await esbuild.build({
-    entryPoints: [join(ROOT, rel)], bundle: true, platform: "node", format: "cjs", outfile: out, logLevel: "silent",
+  const COVER = process.env.T4_COVER === "1";
+  const built = await esbuild.build({
+    entryPoints: [join(ROOT, rel)], bundle: true, platform: "node", format: "cjs", outfile: join(CACHE, stem + ".cjs"), logLevel: "silent",
+    write: false, ...(COVER ? { sourcemap: "inline", sourcesContent: false } : {}),
     jsx: "automatic", loader: { ".js": "jsx" },
     external: ["next/server", "next/cache", "next/headers", "next/navigation", "react", "react/jsx-runtime", "react-dom"],
     plugins: [{ name: "t4s10-standins", setup(b) {
@@ -182,8 +193,18 @@ export async function load(rel, { real = [], extra = {}, tag = "" } = {}) {
         if (a.path.startsWith("@/")) { const f = extFor(abs); return f ? { path: f } : undefined; }
         return undefined;
       });
+      // the deliberate-break copy stands in for its file, wherever it is imported from
+      if (MUT) b.onLoad({ filter: /\.(tsx?|mjs|js)$/ }, (a) => {
+        if (a.path !== join(ROOT, MUT.file)) return undefined;
+        return { contents: MUT.src, loader: a.path.endsWith(".tsx") ? "tsx" : a.path.endsWith(".ts") ? "ts" : "js", resolveDir: dirname(a.path) };
+      });
     } }],
   });
+  // A content-hashed name: the same file bundled two ways (different stand-ins) must not share one path,
+  // or a coverage record would be mapped through the wrong bundle's source map.
+  const text = built.outputFiles[0].text;
+  const out = join(CACHE, `${stem}-${createHash("sha1").update(text).digest("hex").slice(0, 10)}.cjs`);
+  writeFileSync(out, text);
   delete require_.cache[out];
   return require_(out);
 }

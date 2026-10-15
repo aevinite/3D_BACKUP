@@ -7,7 +7,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "./lib.mjs";
 const WRITE = process.argv.includes("--write");
-const STAMP = "re-run 2026-10-12 (sweep #10, T4)";
+// round 2 stamps with its own words (--stamp="…" --tag="s10·T4r2"); a row keeps every earlier stamp
+const argOf = (k) => { const x = process.argv.find((y) => y.startsWith(`--${k}=`)); return x ? x.slice(k.length + 3) : null; };
+const STAMP = argOf("stamp") || "re-run 2026-10-12 (sweep #10, T4)";
+const TAG = argOf("tag") || "s10·T4";
 const decisions = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const byFile = new Map();
 for (const d of decisions) { if (!byFile.has(d.ledger)) byFile.set(d.ledger, []); byFile.get(d.ledger).push(d); }
@@ -24,7 +27,7 @@ for (const [file, ds] of byFile) {
     if (lines[i].includes(STAMP)) { already++; continue; }
     const inner = lines[i].split(/(?<!\\)\|/).slice(1, -1);
     const resIdx = inner.findIndex((c, k) => k >= 2 && /✅|❌|⏭/.test(c));
-    if (resIdx >= 0 && resIdx < inner.length - 1) inner[resIdx] = ` ${inner[resIdx].trim()} · s10·T4 ${d.mark} `;
+    if (resIdx >= 0 && resIdx < inner.length - 1) inner[resIdx] = ` ${inner[resIdx].trim()} · ${TAG} ${d.mark} `;
     const last = inner.length - 1;
     inner[last] = ` ${inner[last].trim()}${inner[last].trim() ? " · " : ""}**${STAMP}:** ${d.mark} ${esc(d.note)} `;
     lines[i] = `|${inner.join("|")}|`;
