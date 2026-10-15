@@ -78,7 +78,9 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
     // NEW
     check("P66051", "a save's RE-READ is outside the save's own try, so a blip cannot say 'not saved'", () => {
       const inner = save.slice(save.indexOf("if (btn) btn.textContent"));
-      return /try \{\s*await load\(\);\s*render\(\);\s*\} catch \(e\) \{/.test(inner);
+      // Since sweep #10 T16 round 2 (item 18) a re-read that FAILS also keeps the screen (it no longer
+      // renders "Couldn't load") — still in its own try, and its catch still swallows the blip.
+      return /try \{\s*await load\(\);\s*if \(readFailed\) \{ readFailed = false; me = held;[^}]*\} else render\(\);\s*\} catch \(e\) \{/.test(inner);
     });
     check("P66052", "available() remembers a real answer but never a failure", () =>
       /if \(availability !== null\) return availability;/.test(available) &&
