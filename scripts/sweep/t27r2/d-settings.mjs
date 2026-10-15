@@ -9,11 +9,40 @@
  * re-read-and-diff afterwards.
  */
 export default function section(c) {
-  const { phase, sec, req, sq, FH, NOSUCH, DB_WORDS } = c;
+  const { sec, req, sq, FH, NOSUCH, DB_WORDS } = c;
   const F = "app/api/admin/restaurants/settings/route.ts";
   const P = "/api/admin/restaurants/settings";
   sec("D · one restaurant's operational settings");
-  const save = (body) => req(P, { method: "POST", body: { restaurant_id: FH, ...body } });
+  const get = (cols) => sq(`settings?select=${cols}&restaurant_id=eq.${FH}`).then((q) => q.json?.[0] || {});
+
+  // ── EVERY SETTING IS PUT BACK THE MOMENT ITS PHASE ENDS (sweep #10 T3 round 3, owner's item 30) ──
+  // French House is the restaurant EVERY terminal writes to and tests against, and this section saves
+  // its table count as 0 / 10,000 / "lots" (stored 1 / 500 / 12), its tax rate, tax lines, price mode,
+  // name, geofence and the dining-session switch. The harness snapshot only put the row back after the
+  // WHOLE run — so for minutes French House really had 12 tables, or no tax, or sessions ON, while other
+  // terminals' checks ran against it. Terminal 3's join-a-table screen read "we have tables 1–13" in
+  // one of those windows (staff_actions: nine `updated table_count` rows on 2026-10-12, 05:30–16:08 UTC)
+  // and it looked like a product fault. It was a true answer about a borrowed restaurant.
+  //
+  // So `save` remembers each column's value the first time a phase touches it, and the phase wrapper
+  // writes those values back in a `finally` the moment the phase ends — pass, fail or throw. Every phase
+  // in this file is self-contained (it saves and reads back inside itself), so nothing depends on a
+  // value surviving into the next one. The harness's whole-row snapshot still runs as the safety net.
+  let touched = null;   // Map<column, value as found> for the phase that is running, or null between phases
+  const save = async (body) => {
+    if (touched) {
+      const fresh = Object.keys(body).filter((k) => !touched.has(k));
+      if (fresh.length) { const cur = await get(fresh.join(",")); for (const k of fresh) if (k in cur) touched.set(k, cur[k]); }
+    }
+    return req(P, { method: "POST", body: { restaurant_id: FH, ...body } });
+  };
+  const putBack = async () => {
+    const t = touched; touched = null;
+    if (!t || !t.size) return;
+    const r = await sq(`settings?restaurant_id=eq.${FH}`, { method: "PATCH", body: JSON.stringify(Object.fromEntries(t)) });
+    if (r.status >= 300) console.error(`  ⚠️ French House's ${[...t.keys()].join(", ")} were NOT put back after the phase (${r.status}) — the run's final restore still will`);
+  };
+  const phase = (check, how, fn) => c.phase(check, how, async (...a) => { touched = new Map(); try { return await fn(...a); } finally { await putBack(); } });
 
   // TABLE 1'S QR CODE IS PUT BACK (sweep #10 T39 item 80). The three regen phases below each mint
   // French House table 1 a brand-new permanent code, and the harness's snapshot covers the settings
@@ -37,7 +66,6 @@ export default function section(c) {
     if (r.status >= 300) console.error(`  ⚠️ table 1's QR code was NOT put back (${r.status}) — it should be ${qr1}`);
     return r.status < 300;
   };
-  const get = (cols) => sq(`settings?select=${cols}&restaurant_id=eq.${FH}`).then((q) => q.json?.[0] || {});
 
   // ── the file's own rules ─────────────────────────────────────────────────────────────────────
   phase("the sign-in gate runs before the first database call", "compare positions",

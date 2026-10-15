@@ -1158,7 +1158,13 @@ flush();
     const cp = r3("components/ChefPopup.tsx"), mn = r3("lib/menu.ts");
     check("item 29 — the bell passes the database's sentence through to the popup", /error: typeof res\.error === "string" \? res\.error : undefined/.test(mn));
     check("item 29 — the popup flags the table box with it and forgets a remembered table that does not exist",
-      /res\.reason === "unknown_table" \|\| res\.reason === "off_plan_table"/.test(cp) && /if \(getScannedTable\(\) === check\.value\) \{\s*setScannedTable\(""\)/.test(cp) && /flagTableInput\("chef-table", res\.error \|\|/.test(cp)); }}
+      /res\.reason === "unknown_table" \|\| res\.reason === "off_plan_table"/.test(cp) && /if \(getScannedTable\(\) === check\.value\) \{\s*setScannedTable\(""\)/.test(cp) && /flagTableInput\("chef-table", res\.error \|\|/.test(cp)); }
+  // item 30 — the admin settings suite puts every setting back the moment each phase ends
+  { const d = r3("scripts/sweep/t27r2/d-settings.mjs");
+    check("item 30 — the admin settings suite remembers each column the first time a phase saves it",
+      /const fresh = Object\.keys\(body\)\.filter\(\(k\) => !touched\.has\(k\)\);/.test(d));
+    check("item 30 — …and writes it back in a finally, whatever the phase did",
+      /const phase = \(check, how, fn\) => c\.phase\(check, how, async \(\.\.\.a\) => \{ touched = new Map\(\); try \{ return await fn\(\.\.\.a\); \} finally \{ await putBack\(\); \} \}\);/.test(d)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
