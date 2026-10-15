@@ -186,6 +186,11 @@ say("\n4. THE BILL'S BUTTON ALWAYS SAYS \"PRINT\" — no reprint marking on a gu
     body && !/Reprint/.test(body)
       ? ok(`${what}: billPrintLabel always says Print`)
       : bad(`${what}: the bill's label can say Reprint again`, "R62 — the guest bill keeps no reprint marking");
+    // The hook the stamp looked for is gone too (sweep #10 T12, 2026-10-15/16) — a marker nobody reads is
+    // an invitation to bring the stamp back.
+    !/data-bill-print-btn/.test(body.replace(/\/\/[^\n]*/g, ""))
+      ? ok(`${what}: the Print label carries no leftover "printed" hook`)
+      : bad(`${what}: the Print label carries the data-bill-print-btn hook again`, "R62 — nothing reads it; plain text only");
     !/billPrintedBefore|_billPrintedHere|markBillPrintedLocally|\/bill-printed|bill_printed_at/.test(src.replace(/\/\/[^\n]*/g, ""))
       ? ok(`${what}: nothing remembers, stamps or reads whether a bill was printed`)
       : bad(`${what}: a "was this bill printed?" reader is back`, "R62 — remove it; the word it fed is gone");

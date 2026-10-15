@@ -6317,8 +6317,11 @@ function combineBillLines(entries) { return LFH_BILLDOC.combineBillLines(entries
 // show reprint instead of print"); see docs/REJECTED-IDEAS.md → R62. The per-device "printed here" set,
 // the relabel after printing and the POST /sessions/:id/bill-printed stamp went with it.
 // `sess` / `os` stay in the signature so the nine buttons that build their label here keep one door.
+// OBITUARY (sweep #10 T12 item 10, 2026-10-16): the label used to be wrapped in <span data-bill-print-btn>,
+// the hook the "bill printed → Reprint" stamp looked for. The stamp went on 2026-10-10 (R62) and nothing
+// has read the marker since. Plain text now — the waiter tablet's twin was cleared the same way.
 function billPrintLabel(_sess, _os, suffix) {
-  return `<span data-bill-print-btn>🖨 Print${suffix ? " " + suffix : ""}</span>`;
+  return `🖨 Print${suffix ? " " + suffix : ""}`;
 }
 // The window path, kept exactly as it was, in one place — so the helper path above can fall back to
 // it without a second copy of these six lines drifting from this one.
