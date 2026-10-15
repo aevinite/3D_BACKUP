@@ -348,7 +348,9 @@
       }
     }
     // waiting-to-sync
-    var off = navigator.onLine === false;
+    // (A `var off = navigator.onLine === false;` stood here, read by nothing — syncState() answers the
+    // offline question. Removed in sweep #10 T16 round 2, item 24, found by a mutation that changed it
+    // and changed nothing.)
     var st = syncState();
     if (outbox.failed.length || outbox.queued.length) {
       var sync = el("span", "lfh-conn-pop-sync");

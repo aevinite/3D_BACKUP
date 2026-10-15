@@ -563,10 +563,11 @@ has("guestbell.js", /rows: all\.slice\(0, 50\)/,
   for (const f of SHARED) {
     let raw = ""; try { raw = fs.readFileSync(path.join(ROOT, "public/panels", f), "utf8"); } catch { fails.push(`${f}: missing — the dead-helper check had nothing to read`); continue; }
     const c = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\\])\/\/.*$/gm, "$1");
-    const decl = [...c.matchAll(/(?:^|[;{}\n])\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|[;{}\n])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/g)].map((m) => m[1] || m[2]);
+    // …and (item 24) every VARIABLE too: connbadge.js still computed an `off` flag nothing read.
+    const decl = [...c.matchAll(/(?:^|[;{}\n])\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|[;{(\n,])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)].map((m) => m[1] || m[2]);
     for (const n of new Set(decl)) {
       const uses = (c.match(new RegExp("(^|[^\\w$.])" + n.replace(/\$/g, "\\$") + "(?![\\w$])", "g")) || []).length;
-      if (uses < 2) fails.push(`${f}: ${n}() is declared and never used — dead code a reader trusts and nothing runs (delete it, or call it)`);
+      if (uses < 2) fails.push(`${f}: ${n}() is declared and never used — dead code a reader trusts and nothing runs (delete it, or use it)`);
     }
   }
 }
