@@ -199,6 +199,31 @@ console.log("\nD2. a bill saved on this device is not 'sent to the printer' (swe
   }
 }
 
+console.log("\nD3. the banquet sheet and the KOT 'where?' question, the same rule (sweep #10 T12 round 2, item 11)");
+// D2's twin and its cousin. printBanquetBill() asked the same question as printBill() and still read
+// the outbox's own { queued, action_id } as "the printer has it"; the KOT reprint sheet's probe
+// ({ kind: "kot" }, a question, not a print) was kept by the queue and listed as unsent work.
+{
+  const b = codeOnly.indexOf('api("POST", "/print/send", { kind: "banquet", billId: b.id })');
+  if (b < 0) bad("printBanquetBill's hand-off is no longer written this way", "re-point this line");
+  else {
+    const win = codeOnly.slice(b, b + 1400);
+    const dev = win.search(/r\.queued && r\.action_id/);
+    const sent = win.search(/if \(r && r\.queued\) \{/);
+    const opens = dev >= 0 ? win.slice(dev, dev + 400).indexOf("openBanquetWindow(b, lines)") : -1;
+    if (dev < 0 || (sent >= 0 && sent < dev) || opens < 0 || !/LFH_OUTBOX\.dismiss\(r\.action_id\)/.test(win.slice(dev, dev + 400)))
+      bad("a banquet sheet that only reached this device is still called 'Sent to the printer'", "it must open the sheet here and take the saved send back out of the queue");
+    else ok("a banquet print that only reached this device opens the sheet here and is taken back out of the queue");
+  }
+  const k = codeOnly.indexOf('const r = await api("POST", "/print/send", { kind: "kot" });');
+  if (k < 0) bad("the KOT reprint sheet's 'who owns the slips?' question is no longer written this way", "re-point this line");
+  else {
+    const win = codeOnly.slice(k, k + 1400);   // comments are blanked to spaces, so the window counts them
+    if (/r\.queued && r\.action_id/.test(win) && /LFH_OUTBOX\.dismiss\(r\.action_id\)/.test(win)) ok("the KOT 'where?' question saved offline is taken back out of the queue");
+    else bad("the KOT 'where?' question saved offline stays in 'waiting to sync'", "a question is not a change — take it back out");
+  }
+}
+
 console.log("\nE. reopen puts the TABLE back, not the bill (owner, 2026-08-26; mig 365)");
 // The four rules he gave, each asserted where it actually lives. Driven end to end when it was
 // built — a settled bill was refused while another party sat at the table, then accepted once the
