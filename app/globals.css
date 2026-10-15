@@ -1108,18 +1108,7 @@ body.menu-frost .nav {
 .allergen-chip.warn { background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.5); color: #fca5a5; }
 
 /* billing + allergy step (cart panel) */
-/* menu-wide allergy filter banner + popup */
-.allergy-banner {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin: 0 0 14px; padding: 11px 16px; border-radius: 12px; font-size: 14px;
-  background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.35); color: var(--text);
-}
-.allergy-banner button {
-  margin-left: auto; background: transparent; border: 1px solid var(--accent); color: var(--accent);
-  padding: 5px 12px; border-radius: 999px; font-weight: 600; font-size: 13px; cursor: pointer;
-}
-.allergy-popup { text-align: center; max-width: 420px; }
-.allergy-popup .allergy-chips { justify-content: center; }
+/* .allergy-banner / .allergy-popup — the menu-wide allergy filter they styled is long gone (sweep #10 T3 round 3 — nothing in app/, components/, lib/ or public/ renders it; the round-3 dead-code check, R3-H03). */
 .allergy-section { margin: 8px 0 16px; padding: 14px; border: 1px solid rgba(212,165,116,0.18); border-radius: 14px; background: rgba(212,165,116,0.05); }
 .allergy-section h4 { font-size: 13px; color: var(--text); margin: 0 0 10px; font-weight: 700; }
 .allergy-chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1129,7 +1118,6 @@ body.menu-frost .nav {
 /* No opacity on the note's text: at 0.85 it measured 4.0:1 in dark and 3.43:1 in light (item 27). */
 .allergy-note { margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted-ink); }
 .allergy-note i { margin-right: 5px; opacity: 0.8; }
-.cart-item-warn { font-size: 12px; color: #fca5a5; margin-top: 4px; }
 /* pairing upsell on the bill */
 .pairing { margin: 4px 0 16px; }
 .pairing-label { font-size: 13px; font-weight: 700; color: var(--accent-ink); margin-bottom: 8px; }
@@ -3901,13 +3889,6 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 @keyframes otDropIn { from { opacity: 0; transform: translate(-50%, -40%) scale(0.82); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .ot-dropzone { animation: none; } }
 
-/* Keyboard / non-touch fallback inside the detail sheet. */
-.ot-hide-link {
-  background: none; border: none; color: var(--muted); font-size: 12px;
-  text-decoration: underline; cursor: pointer; margin-top: 14px; align-self: center;
-}
-.ot-hide-link:hover { color: var(--text); }
-
 /* sticky mini-cart — a compact centred pill on desktop, a full-width bar on phones */
 .mini-cart {
   display: flex; align-items: center; gap: 12px;
@@ -4002,6 +3983,26 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 }
 .gob-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 6px; font-weight: 800; font-size: 13px; }
 .gob-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 4px 6px; }
+/* ── EVERY ✕ AND BACK ON THE ORDERING SCREENS CAN BE HIT WITH A THUMB (sweep #10 T3 round 3) ──────────
+   Measured at 360 px: the saved list's ✕ was 23×25 px — under even WCAG 2.2's hard minimum of 24×24 —
+   the dish popup's ✕ 32×32, the bill's ✕ 34×34 and its Back 36 px tall, against the 44×44 a phone
+   tap is designed for. Each one keeps exactly how it LOOKS; an invisible ::after centred on it makes the
+   area a finger can hit at least 44×44 (a pseudo-element is part of its button for hit-testing). The
+   bill's ✕ shares .nav-btn with the menu's header buttons, so only the one inside the bill is touched.
+   The same for the controls a diner taps again and again: the bill's − and + (32×32), its two tabs and
+   "Wrong table? Fix it" (35 and 30 px tall), a line's Edit (26 px tall) and bin (25 px wide), the
+   suggestion's "+ Add" (33 px tall), and the allergy chips and the dish popup's option chips (35–36 px
+   tall — 8 px apart, so their 44 px areas meet and never overlap). The bin sits at the very edge of its
+   line, which hides what spills past it, so a finger reaches about 26×44 of it: above WCAG's 24 px
+   minimum; making it wider means moving it, which is a layout decision, not a hit-area one. */
+.gob-x, .cart-back, #cart-panel .nav-btn, .cart-qty-btn, .live-order-fixlink, .oc-choice,
+.cart-edit-btn, .remove-item, .pairing-add, .allergy-toggle { position: relative; }
+.gob-x::after, .cart-back::after, .order-confirm-close::after, #cart-panel .nav-btn::after,
+.cart-qty-btn::after, .cart-tabs button::after, .live-order-fixlink::after, .oc-choice::after,
+.cart-edit-btn::after, .remove-item::after, .pairing-add::after, .allergy-toggle::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
+}
 .gob-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: var(--border); }
 .gob-row-main { flex: 1; min-width: 0; }
 .gob-row-title { font-size: 13px; font-weight: 700; }
@@ -4027,77 +4028,14 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 @media (prefers-reduced-motion: reduce) { .gob-spin i { animation: none; } }
 .gob-foot { font-size: 11px; color: var(--muted); padding-top: 10px; border-top: var(--border); }
 
-/* detail/edit sheet opened by tapping the strip */
-.ot-sheet {
-  position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%); z-index: 1001;
-  width: min(420px, calc(100vw - 28px)); max-height: 80vh; overflow-y: auto;
-  padding: 22px 20px 20px; border-radius: 22px;
-  background: rgba(24,20,16,0.96); backdrop-filter: blur(20px);
-  border: 1px solid rgba(212,165,116,0.3); box-shadow: 0 24px 60px rgba(0,0,0,0.55);
-  color: var(--text); animation: otRiseCentered 0.35s cubic-bezier(0.22,1,0.36,1) both;
-  --ot-accent: #d4a574;
-}
-.ot-sheet-close {
-  position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%;
-  background: rgba(245,236,221,0.08); border: 1px solid rgba(245,236,221,0.14);
-  color: var(--text); cursor: pointer; font-size: 15px;
-}
-.ot-sheet-head { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; padding-right: 36px; }
-/* cancelled-order notice + call-waiter button inside the tracker sheet */
-.ot-cancelled-note { margin: 14px 0 4px; text-align: center; }
-.ot-cancelled-note p { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.5; }
-.ot-cancelled-note .ot-call-waiter { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
-.ot-sheet-head.status-received { --ot-accent: #e8a13c; } /* amber — not accepted yet */
-.ot-sheet-head.status-preparing { --ot-accent: #4f9dff; }
-.ot-sheet-head.status-served { --ot-accent: #4ade80; }
-.ot-sheet-head.status-cancelled { --ot-accent: #ef4444; }
-.ot-sheet-head .ot-label { font-size: 16px; font-weight: 700; }
-.ot-steps.big { margin: 0 0 18px; }
-.ot-steps.big .ot-step { height: 6px; }
-.ot-items { border-top: 1px solid rgba(245,236,221,0.1); padding-top: 12px; margin-bottom: 16px; }
-.ot-item-line { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); padding: 4px 0; }
-.ot-item-line.total { color: var(--text); font-weight: 700; border-top: 1px solid rgba(245,236,221,0.1); margin-top: 6px; padding-top: 10px; }
-.ot-table-edit label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; font-weight: 600; }
-.ot-table-row { display: flex; gap: 8px; }
-.ot-table-row input {
-  flex: 1; min-width: 0; padding: 11px 14px; border-radius: 12px;
-  background: rgba(245,236,221,0.06); border: 1px solid rgba(212,165,116,0.3);
-  color: var(--text); font-size: 15px;
-}
-.ot-table-row input:disabled { opacity: 0.5; }
-.ot-save {
-  flex: 0 0 auto; padding: 0 18px; border-radius: 12px; border: none; cursor: pointer;
-  background: var(--accent, #d4a574); color: #2a1d0c; font-weight: 700; font-size: 14px;
-}
-.ot-save:disabled { opacity: 0.45; cursor: default; }
-.ot-note { font-size: 12px; color: var(--muted); margin: 9px 0 0; line-height: 1.45; }
-
-/* The strip and sheet are ALWAYS dark glass, so lock their text to cream/gold
-   regardless of the site theme — otherwise light mode turns var(--text)/
-   var(--muted) dark and they vanish (dark-on-dark). */
-/* Collapsed tracker text is theme-aware (var(--text)/var(--muted)) so it reads on
-   the warm card in BOTH light & dark. Only the (unreachable) dark .ot-sheet keeps
-   cream text. (owner, 2026-06-19) */
-.ot-sheet .ot-label, .ot-item-line.total { color: #f5ecdd; }
-.ot-sheet .ot-sub, .ot-item-line, .ot-table-edit label, .ot-note { color: rgba(245,236,221,0.74); }
-.ot-sheet, .ot-sheet-close, .ot-table-row input { color: #f5ecdd; }
-
+/* The strip's old DETAIL SHEET (.ot-sheet and its head, items, table editor, save button, cancelled note
+   and hide link) was replaced by the bill's Live status tab, which tapping the strip opens (owner,
+   2026-06-19); its rules stayed behind (sweep #10 T3 round 3 — nothing in app/, components/, lib/ or public/ renders it; the round-3 dead-code check, R3-H03). */
 @media (prefers-reduced-motion: reduce) {
-  .order-tracker, .order-tracker .ot-icon, .ot-step.active, .ot-sheet { animation: none !important; }
+  .order-tracker, .order-tracker .ot-icon, .ot-step.active { animation: none !important; }
 }
 
-/* The customize popup's SUCCESS step ("Added to your bill") — step 2 of the
-   two-step add flow. Reuses .order-confirm for the box; these are extras. */
-.order-confirm-done { text-align: center; padding: 32px 24px; }
-.order-confirm-done .done-check {
-  width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px; color: #fff; background: var(--accent, #d4a574);
-}
-.order-confirm-done .done-title { margin: 0 0 6px; font-size: 20px; }
-.order-confirm-done .done-line { margin: 0; color: var(--muted); font-size: 14px; }
-.order-confirm-done .done-actions { display: flex; gap: 12px; justify-content: center; margin-top: 22px; }
+/* .order-confirm-done — the customize popup's old "Added to your bill" step; the popup now closes and the toast says it (sweep #10 T3 round 3 — nothing in app/, components/, lib/ or public/ renders it; the round-3 dead-code check, R3-H03). */
 
 /* (The "New" badge that briefly lived here was removed on the owner's
    request 2026-06-10 — unreviewed dishes simply show no rating.) */
