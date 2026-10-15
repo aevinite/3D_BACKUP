@@ -468,7 +468,9 @@ P("P42299", "…and a composition restaurant is still quoted none", /dispSplit\.
 P("P42300", "the tax rate still comes from the restaurant's own settings", /setTaxRate\(s\.taxRate\)/.test(F.cart));
 P("P42301", "the live table bill still recomputes nothing", !/subtotal \* |tax \* /.test(bare(read("components/SessionTableBill.tsx"))));
 P("P42302", "…and still says so honestly when it cannot be reached", /can&apos;t reach the restaurant&apos;s system right now/.test(read("components/SessionTableBill.tsx")));
-P("P42303", "…and its live dot still stops claiming a live connection then", /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(read("components/SessionTableBill.tsx")));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the dot now greys whenever the LATEST read failed (`stalled`),
+// not only before the first answer (`!loaded && stalled`) — the rule this row states, made stronger.
+P("P42303", "…and its live dot still stops claiming a live connection then", /style=\{stalled \? \{ background: "var\(--muted\)"/.test(read("components/SessionTableBill.tsx")));
 P("P42304", "the guest is still never shown the staff-only 'ready' stage", /"ready" \? \{ \.\.\.i, status: "preparing" as const \}/.test(read("components/SessionTableBill.tsx")));
 P("P42305", "…on the strip either", /i\.status === "ready" \? "preparing" : i\.status/.test(F.tracker));
 P("P42306", "a finished order's strip still stays, and the reason is still written down", /Staying put is the correct behaviour/.test(read("lib/orderStatus.ts")));

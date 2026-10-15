@@ -341,8 +341,10 @@ P("P16208", "the loading skeleton still exists for the ordinary first load",
   /className="stb-loading"/.test(F.tbill) && /className="stb-skel"/.test(F.tbill));
 P("P16209", "…and the true 'nothing ordered yet' message is still a separate, later state",
   /No dishes sent to the kitchen yet/.test(F.tbill));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the dot now greys whenever the LATEST read failed (`stalled`),
+// not only before the first answer (`!loaded && stalled`) — the rule this row states, made stronger.
 P("P16210", "the green live dot stops claiming a live connection while that message is up",
-  /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(F.tbill));
+  /style=\{stalled \? \{ background: "var\(--muted\)"/.test(F.tbill));
 // RE-AIMED, sweep #10 T4 (2026-10-12). Sweep #9 item 7 DELIBERATELY added a third "working" screen:
 // Place order and Call a waiter now open the sheet on "One moment…" BEFORE the restaurant's rules are
 // read, so a tap is never silent. Every exit from it is a named screen (net_error, ask_table, or the

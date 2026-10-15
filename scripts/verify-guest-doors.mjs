@@ -508,8 +508,10 @@ check("…and the diner gets a sentence, not three pulsing bars",
   /\{!loaded && stalled \? \(/.test(tbill) && /can&apos;t reach the restaurant&apos;s system right now/.test(tbill));
 check("…which says nothing is lost, and offers a way to ask again",
   /Nothing is lost/.test(tbill) && /pollRef\.current\?\.\(\)/.test(tbill));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the dot now greys whenever the LATEST read failed (`stalled`),
+// not only before the first answer (`!loaded && stalled`) — the rule this row states, made stronger.
 check("…and the green 'live' dot stops claiming a live connection while it is up",
-  /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(tbill));
+  /style=\{stalled \? \{ background: "var\(--muted\)"/.test(tbill));
 // The skeleton itself must survive: it is what stops the "no dishes yet" message flashing.
 check("the loading skeleton is still there for the normal first load",
   /className="stb-loading"/.test(tbill) && /className="stb-skel"/.test(tbill));
@@ -1261,6 +1263,18 @@ flush();
     /for \(const li of local\) if \(!map\.has\(lineKey\(li\)\)\) map\.set\(lineKey\(li\), li\);/.test(sync) && /if \(server\.length === 0\) return local;/.test(sync));
   check("item — a failed LATER change (the delta) re-merges too, rather than being forgotten",
     /\} else \{\s*reconciledToken\.current = null;\s*\}/.test(sync));
+}
+// ── 16. THE TABLE BILL'S "LIVE" DOT NEVER CLAIMS LIVE OVER A BILL IT COULD NOT REFRESH (T4 round 2) ──
+// components/SessionTableBill greyed its pulsing dot only when the FIRST read failed (`!loaded && stalled`).
+// A restaurant that stopped answering mid-meal left the last good bill on screen — right — under a dot still
+// pulsing "live", over numbers that could be minutes old. The dot now follows the latest read alone.
+{
+  say("\n── 16. the table bill's live dot follows the latest read (sweep #10 T4 round 2) ──");
+  const tb = codeOnly(read("components/SessionTableBill.tsx"));
+  const dot = (tb.match(/<span className="stb-dot"[\s\S]{0,240}?\/>/) || [""])[0];
+  check("item — the dot greys whenever the latest read failed, not only before the first answer", /style=\{stalled \?/.test(dot) && !/!loaded && stalled/.test(dot));
+  check("item — …a later failure still keeps the last good bill (the stalled message is for the first read only)", /\{!loaded && stalled \? \(/.test(tb));
+  check("item — …and a read that lands clears it", /setStalled\(false\);/.test(tb));
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
