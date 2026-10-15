@@ -24,7 +24,12 @@ const MAX = Number(arg("max", 60)), WORKERS = Number(arg("workers", 4)), SEED = 
 const SKIP = new Set((arg("skip", "") || "").split(",").filter(Boolean));   // "file:line:col:op" already tried (convergence)
 const ALL = [...MY_FILES.map((f) => "public/panels/" + f), ROUTES.health, ROUTES.clientError, ROUTES.maintenance, "lib/maintenance.ts", ROUTES.ownerSettings];
 const FILES = arg("files", "") ? arg("files", "").split(",").map((f) => ALL.find((x) => x.endsWith("/" + f) || x === f)).filter(Boolean) : ALL;
-const SUITES = "node,browser,browser2,routes,extra2,new-a,new-b,new-c";
+// Only suites whose checks RUN the code (no text-reading suites, and none that need a login on the
+// live dev server — those run the server's own, unbroken copy and only slow this down).
+const SUITES = "node,browser,browser2,new-a,new-b,new-c,new-f,new-g,new-h,new-i,new-j,new-k";
+// The route files are also driven by two in-memory guards; they read the broken copy through the same
+// loader (routes.mjs + hooks.mjs), so they count as checks that RUN it.
+const NODE_GUARDS = ["scripts/verify-guest-menu-switch.mjs", "scripts/verify-public-endpoints.mjs"];
 
 function codeMask(L) {
   const m = new Array(L.length).fill(false); let q = null;
@@ -59,13 +64,19 @@ const rand = () => { rnd ^= rnd << 13; rnd >>>= 0; rnd ^= rnd >> 17; rnd ^= rnd 
 
 const base = join(ROOT, ".t16mut");
 rmSync(base, { recursive: true, force: true });
-const runCopy = (rel, file) => new Promise((res) => {
-  const p = spawn("node", ["--no-warnings", "--import", "./scripts/sweep/t16s10/hooks.mjs", "scripts/sweep/t16s10/run.mjs", "--suite", SUITES, "--file", rel, "--bail", "--quiet", "--browser-close"],
+const runOne = (args, rel, file) => new Promise((res) => {
+  const p = spawn("node", ["--no-warnings", "--import", "./scripts/sweep/t16s10/hooks.mjs", ...args],
     { cwd: ROOT, env: { ...process.env, T16_NODE_ROUTES: "1", T16_MUT: file, T16_MUT_REL: rel }, stdio: ["ignore", "pipe", "pipe"] });
   let out = ""; p.stdout.on("data", (d) => { out += d; }); p.stderr.on("data", () => {});
   const kill = setTimeout(() => { p.kill("SIGKILL"); res({ code: "timeout", out }); }, 240000);
   p.on("close", (c) => { clearTimeout(kill); res({ code: c, out }); });
 });
+const runCopy = async (rel, file) => {
+  const r = await runOne(["scripts/sweep/t16s10/run.mjs", "--suite", SUITES, "--file", rel, "--bail", "--quiet", "--browser-close"], rel, file);
+  if (r.code !== 0 || rel.startsWith("public/")) return r;
+  for (const g of NODE_GUARDS) { const q = await runOne([g], rel, file); if (q.code !== 0) return { code: q.code, out: r.out + "\n" + q.out.split("\n").filter((l) => /❌/.test(l)).slice(0, 1).map((l) => "❌ " + g.split("/").pop() + l).join("") }; }
+  return r;
+};
 
 const results = [], controls = {};
 for (const rel of FILES) {
@@ -84,6 +95,9 @@ for (const rel of FILES) {
   }
   // A seeded shuffle, then the first MAX — a fresh seed draws a different sample (convergence).
   for (let i = sites.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [sites[i], sites[j]] = [sites[j], sites[i]]; }
+  // The breaks most likely to be real bugs first: a dropped "not", true/false, and/or, ===/!==.
+  const band = (n) => (/drop !|true|false|null/.test(n) ? 0 : /&&|\|\||===|!==|\?\?/.test(n) ? 1 : 2);
+  sites.sort((a, b) => band(a.name) - band(b.name));
   const chosen = sites.slice(0, MAX);
   const dir = join(base, basename(rel).replace(/\W/g, "_")); mkdirSync(dir, { recursive: true });
   const ctl = join(dir, "control" + ext); writeFileSync(ctl, text);
@@ -91,7 +105,7 @@ for (const rel of FILES) {
   controls[rel] = c.code === 0;
   const rowsRan = (c.out.match(/— (\d+) rows:/) || [])[1] || "?";
   if (c.code !== 0) { console.log(`✗ ${rel}: CONTROL FAILED (an unchanged copy is not green) — skipped\n${c.out.slice(-400)}`); continue; }
-  if (rowsRan === "0") { console.log(`· ${rel}: no behavioural row is about this file — ${sites.length} sites, none can be judged`); results.push(...chosen.map((s) => ({ ...s, status: "NO-ROWS" }))); continue; }
+  if (rowsRan === "0" && rel.startsWith("public/")) { console.log(`· ${rel}: no behavioural row is about this file — ${sites.length} sites, none can be judged`); results.push(...chosen.map((s) => ({ ...s, status: "NO-ROWS" }))); continue; }
   console.log(`${rel}: ${sites.length} sites, running ${chosen.length} against ${rowsRan} behavioural rows, ${WORKERS} at a time`);
   let next = 0;
   await Promise.all(Array.from({ length: WORKERS }, async (_, w) => {

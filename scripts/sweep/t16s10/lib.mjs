@@ -114,7 +114,7 @@ export async function runAll({ only = null, suites = null, quiet = false, file =
     if (file && !(d.file === file || d.file === file.replace(/^public\/panels\//, "") || ("public/panels/" + d.file) === file)) continue;
     let res, note = "";
     const t0 = Date.now();
-    try { res = await d.fn(); } catch (e) { res = false; note = `threw: ${(e && e.message) || e}`.slice(0, 220); }
+    try { res = await d.fn(); } catch (e) { const m = String((e && e.message) || e); if (m.startsWith("skip:")) res = m; else { res = false; note = `threw: ${m}`.slice(0, 220); } }
     let mark;
     if (typeof res === "string" && res.startsWith("skip:")) { mark = "⏭"; note = res.slice(5).trim(); }
     else if (res && typeof res === "object" && "ok" in res) { mark = res.ok ? "✅" : "❌"; note = res.note || note; }

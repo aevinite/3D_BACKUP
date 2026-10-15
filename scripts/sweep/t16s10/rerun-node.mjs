@@ -11,7 +11,7 @@ const SITE = process.env.T16_SITE || "https://3-d-backup.vercel.app";
 function load(text, filename) { const m = { exports: {} }; vm.runInNewContext(text, { module: m, exports: m.exports, window: {} }, filename ? { filename } : undefined); return m.exports; }
 const A = load(src(AS), join(ROOT, "public/panels", AS));
 let served = null;
-async function S() { if (!served) { const r = await fetch(SITE + "/panels/auditsort.js", { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`site answered ${r.status}`); served = load(await r.text()); } return served; }
+async function S() { if (process.env.T16_MUT) throw new Error("skip: reads the deployed site — not part of a mutation run"); if (!served) { const r = await fetch(SITE + "/panels/auditsort.js", { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`site answered ${r.status}`); served = load(await r.text()); } return served; }
 const row = (o) => Object.assign({ id: Math.floor(Math.random() * 1e9), at: "2026-10-12T10:00:00Z" }, o);
 const ids = (rows) => rows.map((r) => r.id).join(",");
 

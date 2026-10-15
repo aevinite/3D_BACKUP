@@ -15,6 +15,9 @@ export async function getBrowser() { if (!browser) browser = await chromium.laun
 export async function closeBrowser() { await covFlush(); if (browser) { await browser.close(); browser = null; } }
 const siteBytes = new Map();
 export async function siteFile(path) {
+  // A mutation run (./mutate.mjs) judges a broken LOCAL copy; the deployed bytes say nothing about it,
+  // and hundreds of runs fetching them made the backup site answer 403 once (round 2). So it never asks.
+  if (process.env.T16_MUT) throw new Error("skip: reads the deployed site — not part of a mutation run");
   if (!siteBytes.has(path)) {
     const r = await fetch(SITE + path, { signal: AbortSignal.timeout(20000) });
     siteBytes.set(path, { status: r.status, type: r.headers.get("content-type") || "", body: await r.text(), cache: r.headers.get("cache-control") || "" });
