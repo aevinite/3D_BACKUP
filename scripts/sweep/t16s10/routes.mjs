@@ -20,6 +20,11 @@ async function world0() {
 export async function route(name) {
   await world0();
   if (built[name]) return built[name];
+  // Coverage mode (./hooks.mjs, ./cov.mjs): import the .ts file itself so offsets are file offsets.
+  if (process.env.T16_NODE_ROUTES === "1") {
+    const abs = process.env.T16_MUT_REL === ROUTES[name] ? process.env.T16_MUT : join(ROOT, ROUTES[name]);   // ./mutate.mjs
+    built[name] = await import(pathToFileURL(abs).href); return built[name];
+  }
   process.env.NEXT_PUBLIC_SUPABASE_URL ||= "http://127.0.0.1:9/stub";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "stub-anon-key";
   process.env.SUPABASE_SERVICE_ROLE_KEY ||= "stub-service-key";

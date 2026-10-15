@@ -2,13 +2,14 @@
 // P44331–P44358, P44589–P44593, P44667–P44679), and the same answers computed by the bytes the backup
 // site SERVES (P45470–P45489). No DOM, no network except the one GET of the served file.
 import vm from "node:vm";
-import { R, src, ok, eq, assert, tag } from "./lib.mjs";
+import { R, src, ok, eq, assert, tag, ROOT } from "./lib.mjs";
+import { join } from "node:path";
 
 const done = tag("node");
 const AS = "auditsort.js";
 const SITE = process.env.T16_SITE || "https://3-d-backup.vercel.app";
-function load(text) { const m = { exports: {} }; vm.runInNewContext(text, { module: m, exports: m.exports, window: {} }); return m.exports; }
-const A = load(src(AS));
+function load(text, filename) { const m = { exports: {} }; vm.runInNewContext(text, { module: m, exports: m.exports, window: {} }, filename ? { filename } : undefined); return m.exports; }
+const A = load(src(AS), join(ROOT, "public/panels", AS));
 let served = null;
 async function S() { if (!served) { const r = await fetch(SITE + "/panels/auditsort.js", { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error(`site answered ${r.status}`); served = load(await r.text()); } return served; }
 const row = (o) => Object.assign({ id: Math.floor(Math.random() * 1e9), at: "2026-10-12T10:00:00Z" }, o);
@@ -112,12 +113,13 @@ const thousand = Array.from({ length: 1000 }, (_, i) => row({ id: i + 1, at: new
 R("P44337", AS, "sortRows handles a list of a thousand without losing a row", () => eq(new Set(A.sortRows(thousand, "new").map((r) => r.id)).size, 1000));
 R("P44338", AS, "…and it really is sorted", () => { const s = A.sortRows(thousand, "new"); return assert(s.every((r, i) => !i || Date.parse(s[i - 1].at) >= Date.parse(r.at))); });
 R("P44339", AS, "a row whose amount is a negative number sorts below zero, not above everything", () => eq(ids(A.sortRows([row({ id: 1, amount: -5 }), row({ id: 2, amount: 0 })], "amount")), "2,1"));
-R("P44340", AS, "sorting by person puts an EMPTY name last rather than first — EXPECTATION CORRECTED", () => {
-  // Sweep #7 filed this ✅ with the evidence "order [1,2]", i.e. the EMPTY name (row 1) FIRST — the
-  // opposite of its own title. localeCompare puts "" before every name, today as then. The behaviour
-  // has not changed; the row's wording was wrong. Recorded so nobody reads it as a regression.
+R("P44340", AS, "sorting by person puts an EMPTY name last rather than first", () => {
+  // Sweep #7 filed this ✅ with the evidence "order [1,2]" — the EMPTY name FIRST, the opposite of its
+  // own title. Round 1 of sweep #10 recorded that as an expectation correction and listed "blanks
+  // first" as a small idea; the owner said yes (2026-10-15, "do all five"), and round 2 item 13 made a
+  // blank sort LAST in every A–Z sort. So the title is true now, and this checks the title.
   const s = ids(A.sortRows([row({ id: 1, actor: "" }), row({ id: 2, actor: "asha" })], "person"));
-  return ok(s === "1,2", `order ${s} — an unnamed (system) row sorts FIRST in Person A–Z, exactly as in sweep #7; the title claimed last`);
+  return ok(s === "2,1", `order ${s} — the named row first, the unnamed (system) row last (round 2 item 13)`);
 });
 R("P44341", AS, "two rows with the same person keep their time order", () => eq(ids(A.sortRows([row({ id: 1, actor: "a", at: "2026-10-01" }), row({ id: 2, actor: "a", at: "2026-10-02" })], "person")), "2,1"));
 R("P44342", AS, "matches() does not throw on a row with nothing in it", () => assert(A.matches({}, "x") === false));

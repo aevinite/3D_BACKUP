@@ -7,6 +7,7 @@
 import { chromium } from "playwright";
 import { R, ok, tag } from "./lib.mjs";
 import { memo, sleep, BASE } from "./browser.mjs";
+import { covStart, covStop } from "./cov.mjs";
 import { loginAs } from "../login.mjs";
 
 const done = tag("new-d");
@@ -24,7 +25,7 @@ async function open(role, dev, skin) {
   const ctx = await browser.newContext(DEV[dev]);
   await loginAs(ctx, role, BASE);
   await ctx.addInitScript((s) => { try { localStorage.setItem("lfh_panel_theme", s); } catch (e) {} }, skin);
-  const p = await ctx.newPage();
+  const p = await ctx.newPage(); await covStart(p);
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e).slice(0, 160)));
   await p.route("**/api/**", (r) => (["GET", "HEAD"].includes(r.request().method()) ? r.continue() : r.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })));
@@ -52,7 +53,7 @@ const view = (role, dev, skin) => memo(async () => {
   await sleep(700);
   m.undo = await p.evaluate(() => { const u = document.getElementById("lfh-undobar").getBoundingClientRect(); return { inside: u.left >= 0 && u.right <= innerWidth + 0.5 && u.bottom <= innerHeight + 0.5 && u.width > 0 }; });
   m.errors = errors;
-  await ctx.close(); return m;
+  await covStop(p); await ctx.close(); return m;
 });
 const COMBOS = [];
 for (const role of ["manager", "kitchen", "tablet"]) for (const dev of ["desk", "a35", "ipad"]) for (const skin of ["light", "dark"]) COMBOS.push([role, dev, skin]);
@@ -110,7 +111,7 @@ const kb = memo(async () => {
   o.yesFocused = await p.evaluate(() => document.activeElement && document.activeElement.classList.contains("lfh-ask-yes"));
   await p.keyboard.press("Escape").catch(() => {}); await p.evaluate(() => history.back()); await sleep(300);
   o.errors = errors;
-  await ctx.close(); return o;
+  await covStop(p); await ctx.close(); return o;
 });
 const K = (file, what, fn) => N(file, what, async () => fn(await kb()), "headless: the REAL manager panel, desktop, keyboard and history driven");
 K("connbadge.js", "the connection pill opens with the keyboard (Enter)", (o) => ok(o.enterOpens));

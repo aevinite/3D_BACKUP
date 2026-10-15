@@ -7,6 +7,7 @@
 import { chromium } from "playwright";
 import { R, ok, eq, assert, tag, src, strip, git, originMain, MY_FILES } from "./lib.mjs";
 import { harness, memo, until, sleep, siteFile, SITE, BASE } from "./browser.mjs";
+import { covStart, covFlush } from "./cov.mjs";
 import { loginAs, loginRequestCount } from "../login.mjs";
 
 const done = tag("live");
@@ -26,7 +27,7 @@ async function panel(role, width) {
   if (ctxs[key]) return ctxs[key];
   const ctx = await browser.newContext(width === 390 ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 860 } });
   await loginAs(ctx, role, BASE);
-  const page = await ctx.newPage();
+  const page = await ctx.newPage(); await covStart(page);
   const errors = [], writes = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
   await page.route("**/api/**", (r) => {
@@ -236,5 +237,5 @@ DR("P45615", "…and once the deadline passes it SAYS it could not read it", asy
 DR("P45616", "…and offers the read again rather than sitting there", async () => ok(/tap to check again/.test((await drawer()).afterDeadline)));
 DR("P45617", "a hung read raises no error", async () => ok(true, "measured with the drawer above; no pageerror"));
 
-export async function closeLive() { if (browser) await browser.close(); }
+export async function closeLive() { await covFlush(); if (browser) await browser.close(); }
 done();

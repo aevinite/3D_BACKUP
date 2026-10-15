@@ -303,7 +303,10 @@ R("P19440", MT, "backdrop-filter is one unprefixed line", () => !/-webkit-backdr
 R("P19441", MT, "The drawer fits a phone: max-height 100dvh minus a margin", () => /\.lfh-dw\{width:min\(94vw,400px\);max-height:calc\(100dvh - 36px\)/.test(src(MT)));
 // ═════════════ issue-raise.js ═════════════
 R("P19442", IR, "The ticket goes through the panel's own api(), so it queues offline", () => /var r = await api\("POST", "\/issue",/.test(code(IR)));
-R("P19443", IR, "Only PNG / JPEG / WEBP are accepted, and a photo over 5 MB is refused with a sentence", () => /var OK_IMAGE = \{ "image\/png": 1, "image\/jpeg": 1, "image\/webp": 1 \};/.test(code(IR)) && /setStatus\("Photo must be 5 MB or smaller\.", "err"\)/.test(code(IR)));
+// Round 2 item 11 (owner, 2026-10-15): a photo over 5 MB is first made smaller; only one that is STILL
+// over (or cannot be shrunk) is refused, with a sentence that says what to do. Driven in
+// verify:panel-helpers-driven §1; this reads that the shape is the shipped one.
+R("P19443", IR, "Only PNG / JPEG / WEBP are accepted, and a photo over 5 MB is refused with a sentence", () => /var OK_IMAGE = \{ "image\/png": 1, "image\/jpeg": 1, "image\/webp": 1 \};/.test(code(IR)) && /if \(!shrunk \|\| shrunk\.size > MAX_IMAGE_BYTES\) \{\s*setStatus\("This photo is too big to send\. Take a new one, or pick a smaller picture\.", "err"\);/.test(code(IR)));
 R("P19444", IR, "A voice note auto-stops at two minutes", () => /var MAX_AUDIO_MS = 120000;/.test(code(IR)) && /recStop = setTimeout\(stopRecording, MAX_AUDIO_MS\);/.test(code(IR)));
 R("P19445", IR, "The Record button is never disabled while a recording is running — Stop must stay reachable", () => /recBtn\.disabled = !rec && /.test(code(IR)));
 R("P19446", IR, "The mic is released on stop AND on close", () => count(code(IR), /getTracks\(\)\.forEach\(function \(t\) \{ t\.stop\(\); \}\)/) === 2);
@@ -363,7 +366,7 @@ R("P19475", AS, "view() filters before it sorts, and never mutates its input", (
 R("P19476", AS, "The search matches the WORDS a screen shows, not only the stored codes", () => /\(reasonLabel && reasonLabel\[r\.reason_code\]\) \|\| r\.reason_code/.test(code(AS)) && /\(kindLabel && kindLabel\[r\.kind\]\) \|\| r\.kind/.test(code(AS)));
 export function loadAudit() {
   const m = { exports: {} };
-  vm.runInNewContext(src(AS), { module: m, exports: m.exports, window: {} });
+  vm.runInNewContext(src(AS), { module: m, exports: m.exports, window: {} }, { filename: join(ROOT, "public/panels", AS) });
   return m.exports;
 }
 // ═════════════ vendor/chart.umd.min.js ═════════════
@@ -504,8 +507,9 @@ R("P19577", IR, "Every window listener these files add inside an overlay is remo
 R("P19578", OB, "Nothing in these files reads or writes another restaurant's data — every path is scoped server-side", () => {
   const paths = new Set();
   for (const f of MY_FILES) for (const m of code(f).matchAll(/["'`](\/api\/[a-z\-\/]+)/g)) paths.add(m[1]);
-  // "/api/inventory" in outbox.js is the LABEL vocabulary switch (labelFor's `base`), not a request.
-  return ok([...paths].every((p) => /rt-config|log\/client-error|panel-profile|panel-logout|maintenance|issue-media|^\/api\/inventory$/.test(p)), [...paths].join(" "));
+  // "/api/inventory" and (since round 2, item 21) "/api/editor" in outbox.js are the LABEL vocabulary
+  // switch (labelFor's `base`), not requests.
+  return ok([...paths].every((p) => /rt-config|log\/client-error|panel-profile|panel-logout|maintenance|issue-media|^\/api\/(inventory|editor)$/.test(p)), [...paths].join(" "));
 });
 R("P19579", RT, "The admin's per-tab restaurant pin is forwarded wherever a request is made", () => /RT_RID_Q \? "\?rid=" \+ encodeURIComponent\(RT_RID_Q\)/.test(code(RT)) && /opts\.rid \? "\?rid="/.test(code(IR)));
 
@@ -664,9 +668,13 @@ R("P160873", ROUTES.health, "it answers nothing but the verdict — no counts, n
 R("P160874", ROUTES.health, "it really touches the database — it is a connection probe, not a ping", () => /await sb\.from\("restaurants"\)\.select\("id"\)\.limit\(1\);/.test(code(ROUTES.health)));
 R("P160875", ROUTES.health, "the deeper health page stays deleted — he asked for it removed", () => !existsSync(join(ROOT, "app/api/health/deep")));
 R("P160876", ROUTES.health, "…and this one has not grown storage or config checks instead", () => count(code(ROUTES.health), /sb\./) === 1 && !/storage|rt-config|env\./i.test(code(ROUTES.health)));
-R("P160884", ROUTES.maintenance, "a write that matches no row is NOT reported as a write", () => /if \(!r\.data\?\.length\) \{\s*return NextResponse\.json\(\s*\{ error: "Couldn't change the menu's status — this restaurant has no settings saved yet\. Ask your admin\." \},\s*\{ status: 409 \},/.test(code(ROUTES.maintenance)));
+// Round 2 (item 15) moved the write and its two honest refusals into lib/maintenance.ts → setServiceMode,
+// shared with the owner's Settings page; the route returns the refusal BEFORE it logs anything.
+R("P160884", ROUTES.maintenance, "a write that matches no row is NOT reported as a write", () => /if \(!r\.data\?\.length\) \{\s*return \{ ok: false, status: 409, error: "Couldn't change the menu's status — this restaurant has no settings saved yet\. Ask your admin\." \};/.test(code("lib/maintenance.ts")) && /const w = await setServiceMode\(s\.rid, on, "maintenance"\);\s*if \(!w\.ok\) return NextResponse\.json\(\{ error: w\.error \}, \{ status: w\.status \}\);[\s\S]*await logAction\(/.test(code(ROUTES.maintenance)));
 R("P160908", ROUTES.clientError, "both halves have a ceiling, and a cookie-less caller is counted too", () => /const capKey = capKeyFor\(req\);/.test(code(ROUTES.clientError)) && count(code(ROUTES.clientError), /recentActionCount\(capKey/) === 2);
-R("P104350", ROUTES.maintenance, "the admin's own flip of that switch is recorded against the ADMIN's log, not the owner's", () => /const logIn = s\.admin \? "admin" : "manager";/.test(code(ROUTES.maintenance)) && /admin: !g\.user/.test(code(ROUTES.maintenance)));
+// Round 2 added the owner's own row (an owner flipping through this door is the owner's, not the manager
+// panel's) — the admin's flip is still decided first. Driven: verify:guest-menu-switch §1.
+R("P104350", ROUTES.maintenance, "the admin's own flip of that switch is recorded against the ADMIN's log, not the owner's", () => /const logIn = s\.admin \? "admin" : s\.owner \? "owner" : "manager";/.test(code(ROUTES.maintenance)) && /admin: !g\.user/.test(code(ROUTES.maintenance)));
 R("P14023", ROUTES.maintenance, "`/api/maintenance` really does require a signed-in manager before any database call", () => { const c = code(ROUTES.maintenance), a = c.indexOf('requireRole(req, "manager")'); return a > 0 && a < c.indexOf("sb.from("); });
 R("P14456", SW, "the offline layer registers on the guest doors AND the panel doors", () => PAGES.every((p) => loads(p, "swreg.js")) && /OfflineShell/.test(src("app/layout.tsx")));
 R("P14148", SW, "`app/layout.tsx` registers the service worker for every surface", () => /OfflineShell/.test(src("app/layout.tsx")));

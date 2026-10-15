@@ -6,6 +6,7 @@
 import { chromium } from "playwright";
 import { R, ok, tag, src, code, fnBody } from "./lib.mjs";
 import { harness, memo, sleep, PACE, BASE } from "./browser.mjs";
+import { covStart, covStop } from "./cov.mjs";
 import { loginAs } from "../login.mjs";
 
 const done = tag("extra2");
@@ -65,16 +66,16 @@ R("P45720", "outbox.js", "…and is not offered as something to retry, because t
 R("P45722", "outbox.js", "the limit raises no error", async () => ok(!(await siteCeil()).capErr.length));
 R("P45593", "issue-raise.js", "issue-raise raises no error on the live bytes", async () => { const h = await harness({ from: "site", body: "<div class='topbar'></div>", scripts: ["backstack.js", "issue-raise.js"] }); await h.page.evaluate(() => window.LFH_ISSUE.open({ api: async () => ({ ok: true }) })); await sleep(300); const e = h.errors; await h.close(); return ok(!e.length, e.join(" | ")); }, "the site's bytes, the modal opened");
 R("P15011", "public/panels/vendor/chart.umd.min.js", "The Dashboard's graphs draw with the vendored charts library", async () => {
-  const b = await chromium.launch(); try {
+  const b = await chromium.launch(); let p = null; try {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } }); await loginAs(ctx, "manager", BASE);
-    const p = await ctx.newPage();
+    p = await ctx.newPage(); await covStart(p);
     await p.route("**/api/**", (r) => (["GET", "HEAD"].includes(r.request().method()) ? r.continue() : r.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })));
     await p.goto(`${BASE}/panels/editor/index.html`, { waitUntil: "load", timeout: 120000 }); await p.waitForFunction(() => !!window.LFH_OUTBOX, null, { timeout: 60000 }); await sleep(1500);
     const opened = await p.evaluate(() => { const t = document.querySelector('button.tab[data-tab="dash"]'); if (t) { t.click(); return true; } return false; });
     await sleep(6000);
     const r = await p.evaluate(() => { const cs = [...document.querySelectorAll("canvas")].filter((c) => c.offsetParent && c.width > 0); let drawn = 0; for (const c of cs) { try { const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 400) if (d[i]) { drawn++; break; } } catch (e) {} } return { lib: !!window.Chart, canvases: cs.length, drawn }; });
     return ok(opened && r.lib && r.canvases > 0 && r.drawn > 0, JSON.stringify(r));
-  } finally { await b.close(); }
+  } finally { if (p) await covStop(p).catch(() => {}); await b.close(); }
 }, "headless: the manager panel's Dashboard on :4416, writes answered by the test");
 
 done();

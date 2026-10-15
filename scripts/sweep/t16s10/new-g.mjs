@@ -1,0 +1,120 @@
+// scripts/sweep/t16s10/new-g.mjs — NEW checks, sweep #10 T16 ROUND 2, ids from P185676.
+// myprofile.js — "My profile & pay", driven where the round-2 coverage run found it had NEVER been
+// run: saving your details (both writes, the queue, a refusal, a failed re-read), the pay and job
+// sections in every state, the read fallbacks, and the two faults this block found (items 18 and 19).
+// Every request is answered by the test (browser.mjs harness). Nothing reaches a server.
+/* eslint-disable @typescript-eslint/no-unused-vars -- a check suite: helpers are imported whole */
+import { R, ok, eq, tag } from "./lib.mjs";
+import { harness, sleep, until, PACE } from "./browser.mjs";
+
+const done = tag("new-g");
+let id = 185676;
+const N = (what, fn) => R(`P${id++}`, "myprofile.js", what, fn, "headless: the real myprofile.js (+ backstack.js, maint.js, outbox.js where named), every request answered by the test");
+const TOP = `<div class="topbar"><div class="top-actions"><button id="myProfileBtn" hidden>me</button></div></div>`;
+const ME = { staff: true, id: "u1", username: "w1", role: "tablet", name: "Asha", phone: "1111111111", profileModule: true, profile: {}, completeness: { filled: 1, total: 8 }, job: {} };
+
+// gets: a list of answers for successive GETs (the last repeats); posts: (rec) => answer
+async function screen(o = {}) {
+  let n = 0;
+  const gets = o.gets || [{ status: 200, body: o.me || ME }];
+  const h = await harness({
+    pre: PACE + (o.pre || ""), body: TOP,
+    scripts: o.scripts || ["backstack.js", "maint.js", "outbox.js", "myprofile.js"],
+    api: async (rec, route) => {
+      if (rec.method === "GET" && /panel-profile/.test(rec.path)) { const a = gets[Math.min(n++, gets.length - 1)]; if (a === "fail") { await route.abort("internetdisconnected"); return "handled"; } return a; }
+      if (rec.method === "POST" && /panel-profile/.test(rec.path)) return o.posts ? o.posts(rec) : { status: 200, body: { ok: true } };
+      return { status: 200, body: {} };
+    },
+  });
+  h.gets = () => n;
+  return h;
+}
+const openMe = async (p) => { await until(() => p.evaluate(() => !!window.LFH_ME), 6000); await p.evaluate(() => window.LFH_ME.open()); await until(() => p.evaluate(() => !/Loading…/.test(document.getElementById("meBody").innerText)), 6000); };
+const body = (p) => p.evaluate(() => document.getElementById("meBody").innerText);
+const html = (p) => p.evaluate(() => document.getElementById("meBody").innerHTML);
+const dialog = (p) => p.evaluate(() => { const d = [...document.querySelectorAll(".lfh-ov")].pop(); return d ? { title: (d.querySelector(".lfh-h1") || {}).textContent || "", text: (d.querySelector(".lfh-d") || {}).textContent || "" } : null; });
+const posts = (h) => h.sent.filter((r) => r.method === "POST" && /panel-profile/.test(r.path)).map((r) => ({ body: JSON.parse(r.body || "{}"), expect: JSON.parse(r.headers["x-lfh-expect"] || "null"), aid: r.headers["x-lfh-action-id"] || null }));
+const saveNow = async (p) => { await p.click(".me-save"); await sleep(700); };
+
+// ── 1. saving your details ───────────────────────────────────────────────────────────────────
+const S = {};
+async function saved() {
+  if (S.r) return S.r;
+  const h = await screen(); const p = h.page; await openMe(p);
+  await p.fill('input[name="phone"]', " 2222222222 "); await p.fill('input[name="email"]', "  asha@example.invalid ");
+  await p.fill('textarea[name="address"]', "12, MG Road"); await p.fill('input[name="upi_id"]', "asha@upi");
+  const before = await p.evaluate(() => document.querySelector(".me-save").textContent);
+  await p.click(".me-save"); const during = await p.evaluate(() => ({ t: document.querySelector(".me-save").textContent, d: document.querySelector(".me-save").disabled }));
+  await sleep(900);
+  S.r = { before, during, ps: posts(h), gets: h.gets(), text: await body(p), dialog: await dialog(p), errors: h.errors };
+  await h.close(); return S.r;
+}
+N("Save sends the PHONE as its own write when it changed, trimmed", async () => { const r = await saved(); const ph = r.ps.find((x) => "phone" in x.body); return ok(ph && ph.body.phone === "2222222222" && Object.keys(ph.body).length === 1, JSON.stringify(ph)); });
+N("…marked as edited FROM the old number (so a manager's change meanwhile is caught)", async () => { const r = await saved(); const ph = r.ps.find((x) => "phone" in x.body); return ok(ph.expect && ph.expect.table === "staff_users" && ph.expect.id === "u1" && ph.expect.fields.phone === "1111111111", JSON.stringify(ph.expect)); });
+N("…and the details as ONE profile write with every self-editable field, each trimmed", async () => { const r = await saved(); const pr = r.ps.find((x) => "profile" in x.body); const k = Object.keys(pr.body.profile); return ok(k.length === 11 && pr.body.profile.email === "asha@example.invalid" && pr.body.profile.address === "12, MG Road" && pr.body.profile.upi_id === "asha@upi" && pr.body.profile.city === "", JSON.stringify(pr.body.profile)); });
+N("…the profile write protects only the owner's private note (profile.notes), not the whole column", async () => { const r = await saved(); const pr = r.ps.find((x) => "profile" in x.body); return ok(pr.expect && Object.keys(pr.expect.fields).join() === "profile.notes" && pr.expect.fields["profile.notes"] === null, JSON.stringify(pr.expect)); });
+N("…both go through the queue (each carries an action id, so a dead connection cannot lose them)", async () => { const r = await saved(); return ok(r.ps.length === 2 && r.ps.every((x) => !!x.aid), JSON.stringify(r.ps.map((x) => x.aid))); });
+N("…the button reads 'Saving…' and is disabled while it saves", async () => { const r = await saved(); return ok(r.before === "Save my details" && r.during.t === "Saving…" && r.during.d === true, JSON.stringify(r)); });
+N("…and afterwards the screen is read again and drawn fresh, with no message box", async () => { const r = await saved(); return ok(r.gets >= 2 && /key details added|No details added/.test(r.text) && !r.dialog, JSON.stringify({ gets: r.gets, d: r.dialog })); });
+N("…no page error anywhere along that walk", async () => { const r = await saved(); return ok(!r.errors.length, r.errors.join(" | ")); });
+N("An unchanged phone sends NO phone write — only the details", async () => { const h = await screen(); const p = h.page; await openMe(p); await p.fill('input[name="city"]', "Pune"); await saveNow(p); const ps = posts(h); await h.close(); return ok(ps.length === 1 && "profile" in ps[0].body, JSON.stringify(ps.map((x) => Object.keys(x.body)))); });
+N("A second tap while the first save is still going does nothing (one save, not two)", async () => { const h = await screen({ posts: async () => { await sleep(600); return { status: 200, body: { ok: true } }; } }); const p = h.page; await openMe(p); await p.fill('input[name="city"]', "Pune"); await p.evaluate(() => { const f = document.getElementById("meForm"); f.requestSubmit(); f.requestSubmit(); }); await sleep(1500); const n = posts(h).length; await h.close(); return ok(n === 1, `${n} write(s)`); });
+N("A refusal says 'Not saved' with the server's own sentence, and the button comes back", async () => { const h = await screen({ posts: () => ({ status: 409, body: { error: "Someone else changed Phone while you had it open — it now says “3333333333”." } }) }); const p = h.page; await openMe(p); await p.fill('input[name="phone"]', "2222222222"); await saveNow(p); const d = await dialog(p); const b = await p.evaluate(() => ({ t: document.querySelector(".me-save").textContent, d: document.querySelector(".me-save").disabled })); await h.close(); return ok(d && d.title === "Not saved" && /Someone else changed Phone/.test(d.text) && b.t === "Save my details" && !b.d, JSON.stringify({ d, b })); });
+N("With no signal both writes are KEPT on the device and it says so ('Saved here for now')", async () => { const h = await screen({ pre: "Object.defineProperty(navigator,'onLine',{configurable:true,get:()=>window.__on!==false});" }); const p = h.page; await openMe(p); await p.evaluate(() => { window.__on = false; }); await p.fill('input[name="phone"]', "2222222222"); await saveNow(p); const d = await dialog(p); const q = await p.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.length); const b = await p.evaluate(() => document.querySelector(".me-save").textContent); await h.close(); return ok(d && d.title === "Saved here for now" && /Saved on this device/.test(d.text) && q === 2 && b === "Save my details" && !posts(h).length, JSON.stringify({ d, q, b })); });
+
+// ── 2. the two faults (items 18 and 19) ──────────────────────────────────────────────────────
+N("ITEM 18: a busy re-read straight after a save keeps the form and 'Saved ✓' — never 'Couldn't load'", async () => { const h = await screen({ gets: [{ status: 200, body: ME }, { status: 200, body: ME }, { status: 503, body: {} }] }); const p = h.page; await openMe(p); await p.fill('input[name="phone"]', "2222222222"); await saveNow(p); const t = await body(p); const b = await p.evaluate(() => ({ t: (document.querySelector(".me-save") || {}).textContent, d: (document.querySelector(".me-save") || {}).disabled })); await h.close(); return ok(!/Couldn't load/.test(t) && /Phone number/.test(t) && b.t === "Saved ✓" && b.d === false, JSON.stringify({ b, t: t.slice(0, 80) })); });
+N("…the same when the re-read gets no answer at all (a dropped connection)", async () => { const h = await screen({ gets: [{ status: 200, body: ME }, { status: 200, body: ME }, "fail"] }); const p = h.page; await openMe(p); await p.fill('input[name="city"]', "Pune"); await saveNow(p); const t = await body(p); await h.close(); return ok(!/Couldn't load/.test(t) && /Phone number/.test(t), t.slice(0, 80)); });
+N("…and the fields keep exactly what was typed", async () => { const h = await screen({ gets: [{ status: 200, body: ME }, { status: 200, body: ME }, { status: 503, body: {} }] }); const p = h.page; await openMe(p); await p.fill('input[name="city"]', "Pune"); await saveNow(p); const v = await p.evaluate(() => document.querySelector('input[name="city"]').value); await h.close(); return ok(v === "Pune", v); });
+N("ITEM 19: after a save whose re-read failed, the next save does not send the phone again", async () => { const h = await screen({ gets: [{ status: 200, body: ME }, { status: 200, body: ME }, { status: 503, body: {} }] }); const p = h.page; await openMe(p); await p.fill('input[name="phone"]', "2222222222"); await saveNow(p); await p.fill('input[name="email"]', "a@example.invalid"); await saveNow(p); const ps = posts(h); await h.close(); return ok(ps.filter((x) => "phone" in x.body).length === 1, JSON.stringify(ps.map((x) => Object.keys(x.body).join()))); });
+N("…and after a save KEPT on the device, a second save does not queue the phone a second time from the old number", async () => { const h = await screen({ pre: "Object.defineProperty(navigator,'onLine',{configurable:true,get:()=>false});" }); const p = h.page; await openMe(p); await p.fill('input[name="phone"]', "2222222222"); await saveNow(p); await p.evaluate(() => { const o = [...document.querySelectorAll(".lfh-ov")].pop(); if (o) o.remove(); }); await p.fill('input[name="email"]', "a@example.invalid"); await saveNow(p); const q = await p.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.map((x) => ({ b: x.body, e: x.expect }))); await h.close(); const phones = q.filter((x) => x.b && "phone" in x.b); return ok(phones.length === 1 && phones[0].e.fields.phone === "1111111111", JSON.stringify(q.map((x) => Object.keys(x.b).join() + (x.e && x.e.fields.phone ? "@" + x.e.fields.phone : "")))); });
+N("…a changed phone saved again later is edited from the number THIS device last sent", async () => { const h = await screen({ pre: "Object.defineProperty(navigator,'onLine',{configurable:true,get:()=>false});" }); const p = h.page; await openMe(p); await p.fill('input[name="phone"]', "2222222222"); await saveNow(p); await p.evaluate(() => { const o = [...document.querySelectorAll(".lfh-ov")].pop(); if (o) o.remove(); }); await p.fill('input[name="phone"]', "3333333333"); await saveNow(p); const q = await p.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.filter((x) => x.body && "phone" in x.body).map((x) => x.expect.fields.phone + "→" + x.body.phone)); await h.close(); return ok(q.join() === "1111111111→2222222222,2222222222→3333333333", q.join()); });
+
+// ── 3. the pay section ───────────────────────────────────────────────────────────────────────
+const PAYME = { ...ME, canSeeOwnPay: true, pay: { pay_amount: 15000, pay_type: "monthly", pay_extras: [{ kind: "allowance", label: "Travel", amount: 500 }, { kind: "deduction", label: "Meals", amount: 300 }] },
+  paySummary: { thisMonth: 7500, advanceOutstanding: 2000, lastPaidOn: "2026-10-05" },
+  payments: [{ amount: 7500, kind: "salary", mode: "upi", paid_on: "2026-10-05", for_period: "2026-09-01" }, { amount: 1000, kind: "advance", mode: "cash", paid_on: "2026-09-20", voided_at: "2026-09-21T10:00:00Z", void_reason: "entered twice" }, { amount: 200, kind: "made_up", mode: "cheque", paid_on: "bad-date" }] };
+const P = {};
+async function pay() { if (P.r) return P.r; const h = await screen({ me: PAYME }); await openMe(h.page); P.r = { t: await body(h.page), h: await html(h.page) }; await h.close(); return P.r; }
+N("Pay: the month's figure and the rate, in rupees with Indian grouping", async () => { const r = await pay(); return ok(/₹7,500 paid this month/.test(r.t) && /₹15,000 per month/.test(r.t), r.t.slice(0, 300)); });
+N("…an advance still owed is shown, with when it comes back", async () => { const r = await pay(); return ok(/₹2,000 advance pending/.test(r.t) && /will be taken from a later salary/.test(r.t)); });
+N("…the last payday, as a date a person reads ('05 Oct 2026')", async () => { const r = await pay(); return ok(/Last paid 05 Oct 2026/.test(r.t), (r.t.match(/Last paid[^\n]*/) || [])[0]); });
+N("…extras: an allowance is 'added every cycle', a deduction 'taken off every cycle'", async () => { const r = await pay(); return ok(/Travel · ₹500/.test(r.t) && /added every cycle/.test(r.t) && /Meals · ₹300/.test(r.t) && /taken off every cycle/.test(r.t)); });
+N("…every payment is listed and counted ('Every payment (3)')", async () => { const r = await pay(); return ok(/Every payment \(3\)/i.test(r.t), (r.t.match(/Every payment[^\n]*/i) || [])[0]); });
+N("…each with its kind and mode in words ('Salary', 'UPI') and the month it was for", async () => { const r = await pay(); return ok(/₹7,500 · Salary/.test(r.t) && /UPI · for September 2026/.test(r.t), r.t); });
+N("…a CANCELLED payment is struck through and says why", async () => { const r = await pay(); return ok(/line-through/.test(r.h) && /cancelled: entered twice/.test(r.t)); });
+N("…a kind or mode the screen has no word for is shown as stored, not dropped", async () => { const r = await pay(); return ok(/₹200 · made_up/.test(r.t) && /cheque/.test(r.t)); });
+N("…a date the screen cannot read shows '—', never 'Invalid Date'", async () => { const r = await pay(); return ok(/— · cheque/.test(r.t) && !/Invalid Date|NaN/.test(r.t)); });
+N("Pay with no rate set reads 'no rate set yet' and no payments 'Nothing recorded yet.'", async () => { const h = await screen({ me: { ...ME, canSeeOwnPay: true, pay: { pay_amount: 0 }, paySummary: {}, payments: [] } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/₹0 paid this month/.test(t) && /no rate set yet/.test(t) && /Nothing recorded yet\./.test(t) && /Every payment \(0\)/i.test(t), t.slice(0, 260)); });
+N("…a rate whose type the screen does not know still shows the amount", async () => { const h = await screen({ me: { ...ME, canSeeOwnPay: true, pay: { pay_amount: 900, pay_type: "weird" } } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/₹900/.test(t), t.slice(0, 200)); });
+N("A person who may not see their pay sees no pay section at all", async () => { const h = await screen({ me: { ...PAYME, canSeeOwnPay: false } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(!/My pay|paid this month|Every payment/i.test(t)); });
+
+// ── 4. the job section, the header, and the other states ─────────────────────────────────────
+N("Job: designation, shift and weekly offs (capitalised), under 'set by the owner'", async () => { const h = await screen({ me: { ...ME, job: { designation: "Head waiter", shift_label: "Evening", weekly_off: ["monday", "thursday"], joined_on: "2025-03-01" } } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/set by the owner/i.test(t) && /Head waiter/.test(t) && /Evening shift/.test(t) && /Weekly off: Monday, Thursday/.test(t) && /joined 01 Mar 2025/.test(t), t.slice(0, 300)); });
+N("…a person with no job details has no job section", async () => { const h = await screen({ me: { ...ME, job: {} } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(!/My job/i.test(t)); });
+N("A name with an apostrophe and an ampersand reads as written — never '&#39;' or '&amp;'", async () => { const h = await screen({ me: { ...ME, name: "D'Souza & Sons", job: { designation: "Owner's assistant" } } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/D'Souza & Sons/.test(t) && /Owner's assistant/.test(t) && !/&#39;|&amp;/.test(t), t.slice(0, 160)); });
+N("…and markup in a field is shown as text, never run", async () => { const h = await screen({ me: { ...ME, name: "<b>bold</b>", profile: { city: '"><i id=zz>' } } }); await openMe(h.page); const r = await h.page.evaluate(() => ({ b: !!document.querySelector("#meBody b b"), i: !!document.getElementById("zz"), v: document.querySelector('input[name="city"]').value })); await h.close(); return ok(!r.b && !r.i && r.v === '"><i id=zz>', JSON.stringify(r)); });
+N("A waiter is called 'waiter' (not 'tablet'); the avatar is the first letter", async () => { const h = await screen(); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/waiter · w1/.test(t) && /^A/m.test(t), t.slice(0, 60)); });
+N("A visitor who is not staff is told so, and offered no form", async () => { const h = await screen({ me: { staff: false } }); await openMe(h.page); const t = await body(h.page); const f = await h.page.evaluate(() => !!document.getElementById("meForm")); await h.close(); return ok(/You are not signed in as a staff member/.test(t) && !f); });
+N("A restaurant without staff profiles says so, and offers no form", async () => { const h = await screen({ me: { ...ME, profileModule: false } }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/Staff profiles are not switched on for this restaurant\./.test(t)); });
+N("'Try again' after a failed read reads again and shows the profile once it answers", async () => { const h = await screen({ gets: [{ status: 503, body: {} }, { status: 503, body: {} }, { status: 200, body: ME }] }); const p = h.page; await openMe(p); const a = await body(p); await p.click("#meRetry"); await until(async () => /Phone number/.test(await body(p)), 5000); const b = await body(p); await h.close(); return ok(/Couldn't load/.test(a) && /Phone number/.test(b)); });
+N("← Back closes the screen", async () => { const h = await screen(); await openMe(h.page); await h.page.click("#meBack"); const gone = await h.page.evaluate(() => !document.querySelector(".me-wrap")); await h.close(); return ok(gone); });
+N("…and so does the phone's Back button — the page stays where it was", async () => { const h = await screen(); await openMe(h.page); await sleep(150); await h.page.evaluate(() => history.back()); await sleep(400); const r = await h.page.evaluate(() => ({ gone: !document.querySelector(".me-wrap"), url: location.pathname })); await h.close(); return ok(r.gone && /h\.html/.test(r.url), JSON.stringify(r)); });
+
+// ── 5. the fallbacks: no maint.js on the page ────────────────────────────────────────────────
+N("Without maint.js the screen reads the profile itself and draws it", async () => { const h = await screen({ scripts: ["outbox.js", "myprofile.js"] }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/Phone number/.test(t), t.slice(0, 80)); });
+N("…a 503 on that read says 'Couldn't load', not 'not signed in'", async () => { const h = await screen({ scripts: ["outbox.js", "myprofile.js"], gets: [{ status: 503, body: {} }] }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/Couldn't load/.test(t) && !/not signed in/.test(t), t); });
+N("…a dropped connection on that read says 'Couldn't load' too", async () => { const h = await screen({ scripts: ["outbox.js", "myprofile.js"], gets: ["fail"] }); await openMe(h.page); const t = await body(h.page); await h.close(); return ok(/Couldn't load/.test(t), t); });
+N("…and with no panel notice card, 'Not saved' still reaches the person (the browser's own box)", async () => { const h = await screen({ scripts: ["outbox.js", "maint.js", "myprofile.js"], pre: "", posts: () => ({ status: 400, body: { error: "That email is not valid." } }) }); const p = h.page; const seen = []; p.on("dialog", async (d) => { seen.push(d.message()); await d.dismiss(); }); await openMe(p); await p.evaluate(() => { window.LFH_ASK = null; }); await p.fill('input[name="email"]', "asha@example.invalid"); await saveNow(p); await h.close(); return ok(seen.some((m) => /That email is not valid\./.test(m)), JSON.stringify(seen)); });
+
+N("A malformed email is stopped by the browser's own check before anything is sent", async () => { const h = await screen(); const p = h.page; await openMe(p); await p.fill('input[name="email"]', "not-an-email"); await p.click(".me-save"); await sleep(500); const r = { n: posts(h).length, invalid: await p.evaluate(() => !document.querySelector('input[name="email"]').checkValidity()) }; await h.close(); return ok(r.n === 0 && r.invalid, JSON.stringify(r)); });
+
+// ── 6. the manager panel's own button ────────────────────────────────────────────────────────
+N("The manager's 'My profile & pay' button appears when the restaurant has profiles", async () => { const h = await screen(); const v = await until(() => h.page.evaluate(() => !document.getElementById("myProfileBtn").hidden), 4000); await h.close(); return ok(v); });
+N("…stays hidden when it does not", async () => { const h = await screen({ me: { ...ME, profileModule: false } }); await sleep(900); const v = await h.page.evaluate(() => document.getElementById("myProfileBtn").hidden); await h.close(); return ok(v); });
+N("…stays hidden for a read that answered an error", async () => { const h = await screen({ me: { error: "nope" } }); await sleep(900); const v = await h.page.evaluate(() => document.getElementById("myProfileBtn").hidden); await h.close(); return ok(v); });
+N("…and tapping it opens the screen", async () => { const h = await screen(); await until(() => h.page.evaluate(() => !document.getElementById("myProfileBtn").hidden), 4000); await h.page.click("#myProfileBtn"); const v = await until(() => h.page.evaluate(() => !!document.querySelector(".me-wrap")), 3000); await h.close(); return ok(v); });
+N("…a failed first read retries by itself and shows the button once the server answers", async () => { const h = await screen({ pre: "window.LFH_TEST_PACING = Object.assign({}, window.LFH_TEST_PACING, { boot: 300 });", gets: [{ status: 503, body: {} }, { status: 503, body: {} }, { status: 200, body: ME }] }); const v = await until(() => h.page.evaluate(() => !document.getElementById("myProfileBtn").hidden), 8000); await h.close(); return ok(v); });
+N("…but stops asking after eight tries (never polls for ever)", async () => { const h = await screen({ pre: "window.LFH_TEST_PACING = Object.assign({}, window.LFH_TEST_PACING, { boot: 60 });", gets: [{ status: 503, body: {} }] }); await sleep(2500); const n = h.gets(); await sleep(1000); const m = h.gets(); await h.close(); return ok(m === n && n <= 2 + 8 * 2, `${n} reads, then ${m}`); });
+
+done();

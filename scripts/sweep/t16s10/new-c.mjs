@@ -176,6 +176,9 @@ RTN("…and showing it again rebuilds them", async () => { const i = await idle(
 const keep = memo(async () => {
   const h = await rt({ clock: true, after: "window.LFH_RT.start({ handlers: { ops: function(){} }, keepAlive: function(){ return true; } });" });
   await h.page.clock.runFor(1000);
+  // The client is built after its start-up read, which answers in REAL time while this page's clock
+  // only moves when told to — under load it was not there yet (sweep #10 T16 round 2: a flake).
+  for (let i = 0; i < 50 && !(await h.page.evaluate(() => !!(window.__sb && window.__sb.channels.length))); i++) { await sleep(100); await h.page.clock.runFor(100); }
   const b = await h.page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); return window.__sb.removed; });
   await h.page.clock.runFor(130000);
   const a = await h.page.evaluate(() => window.__sb.removed);
