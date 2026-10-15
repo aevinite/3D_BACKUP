@@ -166,6 +166,7 @@
       imageFile = null;
       if (imageUrlLocal) { URL.revokeObjectURL(imageUrlLocal); imageUrlLocal = null; }
       renderPrevs();
+      reflectOffline();   // item 23: with no signal, removing the photo turns "Add photo" back off
     }
 
     // ── Voice note (MediaRecorder) ─────────────────────────────────────────────
@@ -223,6 +224,10 @@
       if (audioUrlLocal) { URL.revokeObjectURL(audioUrlLocal); audioUrlLocal = null; }
       renderPrevs();
       renderRecBtn();
+      // ITEM 23 (sweep #10 T16 round 2): with no signal the record button is OFF unless there is a
+      // recording to remove. Removing one left it ON — the rule was only re-applied on the next
+      // offline/online event — so the button contradicted the note under it. Re-apply it now.
+      reflectOffline();
     }
     function renderRecBtn(t0) {
       if (rec && rec.state === "recording") {

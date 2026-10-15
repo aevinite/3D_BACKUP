@@ -235,6 +235,16 @@ await p.evaluate(() => { window.__on = false; window.dispatchEvent(new Event("of
 await p.fill("#lfhirSubj", "Fridge not cooling"); await p.click("#lfhirSend"); await p.waitForTimeout(300);
 const off7 = await p.evaluate(() => ({ sent: window.__sent.length, img: !!document.querySelector("#lfhirPrevs img"), s: document.getElementById("lfhirStatus").textContent }));
 ok(off7.sent === 0 && off7.img && /You're offline, so the photo can't go with it yet\. Remove it to save the ticket now/.test(off7.s), "the photo is NOT dropped: nothing is saved, it stays attached, and Send says why", JSON.stringify(off7));
+// Item 23: with no signal, removing the photo turns "Add photo" back OFF (the rule under the note).
+if (off7.img) {
+  const after = await p.evaluate(() => { document.getElementById("lfhirPhoto").click(); return document.getElementById("lfhirPhoto").disabled; });
+  ok(after === true, "…removing the photo while offline turns 'Add photo' back off, as the offline note says", `disabled=${after}`);
+  await p.evaluate(async () => { const c = document.createElement("canvas"); c.width = 60; c.height = 60; const b = await new Promise((r) => c.toBlob(r, "image/png"));
+    window.__on = true; window.dispatchEvent(new Event("online"));
+    const dt = new DataTransfer(); dt.items.add(new File([b], "f.png", { type: "image/png" })); const i = document.getElementById("lfhirFile"); i.files = dt.files; i.dispatchEvent(new Event("change")); });
+  await until(() => p.evaluate(() => !!document.querySelector("#lfhirPrevs img")), 5000);
+  await p.evaluate(() => { window.__on = false; window.dispatchEvent(new Event("offline")); });
+}
 if (off7.img && !off7.sent && await p.evaluate(() => !!document.getElementById("lfhirSend"))) {
   await p.evaluate(() => { window.__on = true; window.dispatchEvent(new Event("online")); }); W.uploads = [];
   await p.click("#lfhirSend"); await until(async () => W.uploads.length > 0, 8000); await p.waitForTimeout(300);
