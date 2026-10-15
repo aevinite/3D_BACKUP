@@ -116,9 +116,12 @@ P("P41025", "…and a cancelled order tells the diner what to DO",
 P("P41026", "'final' means served or cancelled, in one place",
   /export const isFinalStatus = \(s: OrderStatus\) => s === "served" \|\| s === "cancelled";/.test(F.status));
 P("P41027", "the tracked-orders list is read defensively — a corrupt value yields an empty list",
-  /return Array\.isArray\(list\) \? list : \[\];/.test(F.status) && /catch \{\s*return \[\];/.test(bare(F.status)));
+  // re-pointed (sweep #10 T3 round 3): the reading moved into parseActive(), which now also checks every ENTRY (item 34 — one null
+  // inside the list used to throw and take the whole menu down)
+  /if \(!Array\.isArray\(list\)\) return \[\];/.test(F.status) && /catch \{\s*return \[\];/.test(bare(F.status)));
 P("P41028", "…and reading it can never throw",
-  /export const readActiveOrders = \(\): ActiveOrder\[\] => \{\s*try \{/.test(bare(F.status)));
+  // re-pointed (sweep #10 T3 round 3): readActiveOrders is parseActive(…), whose whole body sits in a try
+  /export const readActiveOrders = \(\): ActiveOrder\[\] => parseActive\(tget\(ACTIVE_ORDERS_KEY\)\);/.test(F.status) && /function parseActive\(raw: string \| null\): ActiveOrder\[\] \{\s*try \{/.test(bare(F.status)));
 P("P41029", "the live list drops an order the diner dismissed",
   /if \(o\.dismissed \|\| now - o\.placedAt > MAX_AGE_MS\) return false;/.test(F.status));
 P("P41030", "…and one older than the 3-hour ceiling",
@@ -279,7 +282,8 @@ P("P41098", "the explicit-slug read and write agree on that shape exactly",
   /localStorage\.getItem\(`\$\{base\}:\$\{fold\(slug\)\}`\)/.test(F.tstore)
   && /localStorage\.setItem\(`\$\{base\}:\$\{fold\(slug\)\}`, value\)/.test(F.tstore));
 P("P41099", "…so an order flushed for restaurant A lands under A even while the tab is on B",
-  /tsetFor\("lfh_active_orders", slug/.test(F.outbox));
+  // re-pointed (sweep #10 T3 round 3): written by trackActiveOrder(…, slug), the one door (item 35)
+  /trackActiveOrder\(\{[\s\S]{0,300}\}, slug\);/.test(F.outbox) && /if \(slug\) tsetFor\(ACTIVE_ORDERS_KEY, slug, text\);/.test(F.status));
 P("P41100", "the fold cannot turn a blank slug into a blank bucket",
   /\(slug \|\| DEFAULT_RESTAURANT_SLUG\)\.trim\(\)\.toLowerCase\(\)/.test(F.tstore));
 P("P41101", "the provider's synchronous slug is derived from the PATH only",
@@ -509,7 +513,9 @@ P("P41204", "the network-error screen offers a working Retry",
 P("P41205", "…and that Retry re-fetches settings if they were what failed",
   /if \(!settingsRef\.current\) \{/.test(F.gate));
 P("P41206", "…and gives up gracefully if they still cannot be fetched",
-  /Still can't reach the restaurant's system — check your internet and try again\./.test(F.gate));
+  // re-pointed (sweep #10 T3 round 3): T4 sweep #10 item 1 — the second failure is worded by reachNote(…, { again: true }) ("still isn't
+  // answering … in a moment"), and the internet is named only on proof the phone is offline
+  /setNote\(settingsFailedNote\(err, true\)\);/.test(F.gate) && /\$\{o\.again \? "still isn't" : "isn't"\}/.test(F.gate));
 P("P41207", "the request-sent screen only promises auto-send where a watcher really runs",
   /setReqAutoSend\(type === "open"\)/.test(F.gate));
 P("P41208", "…and the other path says something that is true without it",
@@ -655,9 +661,11 @@ P("P41269", "…and a duplicate with an order id still records the order for tra
 P("P41270", "…and a duplicate with NO id records nothing rather than an empty row",
   /if \(!orderId\) return;/.test(F.outbox));
 P("P41271", "…and an order already tracked is not added twice",
-  /if \(arr\.some\(\(o: \{ id\?: string \}\) => o\?\.id === orderId\)\) return;/.test(F.outbox));
+  // re-pointed (sweep #10 T3 round 3): trackActiveOrder skips an order already followed (item 35)
+  /if \(list\.some\(\(x\) => x\.id === o\.id\)\) return false;/.test(F.status) && /trackActiveOrder\(/.test(F.outbox));
 P("P41272", "recording a tracked order wakes the strip",
-  /window\.dispatchEvent\(new Event\("lfh:order-placed"\)\)/.test(F.outbox));
+  // re-pointed (sweep #10 T3 round 3): the wake-up lives in trackActiveOrder now
+  /window\.dispatchEvent\(new Event\("lfh:order-placed"\)\)/.test(F.status));
 P("P41273", "…and can never break the send if storage refuses",
   /catch \{ \/\* tracker record is best-effort \*\/ \}/.test(F.outbox));
 P("P41274", "the oldest item is the one evicted when the phone is full of saved work",

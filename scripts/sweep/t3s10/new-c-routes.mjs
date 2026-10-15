@@ -164,9 +164,12 @@ check("P172232", PO, "non-list items / allergies are treated as empty lists, not
   const r = await callRoute(PO, { mode: "public", restaurantId: FH, table: "4", items: "lots", allergies: { a: 1 } });
   const c = G.RPC_CALLS[0]; return r.status === 200 && Array.isArray(c.args.p_items) && c.args.p_items.length === 0 && Array.isArray(c.args.p_allergies);
 }));
-check("P172233", PO, "a missing table reaches the database as an empty string (its own refusal), not 'undefined'", HOW, W(async () => {
-  G.RPC.lfh_place_order_public = { ok: false, reason: "no_table" };
-  await callRoute(PO, { mode: "public", restaurantId: FH, items: ITEMS }); return G.RPC_CALLS[0].args.p_table === "";
+// re-pointed (sweep #10 T3 round 3, item 36): a guest order with no table is refused AT THE DOOR now
+// (unknown_table) — it no longer reaches the database at all, where an empty table was stored as "no table"
+check("P172233", PO, "a missing table is refused at the door (unknown_table) — never sent to the database as '' or 'undefined'", HOW, W(async () => {
+  G.RPC.lfh_place_order_public = { ok: true, order_id: "o" };
+  const r = await callRoute(PO, { mode: "public", restaurantId: FH, items: ITEMS });
+  return { ok: G.RPC_CALLS.length === 0 && r.status === 400 && r.json?.reason === "unknown_table", note: `${r.status} ${r.json?.reason} · ${G.RPC_CALLS.length} database call(s)` };
 }));
 // idempotency, end to end through the real wrapper
 check("P172234", PO, "the same saved order sent TWICE places it once — the second answer is a duplicate echoing the order id", HOW, W(async () => {

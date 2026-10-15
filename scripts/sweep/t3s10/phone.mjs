@@ -26,7 +26,7 @@ function memStorage(failSet = false) {
 }
 
 /** A minimal IndexedDB: one database of object stores, keyPath "id", async like the real thing. */
-function fakeIDB({ failWrites = false, noDatabases = false, preload = null, dbName = "lfh_guest_outbox" } = {}) {
+function fakeIDB({ failWrites = false, noDatabases = false, preload = null, dbName = "lfh_guest_outbox", failReads = false, databasesThrow = false, failOpen = false } = {}) {
   const dbs = new Map();
   if (preload) dbs.set(dbName, new Map([["orders", new Map(preload.map((r) => [r.id, JSON.parse(JSON.stringify(r))]))]]));
   const opened = [];
@@ -34,10 +34,11 @@ function fakeIDB({ failWrites = false, noDatabases = false, preload = null, dbNa
   const api = {
     opened,
     _dump: (name = dbName) => [...((dbs.get(name) || new Map()).get("orders") || new Map()).values()],
-    open(name) {
-      opened.push(name);
+    open(name, version) {
+      opened.push(name); (api.versions ||= []).push(version);
       const req = {};
       later(() => {
+        if (failOpen) { req.error = new Error("open failed"); req.onerror && req.onerror(); return; }
         let created = false;
         if (!dbs.has(name)) { dbs.set(name, new Map()); created = true; }
         const stores = dbs.get(name);
@@ -50,7 +51,7 @@ function fakeIDB({ failWrites = false, noDatabases = false, preload = null, dbNa
             tx.objectStore = () => ({
               put: (v) => { ops.push(() => store.set(v.id, JSON.parse(JSON.stringify(v)))); },
               delete: (k) => { ops.push(() => store.delete(k)); },
-              getAll: () => { const r = {}; later(() => { r.result = [...store.values()].map((x) => JSON.parse(JSON.stringify(x))); r.onsuccess && r.onsuccess(); }); return r; },
+              getAll: () => { const r = {}; later(() => { if (failReads) { r.error = new Error("read failed"); r.onerror && r.onerror(); return; } r.result = [...store.values()].map((x) => JSON.parse(JSON.stringify(x))); r.onsuccess && r.onsuccess(); }); return r; },
             });
             later(() => {
               if (failWrites && ops.length) { tx.error = new Error("QuotaExceededError"); tx.onerror && tx.onerror(); return; }
@@ -68,7 +69,7 @@ function fakeIDB({ failWrites = false, noDatabases = false, preload = null, dbNa
       return req;
     },
   };
-  if (!noDatabases) api.databases = async () => [...dbs.keys()].map((name) => ({ name }));
+  if (!noDatabases) api.databases = async () => { if (databasesThrow) throw new Error("databases() refused"); return [...dbs.keys()].map((name) => ({ name })); };
   return api;
 }
 
@@ -76,9 +77,11 @@ function fakeIDB({ failWrites = false, noDatabases = false, preload = null, dbNa
  * phone(opts) — install a fresh fake phone and a FRESH copy of lib/guestOutbox.ts.
  *   opts.path        the page the tab is on (default /r/french-house/menu)
  *   opts.online      navigator.onLine (default true)
- *   opts.idb         options for the fake IndexedDB (failWrites, noDatabases, preload)
+ *   opts.idb         options for the fake IndexedDB (failWrites, noDatabases, preload — and, round 3,
+ *                    failReads, failOpen, databasesThrow)
  *   opts.respond     (url, init, n) => { status, json } | throws — the network
  *   opts.lsFail      localStorage.setItem throws
+ *   opts.load        async () => module — load the queue some other way (round 3: the real .ts file)
  */
 export async function phone(opts = {}) {
   const listeners = new Map();
@@ -115,7 +118,9 @@ export async function phone(opts = {}) {
   Object.defineProperty(globalThis, "navigator", { value: nav, configurable: true, writable: true });
   const idb = fakeIDB(opts.idb || {});
   globalThis.indexedDB = idb;
-  const M = fresh("lib/guestOutbox.ts", "client");
+  // opts.load — round 3 hands in a loader for the REAL lib/guestOutbox.ts (./r3/hooks.mjs, so coverage
+  // and mutation point at the file itself); without one, the bundle the earlier rounds used.
+  const M = opts.load ? await opts.load() : fresh("lib/guestOutbox.ts", "client");
   const settle = (ms = 30) => new Promise((r) => realSetTimeout(r, ms));
   const pending = () => timers.filter((t) => !t.fired && !t.cleared);
   /** Fire the soonest pending long timer (the queue's retry), then let the flush finish. */

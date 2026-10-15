@@ -345,7 +345,8 @@ P("P57449", "the order deadline is a named constant, not an inline number", /con
 P("P57450", "…and it matches the queue's own send deadline", /const SEND_TIMEOUT_MS = 15_000;/.test(O));
 P("P57451", "the busy error is a TYPE with a flag, so nobody matches on a sentence", /export type BusyError = Error & \{ busy: true \}/.test(M));
 P("P57452", "…built in one place", /function busyError\(why: string\): BusyError/.test(M));
-P("P57453", "the waiter-call result shape is declared, so a caller cannot invent a field", /export interface CallWaiterResult \{ ok: boolean; reason\?: string \}/.test(M));
+// re-pointed (sweep #10 T3 round 3): the declared shape gained the database's own sentence (item 29) — still declared, still closed
+P("P57453", "the waiter-call result shape is declared, so a caller cannot invent a field", /export interface CallWaiterResult \{ ok: boolean; reason\?: string; error\?: string \}/.test(M));
 P("P57454", "the reply shape the order path reads is declared too", /type OrderReply = \{/.test(M));
 P("P57455", "…and it names `duplicate`, so a replayed answer is not read as a new order", /duplicate\?: boolean/.test(M));
 P("P57456", "a dish's option groups are a declared shape, not free-form JSON", /export interface OptionGroup/.test(M));
@@ -377,7 +378,8 @@ P("P57597", "…never by branching on the dish's raw setting", /Never branch on 
 P("P57598", "…and a line whose dish has not loaded yet follows the restaurant", /reads as "default" = follow the restaurant/.test(C));
 P("P57599", "the MRP stamp is purely presentational", /const isMrpLine = \(it: CartItem\) => isMrpDish\(dishMode\(it\.id\), taxRules\)/.test(C));
 P("P57600", "…and it says why the price is final, on hover", /Maximum Retail Price — this price is final, no tax is added/.test(C));
-P("P57601", "the MRP row appears only when there is MRP money on the bill", /\{nontaxDisp > 0 && \(/.test(C));
+// re-pointed (sweep #10 T3 round 3): …and only once the restaurant's tax rules are known (item 31 — no rule nobody read decides a row)
+P("P57601", "the MRP row appears only when there is MRP money on the bill", /\{taxKnown && nontaxDisp > 0 && \(/.test(C));
 P("P57602", "…and never under the composition scheme, where it would be a lie", /const nontaxDisp = dispSplit\.composition \? 0 : dispSplit\.nontaxAmount;/.test(C));
 P("P57603", "the tax-inclusive explanation appears only when there IS tax inside", /GST is already included in these prices/.test(C));
 P("P57604", "…and the all-MRP case says something different and true", /No GST on these items/.test(C));
@@ -392,13 +394,16 @@ P("P57610", "the subtotal shown is the sum of the printed lines, not a separate 
 P("P57611", "the item count counts items, not lines", /const itemCount = cart\.reduce\(\(sum, it\) => sum \+ it\.qty, 0\)/.test(C));
 P("P57612", "order records are stored in USD and converted at render, in one domain", /ORDER RECORDS are stored in USD/.test(C));
 P("P57613", "…and the ₹48,550 scar is written down beside it", /₹48,550/.test(C));
-P("P57614", "the tracker entry the bill writes carries the USD total", /total: totalUsd/.test(C));
+// re-pointed (sweep #10 T3 round 3): recordTotal — USD, or 0 when the tax was never read (item 31)
+P("P57614", "the tracker entry the bill writes carries the USD total", /const recordTotal = taxKnown \? totalUsd : 0;/.test(C) && /total: recordTotal/.test(C));
 P("P57615", "…and so does the one the queue writes", /total: item\.track\?\.total \?\? 0/.test(O));
 P("P57616", "…and the one the shared table pull writes", /total: Number\(o\.total\) \|\| 0/.test(T));
 P("P57617", "…so all three feed the ONE storage the tracker and the bill read", /export const ACTIVE_ORDERS_KEY = "lfh_active_orders";/.test(F.status));
 P("P57618", "the queue's tracker entry lands under the ORDER's restaurant, not the tab's", /const slug = item\.restaurantSlug \|\| tenantSlug\(\);/.test(O));
-P("P57619", "…and is written with the tenant-scoped setter", /tsetFor\("lfh_active_orders", slug, JSON\.stringify\(arr\)\)/.test(O));
-P("P57620", "…and wakes the tracker", /window\.dispatchEvent\(new Event\("lfh:order-placed"\)\)/.test(O));
+// re-pointed (sweep #10 T3 round 3): by trackActiveOrder, the one door (item 35), with the order's own restaurant
+P("P57619", "…and is written with the tenant-scoped setter", /if \(slug\) tsetFor\(ACTIVE_ORDERS_KEY, slug, text\); else tset\(ACTIVE_ORDERS_KEY, text\);/.test(F.status) && /\}, slug\);/.test(O));
+// re-pointed (sweep #10 T3 round 3): the wake-up lives in trackActiveOrder now
+P("P57620", "…and wakes the tracker", /window\.dispatchEvent\(new Event\("lfh:order-placed"\)\)/.test(F.status));
 P("P57621", "a same-tab basket change is announced, because storage events do not fire locally", /"lfh:cart-updated"/.test(C));
 P("P57622", "…and a cross-tab one is translated into that same announcement", /window\.addEventListener\("storage", handleStorageCart\)/.test(C));
 P("P57623", "the tracker listens for a placed order from either tab", /window\.addEventListener\("storage", onPlaced\)/.test(T));

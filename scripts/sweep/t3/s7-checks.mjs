@@ -134,7 +134,9 @@ P("P16127", "the sheet's screen-reader label covers both kinds",
 P("P16128", "a call saved with no signal from the WAITER POPUP goes through the queue",
   /enqueueGuestCall\(\{ mode: "public", table: check\.value, restaurantId, reason \}\)/.test(F.chef));
 P("P16129", "…and one saved from inside a table session carries the session token instead of a table",
-  /enqueueGuestCall\(\{ mode: "session", token: s\.token, restaurantId: ridRef\.current \|\| DEFAULT_RESTAURANT_ID, reason: note \}\)/.test(F.gate));
+  // re-pointed (sweep #10 T3 round 3): T4 (sweep #10) removed the restaurant-#1 fallback and wrapped the save in guarded() — the
+  // rule is the same: the saved call carries the SESSION token, never a table
+  /enqueueGuestCall\(\{ mode: "session", token: s\.token, restaurantId: ridRef\.current, reason: note \}\)/.test(F.gate));
 P("P16130", "both promise automatic sending ONLY when the phone really stored it",
   /q\.persisted \? "Saved — we'll call them the moment you're back online"/.test(F.gate)
   && /q\.persisted \? `\$\{reason\} · staff are told as soon as there's signal`/.test(F.chef));
@@ -193,7 +195,9 @@ P("P16148", "the join flow reads its answer and branches on every ending it can 
 // also says "this one's on us" when the restaurant's own system was the one that did not answer.
 P("P16149", "…and treats anything else as 'could not reach', keeping the guest's place",
   /if \(!r\.ok\) \{ setTableInput\(p\.table\); setNote\(joinFailedNote\(r\)\);/.test(F.gate)
-  && /: "Couldn't reach the restaurant's system — check your internet and try again\.";/.test(F.gate));
+  // re-pointed (sweep #10 T3 round 3): T4 sweep #10 item 1 made every "could not reach" sentence come from reachNote()'s three
+  // verdicts — "anything else" is now the blame-nobody one, and the internet is named ONLY on proof
+  && /return `We couldn't reach the restaurant's system just now\.\$\{safe\} Please try again in a moment\.`;/.test(F.gate));
 // RE-AIMED, sweep #8 (2026-09-02). The rule HOLDS and the code got STRONGER: the bare
 // `const r = await callWaiterSession(...)` is now wrapped in the gate's own `guarded()` helper and
 // falls back to `{ ok:false, reason:"timed_out" }`, so the answer is not only read, it can no longer
@@ -298,11 +302,13 @@ P("P16194", "a failed session order leaves the basket alone (the gate showed its
 P("P16195", "the location check's every outcome has a sentence",
   /loc\.reason === "denied" \? "Location was blocked\." : loc\.reason === "far" \? "You seem too far from the restaurant\." : "Couldn't read your location\."/.test(F.gate));
 P("P16196", "a table-state read that fails is not blamed on the diner's own internet",
-  /isSessionTimeout\(st\)\s*\n?\s*\? "The restaurant's system isn't answering right now — this one's on us/.test(F.gate));
+  // re-pointed (sweep #10 T3 round 3): the verdict is faultOfAnswer() — a timed-out read is "ours", worded "this one's on us"
+  /isSessionTimeout\(r\) \? "ours"/.test(F.gate) && /if \(fault === "ours"\) return `The restaurant's system \$\{o\.again \? "still isn't" : "isn't"\} answering right now — this one's on us\./.test(F.gate));
 P("P16197", "only three definitive endings drop a session on the way in",
   /if \(reason === "invalid_token" \|\| reason === "removed" \|\| reason === "session_closed"\)/.test(F.gate));
 P("P16198", "…and a network blip keeps the guest's spot with a working Retry",
-  /your spot at the table is safe/.test(F.gate));
+  // re-pointed (sweep #10 T3 round 3): the sentence starts a clause now ("Your spot…"), offered on the approval poll's blip
+  /" Your spot at the table is safe\."/.test(F.gate) && /reachNote\(faultOfAnswer\(state\), \{ spotSafe: true \}\)/.test(F.gate));
 P("P16199", "the approval poll drops a session only on those same three",
   /if \(reason === "removed" \|\| reason === "session_closed" \|\| reason === "invalid_token"\)/.test(F.gate));
 P("P16200", "…and anything else keeps polling rather than costing a head their role",
@@ -442,9 +448,12 @@ P("P16254", "the STORED total is the USD domain",
 P("P16255", "…and the DISPLAYED total is the display-currency domain",
   /const total = subtotal \+ tax;/.test(F.cart));
 P("P16256", "…and it is the USD one that is written into the tracker record",
-  /total: totalUsd, \/\/ USD — converted at render time like all order records/.test(F.cart));
+  // re-pointed (sweep #10 T3 round 3): the record keeps recordTotal — the USD total, or 0 ("not known") when the tax rules were never read
+  // (item 31) — and joins the strip through trackActiveOrder (item 35)
+  /const recordTotal = taxKnown \? totalUsd : 0;/.test(F.cart) && /trackActiveOrder\(\{ id: orderId, tableNumber: tableTrim, total: recordTotal,/.test(F.cart));
 P("P16257", "…and the session path passes the USD one too",
-  /const totalS = totalUsd, countS = itemCount;/.test(F.cart));
+  // re-pointed (sweep #10 T3 round 3): the same USD-or-0 recordTotal (item 31)
+  /const totalS = recordTotal, countS = itemCount;/.test(F.cart));
 P("P16258", "GST is added only over the lines that are priced NET",
   /const onTopBase = splitBill\(dispLines\.filter\(\(l\) => l\.tax_mode === "excl"\), taxRules\)\.taxableBase;/.test(F.cart));
 P("P16259", "…so a tax-inclusive line is never taxed twice",
@@ -621,7 +630,8 @@ P("P16329", "every storage read and write is wrapped, so private mode cannot cra
   (F.tstore.match(/catch \{/g) || []).length >= 8);
 P("P16330", "the outbox writes a flushed order's tracker entry under the ORDER's restaurant",
   /const slug = item\.restaurantSlug \|\| tenantSlug\(\);/.test(F.outbox)
-  && /tsetFor\("lfh_active_orders", slug/.test(F.outbox));
+  // re-pointed (sweep #10 T3 round 3): through the one door, lib/orderStatus.ts trackActiveOrder(…, slug) (item 35)
+  && /trackActiveOrder\(\{[\s\S]{0,300}\}, slug\);/.test(F.outbox));
 P("P16331", "…and remembers that restaurant when the order is first saved",
   /const restaurantSlug = p\.restaurantSlug \|\| tenantSlug\(\);/.test(F.outbox));
 P("P16332", "…and the basket passes it explicitly rather than relying on where the tab is later",

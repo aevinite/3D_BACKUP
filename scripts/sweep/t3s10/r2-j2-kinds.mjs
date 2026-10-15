@@ -4,6 +4,12 @@
 import { check } from "./lib.mjs";
 import { phone, lists } from "./phone.mjs";
 
+// SAVED N ms AGO — by saving it while the clock reads N ms ago (re-pointed sweep #10 T3 round 3). These checks
+// used to age a saved row by editing it in the published list (lists(P).queued[0].at = …). Round 3 made that
+// list a COPY (item 32 — React's contract), so the edit no longer reached the queue: the "too old" checks went
+// red and the "still fresh" one passed while testing nothing. The clock is the honest way to age it.
+async function savedAgo(ms, save) { const real = Date.now; Date.now = () => real() - ms; try { return await save(); } finally { Date.now = real; } }
+
 const F = "lib/guestOutbox.ts";
 const HOW = "STUB — real lib/guestOutbox.ts on a fake phone, six rounds per stall";
 const FH = "00000000-0000-0000-0000-000000000001";
@@ -65,15 +71,15 @@ check("P172830", F, "the 26th saved CALL (26 tables) pushes the oldest out with 
   const L = lists(P); return { ok: L.queued.length === 25 && L.failed.length === 1 && /member of staff/.test(L.failed[0].error) && !/order it again/.test(L.failed[0].error), note: L.failed[0]?.error };
 }));
 check("P172831", F, "a saved call exactly at its ten-minute edge (9 min 59 s) still goes", HOW, () => S({ online: false, respond: () => ({ status: 200, json: { ok: true } }) }, async (P) => {
-  await SAVE.call(P.M); lists(P).queued[0].at = Date.now() - (10 * 60_000 - 1000); P.setOnline(true);
+  await savedAgo(10 * 60_000 - 1000, () => SAVE.call(P.M)); P.setOnline(true);
   await P.M.flushGuestOutbox(); await P.settle(); return P.fetches.length === 1;
 }));
 check("P172832", F, "a stale call is turned away on the phone WITHOUT costing a network request", HOW, () => S({ online: false }, async (P) => {
-  await SAVE.call(P.M); lists(P).queued[0].at = Date.now() - 20 * 60_000; P.setOnline(true);
+  await savedAgo(20 * 60_000, () => SAVE.call(P.M)); P.setOnline(true);
   await P.M.flushGuestOutbox(); await P.settle(); return P.fetches.length === 0 && lists(P).failed.length === 1;
 }));
 check("P172833", F, "a saved leave is never treated as stale by age — leaving an hour ago is still true", HOW, () => S({ online: false, respond: () => ({ status: 200, json: { ok: true } }) }, async (P) => {
-  await SAVE.leave(P.M); lists(P).queued[0].at = Date.now() - 60 * 60_000; P.setOnline(true);
+  await savedAgo(60 * 60_000, () => SAVE.leave(P.M)); P.setOnline(true);
   await P.M.flushGuestOutbox(); await P.settle(); return P.fetches.length === 1 && lists(P).count === 0;
 }));
 check("P172834", F, "a saved session ORDER keeps its token and sends no table (identity is the token)", HOW, () => S({ online: false, respond: () => ({ status: 200, json: { ok: true, order_id: "o1" } }) }, async (P) => {

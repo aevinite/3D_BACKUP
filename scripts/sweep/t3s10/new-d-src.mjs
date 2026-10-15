@@ -69,7 +69,8 @@ check("P172349", FILES.cart, "every saved-basket read and write is restaurant-sc
 check("P172350", FILES.mini, "the basket pill reads the restaurant-scoped basket", HOW, () => !/localStorage\./.test(CODE.mini) && /tget\("lfh_cart"\)/.test(CODE.mini));
 check("P172351", FILES.confirm, "the dish popup writes the restaurant-scoped basket", HOW, () => !/localStorage\./.test(CODE.confirm) && /tset\("lfh_cart"/.test(CODE.confirm));
 check("P172352", FILES.status, "the tracked orders are restaurant-scoped", HOW, () => !/localStorage\./.test(CODE.status) && /tget\(ACTIVE_ORDERS_KEY\)/.test(CODE.status));
-check("P172353", FILES.outbox, "the queue writes a tracked order under the ORDER'S restaurant, not the page's", HOW, () => /tsetFor\("lfh_active_orders", slug,/.test(CODE.outbox) && /const slug = item\.restaurantSlug \|\| tenantSlug\(\)/.test(CODE.outbox));
+// re-pointed (sweep #10 T3 round 3, item 35): through trackActiveOrder(…, slug), the one way an order joins the strip
+check("P172353", FILES.outbox, "the queue writes a tracked order under the ORDER'S restaurant, not the page's", HOW, () => /trackActiveOrder\(\{[\s\S]{0,300}\}, slug\);/.test(CODE.outbox) && /const slug = item\.restaurantSlug \|\| tenantSlug\(\)/.test(CODE.outbox));
 check("P172354", FILES.cart, "the basket sent to the kitchen carries NO price and NO name — the server prices everything", HOW, () => {
   const i = SRC.cart.indexOf("  const orderItems = () =>"), j = SRC.cart.indexOf("  const allergyPayload");
   const b = SRC.cart.slice(i, j).replace(/\/\/.*$/gm, ""); return { ok: i > 0 && j > i && !/price|title/.test(b), note: b.replace(/\s+/g, " ").trim().slice(0, 120) };
@@ -118,8 +119,10 @@ check("P172375", FILES.cart, "the 5-second re-check runs only while the bill is 
 check("P172376", FILES.cart, "money is quoted through lib/tax.ts (splitBill / resolveTaxMode) — no second tax formula", HOW, () =>
   /splitBill\(dispLines, taxRules\)/.test(CODE.cart) && /resolveTaxMode\(dishMode\(it\.id\), taxRules\)/.test(CODE.cart) && !/\* 0\.05|\* 1\.05/.test(CODE.cart));
 check("P172377", FILES.cart, "a ₹0 GST row is never printed", HOW, () => /const showTaxRow = !dispSplit\.composition && tax > 0;/.test(CODE.cart));
+// re-pointed (sweep #10 T3 round 3, item 31): the record keeps recordTotal — the USD total, or 0 when the tax
+// was never read; the display-domain `total` still never reaches a record
 check("P172378", FILES.cart, "the stored order total is USD-domain and the shown total display-domain — never mixed", HOW, () =>
-  /total: totalUsd/.test(CODE.cart) && !/total: total[,\s}]/.test(CODE.cart));
+  /const recordTotal = taxKnown \? totalUsd : 0;/.test(CODE.cart) && /total: recordTotal/.test(CODE.cart) && !/total: total[,\s}]/.test(CODE.cart));
 check("P172379", FILES.chef, "a double tap cannot ring twice — a synchronous lock beside the state", HOW, () => /if \(sendingRef\.current \|\| sending\) return;/.test(CODE.chef));
 check("P172380", FILES.chef, "every reason button is disabled while a call is sending", HOW, () => /className="chef-reason"\s*disabled=\{sending\}/.test(CODE.chef));
 check("P172381", FILES.chef, "no signal → the call is SAVED and sent later, never just 'please try again'", HOW, () => /navigator\.onLine === false[\s\S]{0,200}enqueueGuestCall\(\{ mode: "public", table: check\.value, restaurantId, reason \}\)/.test(CODE.chef));
