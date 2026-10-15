@@ -32,6 +32,12 @@ await world(); r = await call("maintenance", "GET");
 ok(r.status === 200 && r.json.canChange === false, "not handed over → canChange:false (the drawer draws nothing)", JSON.stringify(r.json));
 await world({ access: GRANT_OWNER }); r = await call("maintenance", "GET");
 ok(r.json.canChange === false, "handed to the OWNER only → still false for a manager", JSON.stringify(r.json));
+// A restaurant whose access settings are EMPTY (null — a new restaurant) reads as "not handed over",
+// never as a crash (found by mutation, round 2: `&&` → `||` there went unnoticed).
+await world({ access: null }); r = await call("maintenance", "GET");
+ok(r.status === 200 && r.json.canChange === false, "a restaurant with no access settings at all → not handed over (no crash)", `${r.status} ${r.text}`);
+await world({ access: null }); r = await call("maintenance", "POST", { body: { on: true } });
+ok(r.status === 403 && g().WRITES.length === 0, "…and its switch cannot be flipped", `${r.status}`);
 await world({ access: GRANT_BOTH }); r = await call("maintenance", "GET");
 ok(r.json.canChange === true, "handed to owner AND manager → true", JSON.stringify(r.json));
 await world({ who: "admin" }); r = await call("maintenance", "GET", { query: "?rid=" + FH });
@@ -48,6 +54,8 @@ ok(r.status === 200 && (g().LOGS[0] || {}).panel === "owner", "an owner's flip t
 console.log("\n2) The owner's Settings page lists the switch only where it was handed over");
 await world({ oscope: OWNER }); r = await call("ownerSettings", "GET");
 ok(r.status === 200 && Array.isArray(r.json.maintenance) && r.json.maintenance.length === 0 && r.json.maintenanceOk === true, "handed over nowhere → no row at all (R36: what is withheld is not mentioned)", JSON.stringify(r.json && r.json.maintenance));
+await world({ oscope: OWNER, access: null }); r = await call("ownerSettings", "GET");
+ok(r.status === 200 && r.json.maintenance.length === 0 && r.json.maintenanceOk === true, "…a restaurant with no access settings at all is simply not listed (no crash)", `${r.status} ${JSON.stringify(r.json && r.json.maintenance)}`);
 await world({ oscope: OWNER, access: GRANT_OWNER }); r = await call("ownerSettings", "GET");
 ok(r.json.maintenance.length === 1 && r.json.maintenance[0].restaurant_id === FH && r.json.maintenance[0].on === false && r.json.maintenance[0].name === "French House", "handed over at French House only → one row, French House, with its real state", JSON.stringify(r.json.maintenance));
 await world({ oscope: OWNER, access: GRANT_OWNER, accessPP: GRANT_OWNER }); r = await call("ownerSettings", "GET");

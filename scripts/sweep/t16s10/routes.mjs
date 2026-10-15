@@ -61,7 +61,7 @@ export async function world(o = {}) {
     : who === "blip" ? { ok: false, transient: true }
     : { ok: true, user: MANAGER };
   G.FIX.restaurants = [
-    { id: FH, slug: "french-house", name: "French House", access_config: o.access || {} },
+    { id: FH, slug: "french-house", name: "French House", access_config: o.access === null ? null : (o.access || {}) },
     { id: PP, slug: "pizza-palace", name: "Pizza Palace", access_config: o.accessPP || {} },
   ];
   G.FIX.settings = o.settings || [{ id: "site", restaurant_id: FH, service_mode: false }, { id: "s2", restaurant_id: PP, service_mode: true }];
