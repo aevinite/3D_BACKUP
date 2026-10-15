@@ -1164,7 +1164,18 @@ flush();
     check("item 30 — the admin settings suite remembers each column the first time a phase saves it",
       /const fresh = Object\.keys\(body\)\.filter\(\(k\) => !touched\.has\(k\)\);/.test(d));
     check("item 30 — …and writes it back in a finally, whatever the phase did",
-      /const phase = \(check, how, fn\) => c\.phase\(check, how, async \(\.\.\.a\) => \{ touched = new Map\(\); try \{ return await fn\(\.\.\.a\); \} finally \{ await putBack\(\); \} \}\);/.test(d)); }}
+      /const phase = \(check, how, fn\) => c\.phase\(check, how, async \(\.\.\.a\) => \{ touched = new Map\(\); try \{ return await fn\(\.\.\.a\); \} finally \{ await putBack\(\); \} \}\);/.test(d)); }
+  // item 31 — a settings read that failed is not a tax rate, and "Try again" asks the server again
+  { const c = r3("components/CartPanel.tsx");
+    check("item 31 — the bill knows whether it has ever read the restaurant's tax rules",
+      /const \[taxKnown, setTaxKnown\] = useState\(false\);/.test(c) && (c.match(/setTaxRules\(taxRulesOf\(s\)\); setTaxKnown\(true\);/g) || []).length === 3);
+    check("item 31 — until then it prints \"+ any tax\", never a guessed GST line or total",
+      /\{!taxKnown && \(/.test(c) && /\+ any tax/.test(c) && /\{taxKnown && showTaxRow && \(/.test(c) && /\{taxKnown && <div className="bill-line grand">/.test(c));
+    check("item 31 — no order record keeps a total computed from rules nobody read",
+      /const recordTotal = taxKnown \? totalUsd : 0;/.test(c) && !/total: totalUsd/.test(c) && /const totalS = recordTotal/.test(c));
+    check("item 31 — a live card with no recorded total shows no ₹0 Total row", /\{o\.total > 0 && <div className="live-order-total">/.test(c));
+    check("item 31 — while unknown, the rules are asked for again only on the realtime nudge and the 60 s backstop",
+      /if \(!open \|\| taxKnown \|\| !restaurantId\) return;[\s\S]{0,400}addEventListener\("lfh:rt-tick", again\);\s*const iv = setInterval\(again, RT_BACKUP_MS\);/.test(c)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
