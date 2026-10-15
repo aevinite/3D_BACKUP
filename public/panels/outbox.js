@@ -419,8 +419,17 @@
   // { note: "more spicy" }. It travels with the write so the server can refuse instead of
   // silently overwriting a change someone else made on another device in the meantime.
   // Used by the dish-edit modal in both staff panels; see lib/clash.ts fieldClash().
+  // TWO CHANGES MADE IN THE SAME MILLISECOND MUST NOT TIE (sweep #10 T16 round 2, item 17). `at` is the
+  // ONLY thing that orders the queue once it is read back from the device (boot) or a refused change is
+  // put back in its place (requeueInOrder) — and every id is random. So three changes queued in one
+  // instant (a screen that sends several at once with no signal) came back after a reload in the order
+  // of their random ids: driven, 16 reloads in 20 replayed A, B, C as B, A, C or C, A, B. Each change
+  // now gets a time strictly after the one before it — the real clock, or one millisecond past the last
+  // if the clock has not moved — so the order it was made in is the order it is kept in.
+  let lastAt = 0;
+  function nextAt() { const n = Date.now(); lastAt = n > lastAt ? n : lastAt + 1; return lastAt; }
   async function send({ base, method, path, body, panel, label, expect, table }) {
-    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path, base), at: Date.now(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
+    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path, base), at: nextAt(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
     // WHICH TABLE, ON EVERY ROW. The "Needs you" / "Saved on this device" sheet lists changes by
     // label, and a call site that passes its own label ("Set table tag", "Place order") named no
     // table at all — so two changes on tables 5 and 7 rendered as two identical rows with nothing

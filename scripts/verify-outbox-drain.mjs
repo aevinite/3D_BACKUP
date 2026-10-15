@@ -36,6 +36,8 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+// Coverage for sweep #10 T16 round 2 (scripts/sweep/t16s10/cov.mjs) — a no-op unless T16_COV is set.
+import { covStart, covStop } from "./sweep/t16s10/cov.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0, fail = 0;
@@ -80,6 +82,13 @@ const server = http.createServer((req, res) => {
       <script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });</script>
       <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
       <script>document.addEventListener("DOMContentLoaded", function () { window.__r = window.LFH_OUTBOX.send({ base: "", method: "POST", path: "/api/editor/tables/3/pay", body: {}, label: "Settle bill" }); });</script>`);
+  }
+  // THE SAME-INSTANT PAGE (section 16): the queue with no signal, so three changes made at once stay queued.
+  if (req.url === "/page-tie") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar">panel</div>
+      <script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>`);
   }
   if (req.url === "/page-boot") {
     res.writeHead(200, { "content-type": "text/html" });
@@ -161,6 +170,7 @@ if (process.argv.some((a) => a === "--base" || a.startsWith("--base="))) {
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
+await covStart(page);
 page.on("pageerror", (e) => bad("the panel threw", String(e).slice(0, 120)));
 
 const fresh = async () => {
@@ -496,6 +506,34 @@ if (!raceMissed) ok("the change is still in the list, every time (4 of 4)"); els
 if (!raceNoTimer) ok("…and it has a next attempt scheduled"); else bad(`no next attempt was scheduled ${raceNoTimer} time(s) in 4`);
 await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
 
+// ── 16. changes made in the same instant keep their order across a reload ────────────────────
+// Sweep #10 T16 round 2, item 17. Every queued change has a random id, and once the queue is read back
+// from the device it is ordered by its time alone — so three changes made in one millisecond came back
+// in the order of their ids: 16 reloads in 20 replayed A, B, C wrongly. Each change now gets a time
+// strictly after the last.
+console.log("\n16) Three changes made in the same instant, then a reload");
+let tieWrong = 0, tieSame = 0;
+for (let i = 0; i < 8; i++) {
+  await page.goto(BASE + "/page-tie", { waitUntil: "load" });
+  await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => !!window.LFH_OUTBOX);
+  const n = await page.evaluate(async () => {
+    const s = (x) => window.LFH_OUTBOX.send({ base: "", method: "POST", path: "/api/editor/tables/1/" + x, body: {}, label: x });
+    await Promise.all([s("A"), s("B"), s("C")]);
+    return new Set(window.LFH_OUTBOX.getSnapshot().queued.map((x) => x.at)).size;
+  });
+  if (n < 3) tieSame++;
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => !!window.LFH_OUTBOX); await wait(250);
+  const o = await page.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.map((x) => x.label[0]).join(""));
+  if (o !== "ABC") tieWrong++;
+}
+if (!tieSame) ok("no two of them share a time (8 of 8)"); else bad(`two changes shared a time ${tieSame} time(s) in 8`);
+if (!tieWrong) ok("…and after a reload they are still in the order they were made (8 of 8)"); else bad(`after a reload the order was wrong ${tieWrong} time(s) in 8`);
+await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+
+await covStop(page);
 await browser.close();
 server.close();
 console.log(`\n${fail ? "❌" : "✅"} outbox drain: ${pass} passed, ${fail} failed\n`);
