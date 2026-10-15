@@ -136,7 +136,9 @@ has("myprofile.js", /addEventListener\("online"/,
   "myprofile no longer re-checks when the connection comes back");
 // A save that WORKED must never be reported as a failure. The refresh that follows it has its own
 // catch, so a blip on the read cannot make the screen claim the save was refused (T9 sweep #7).
-has("myprofile.js", /btn\.textContent = "Saved ✓";[\s\S]{0,900}?try \{\s*\n\s*await load\(\);\s*\n\s*render\(\);\s*\n\s*\} catch/,
+// …and since sweep #10 T16 round 2 (item 18) a re-read that answers "couldn't load" keeps the screen too:
+// it renders only when the read really answered (verify:panel-helpers-driven §6 drives it).
+has("myprofile.js", /btn\.textContent = "Saved ✓";[\s\S]{0,1600}?try \{\s*\n\s*await load\(\);\s*\n\s*if \(readFailed\) \{ readFailed = false; me = held;[^\n]*\} else render\(\);\s*\n\s*\} catch/,
   "the re-read after a successful save is back inside the save's own try — one dropped request and the person is told 'Couldn't save' about a save the server accepted");
 
 // ── maint.js — the guest-menu switch must never claim something the server did not do ──────────
@@ -548,6 +550,25 @@ has("guestbell.js", /rows: all\.slice\(0, 50\)/,
   }
   if (vpc && !/--hook/.test(vpc)) {
     fails.push("scripts/verify-panel-cache.mjs: the auto-restamping --hook mode is gone, so somebody has to remember a command again");
+  }
+}
+
+// NO DEAD HELPER IN A SHARED FILE (sweep #10 T16 round 2, item 22). A coverage run found realtime.js
+// still declaring a debounce() nothing had called since burstDebounce took its job on 2026-08-06 — code
+// a reader trusts and nothing runs. Every function DECLARED in these files (a `function x(` statement,
+// or a `const x = …=>` / `= function`) must be named somewhere else in the same file. Named function
+// EXPRESSIONS (returned, assigned, run on the spot) are not declarations and are not counted.
+{
+  const SHARED = ["outbox.js", "offline.js", "netretry.js", "realtime.js", "connbadge.js", "errlog.js", "theme.js", "fitnums.js", "backstack.js", "undobar.js", "guestbell.js", "myprofile.js", "maint.js", "issue-raise.js", "swipehint.js", "swreg.js", "shrinkimg.js", "auditsort.js"];
+  for (const f of SHARED) {
+    let raw = ""; try { raw = fs.readFileSync(path.join(ROOT, "public/panels", f), "utf8"); } catch { fails.push(`${f}: missing — the dead-helper check had nothing to read`); continue; }
+    const c = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\\])\/\/.*$/gm, "$1");
+    // …and (item 24) every VARIABLE too: connbadge.js still computed an `off` flag nothing read.
+    const decl = [...c.matchAll(/(?:^|[;{}\n])\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|[;{(\n,])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)].map((m) => m[1] || m[2]);
+    for (const n of new Set(decl)) {
+      const uses = (c.match(new RegExp("(^|[^\\w$.])" + n.replace(/\$/g, "\\$") + "(?![\\w$])", "g")) || []).length;
+      if (uses < 2) fails.push(`${f}: ${n} is declared and never used — dead code a reader trusts and nothing runs (delete it, or use it)`);
+    }
   }
 }
 

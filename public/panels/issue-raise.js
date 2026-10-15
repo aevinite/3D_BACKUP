@@ -131,13 +131,33 @@
 
     // ── Photo ────────────────────────────────────────────────────────────────
     photoBtn.onclick = function () { if (imageFile) { clearImage(); } else { fileInp.click(); } };
-    fileInp.onchange = function () {
+    fileInp.onchange = async function () {
       var f = fileInp.files && fileInp.files[0];
       fileInp.value = ""; // allow re-picking the same file later
       if (!f) return;
       if (!OK_IMAGE[f.type]) { setStatus("Photo must be a PNG, JPG or WEBP.", "err"); return; }
-      if (f.size > MAX_IMAGE_BYTES) { setStatus("Photo must be 5 MB or smaller.", "err"); return; }
+      // A BIG PHOTO IS MADE SMALLER HERE, NOT REFUSED (sweep #10 T16 round 2, owner 2026-10-15: "do
+      // all five"). A new phone's camera makes an 8-12 MB picture; it used to be turned away with
+      // "Photo must be 5 MB or smaller", which nobody at a restaurant can act on. The shared shrinker
+      // (shrinkimg.js) brings it to 1280 px first; only if it is STILL over the server's 5 MB limit
+      // (lib/issues.ts IMAGE_MAX), or the device cannot shrink it, is it refused — and then in words
+      // that say what to do. Send waits while it shrinks, so the photo cannot be dropped mid-way.
+      if (f.size > MAX_IMAGE_BYTES) {
+        var shrunk = null;
+        if (window.LFH_IMG) {
+          setStatus("Making the photo smaller…");
+          sendBtn.disabled = true; photoBtn.disabled = true;
+          try { shrunk = (await LFH_IMG.shrink(f)).file; } catch (e) { shrunk = null; }
+          sendBtn.disabled = false; reflectOffline();
+        }
+        if (!shrunk || shrunk.size > MAX_IMAGE_BYTES) {
+          setStatus("This photo is too big to send. Take a new one, or pick a smaller picture.", "err");
+          return;
+        }
+        f = shrunk;
+      }
       setStatus("");
+      if (imageUrlLocal) URL.revokeObjectURL(imageUrlLocal);
       imageFile = f;
       imageUrlLocal = URL.createObjectURL(f);
       renderPrevs();
@@ -146,6 +166,7 @@
       imageFile = null;
       if (imageUrlLocal) { URL.revokeObjectURL(imageUrlLocal); imageUrlLocal = null; }
       renderPrevs();
+      reflectOffline();   // item 23: with no signal, removing the photo turns "Add photo" back off
     }
 
     // ── Voice note (MediaRecorder) ─────────────────────────────────────────────
@@ -203,6 +224,10 @@
       if (audioUrlLocal) { URL.revokeObjectURL(audioUrlLocal); audioUrlLocal = null; }
       renderPrevs();
       renderRecBtn();
+      // ITEM 23 (sweep #10 T16 round 2): with no signal the record button is OFF unless there is a
+      // recording to remove. Removing one left it ON — the rule was only re-applied on the next
+      // offline/online event — so the button contradicted the note under it. Re-apply it now.
+      reflectOffline();
     }
     function renderRecBtn(t0) {
       if (rec && rec.state === "recording") {
@@ -295,6 +320,16 @@
     sendBtn.onclick = async function () {
       var subject = subj.value.trim();
       if (!subject) { setStatus("Please add a subject.", "err"); subj.focus(); return; }
+      // A PHOTO OR VOICE NOTE IS NEVER DROPPED IN SILENCE (sweep #10 T16 round 2, item 20). With no
+      // signal the attachments cannot be uploaded, and this used to queue the ticket WITHOUT them and
+      // say "Saved — will send when you reconnect ✓" — so a manager who photographed the broken fridge
+      // believed the photo had gone with it. Now Send says so and keeps the attachment: remove it to
+      // save the ticket as it is, or press Send again once the signal is back.
+      if (!online() && (imageFile || audioBlob)) {
+        var what = imageFile && audioBlob ? "photo and voice note" : imageFile ? "photo" : "voice note";
+        setStatus("You're offline, so the " + what + " can't go with it yet. Remove it to save the ticket now, or press Send again when you're back online.", "err");
+        return;
+      }
       sendBtn.disabled = true; photoBtn.disabled = true; recBtn.disabled = true;
       var imageUrl = null, audioUrl = null;
       try {

@@ -216,6 +216,52 @@
     }
     const t = (p.match(/\/tables\/([^/]+)/) || [])[1];
     const table = t ? " · Table " + decodeURIComponent(t) : "";
+    // EVERY CHANGE THE PANELS QUEUE HAS A NAME A PERSON CAN READ (sweep #10 T16 round 2, item 21).
+    // The panels never pass a label — this function names every change on the "saved on this device"
+    // sheet and the connection panel — and 53 of the 75 write paths the three panels really send fell
+    // through to the fallback below, which joined the last two pieces of the address: a waiter saw
+    // "3f2a9c1e-77aa-4c1b-9d10-5b6c7d8e9f00 move" or "7 on-the-house" on the very screen whose job is
+    // to say plainly what is still waiting. Two were also WRONG: a delivery-app order's status and a
+    // dish's progress on an order both read "Update availability", and paying off a Pay Later account
+    // read "Settle bill". Each entry is matched before the older rules below; first match wins.
+    const NAMED = [
+      [/\/platform\/[^/]+\/status$/, "Update a delivery-app order"], [/\/platform\/[^/]+\/printed$/, "Mark a delivery-app order printed"],
+      [/\/platform\/[^/]+\/pay$/, "Settle a delivery-app order"], [/\/platform\/test$/, "Send a test delivery-app order"],
+      [/\/(order-)?items\/[^/]+\/status$/, "Update a dish on an order"], [/\/orders\/[^/]+\/item$/, "Update a dish on an order"],
+      [/\/items\/[^/]+\/qty$/, "Change a dish's quantity"], [/\/items\/[^/]+\/note$/, "Change a dish's note"],
+      [/\/items\/[^/]+\/removed$/, "Change what's left out of a dish"], [/\/items\/[^/]+\/delete$/, "Remove a dish from an order"],
+      [/\/order-items\/[^/]+\/move$/, "Move a dish to another table"], [/\/orders\/[^/]+\/move$/, "Move an order to another table"],
+      [/\/orders\/[^/]+\/add-item$/, "Add a dish to an order"], [/\/orders\/[^/]+\/tip$/, "Add a tip"],
+      [/\/orders\/[^/]+\/unready$/, "Mark not ready"], [/\/orders(\/[^/]+)?\/delete$/, "Remove an order"],
+      [/\/calls\/[^/]+\/reopen$/, "Reopen a waiter call"], [/\/calls\/[^/]+\/attend$/, "Attend a waiter call"],
+      [/\/members\/[^/]+\/approve$/, "Let a guest join the table"], [/\/members\/[^/]+\/remove$/, "Remove a guest from the table"],
+      [/\/members\/[^/]+\/make-head$/, "Make a guest the table's host"], [/\/requests\/[^/]+\/resolve$/, "Answer a guest's request"],
+      [/\/sessions\/[^/]+\/void-invoice$/, "Void invoice"], [/\/sessions\/[^/]+\/credit-note$/, "Issue a credit note"],
+      [/\/sessions\/[^/]+\/reopen-table$/, "Reopen a closed table"], [/\/sessions\/[^/]+\/merge$/, "Merge tables"],
+      [/\/sessions\/[^/]+\/auto-approve$/, "Change auto-approve for a table"],
+      [/\/tables\/[^/]+\/unmerge$/, "Split merged tables" + table], [/\/tables\/[^/]+\/tag$/, "Tag a table" + table],
+      [/\/tables\/[^/]+\/pay-split$/, "Settle bill in parts" + table], [/\/tables\/[^/]+\/on-the-house$/, "Put a bill on the house" + table],
+      [/\/tables\/[^/]+\/loyalty-redeem$/, "Redeem loyalty points" + table], [/\/tables\/[^/]+\/loyalty$/, "Add a loyalty member" + table],
+      [/\/tables\/[^/]+\/khata$/, "Put on Pay Later" + table], [/\/tables\/[^/]+\/restart$/, "Restart table" + table],
+      [/\/(tables\/[^/]+\/)?customer-capture$/, "Save the guest's details" + table],
+      [/\/loyalty-redeem$/, "Redeem loyalty points"], [/\/loyalty$/, "Add a loyalty member"], [/\/khata\/pay$/, "Record a Pay Later payment"],
+      [/\/print\/send$/, "Print"], [/\/print-jobs\/[^/]+\/done$/, "Mark a print done"], [/\/print-jobs\/[^/]+\/dismiss$/, "Dismiss a stuck print"],
+      [/\/print-jobs$/, "Print a kitchen slip"], [/\/print-station\/take$/, "Make this screen the printer"], [/\/printer-events$/, "Report a printer problem"],
+      [/\/ratings\/ack$/, "Mark ratings as seen"], [/\/banquet\/item-save$/, "Save a banquet dish"], [/\/banquet\/item-delete$/, "Remove a banquet dish"],
+      [/\/banquet\/bill$/, "Bill a banquet"], [/\/parcel$/, "Place a parcel order"], [/\/table-sections$/, "Save table sections"],
+      [/\/settings$/, "Save a setting"], [/\/audit\/classify$/, "Record whether it was cooked"], [/\/issue$/, "Report an issue"],
+      [/\/blocklist$/, "Ban a guest"],
+    ];
+    for (let i = 0; i < NAMED.length; i++) if (NAMED[i][0].test(p)) return NAMED[i][1];
+    // The menu editor saves and removes its records through one door each ("/" + kind): a dish, a
+    // category, a filter. Named by kind, so "Items" and "Remove items" never reach the screen.
+    const KIND = { items: "dish", categories: "category", filters: "filter" };
+    const km = p.match(/^\/(items|categories|filters)(\/[^/]+)?$/);
+    if (km && base === "/api/editor") return (method === "DELETE" ? "Remove a " : "Save a ") + KIND[km[1]];
+    if (method === "DELETE" && /\/blocklist\//.test(p)) return "Lift a ban";
+    if (method === "PATCH" && /\/calls\/[^/]+$/.test(p)) return "Mark a waiter call handled";
+    if (method === "PATCH" && /\/orders\/[^/]+$/.test(p)) return "Update an order";
+    if (method === "DELETE" && /\/orders\/[^/]+$/.test(p)) return "Remove an order";
     if (/\/order$/.test(p)) return "Place order";
     if (/\/banquet\/place$/.test(p)) return "Place banquet order";
     if (/\/pay$/.test(p)) return "Settle bill" + table;
@@ -230,9 +276,13 @@
     if (/\/shift$/.test(p)) return "Shift table" + table;
     if (/\/close$/.test(p)) return "Close table" + table;
     if (/\/open/.test(p)) return "Open table" + table;
-    // fallback: METHOD last-segment
-    const seg = p.split("/").filter(Boolean).slice(-2).join(" ");
-    return (method === "DELETE" ? "Delete " : "") + (seg || "Action");
+    // FALLBACK — words only, never an id (item 21). The last piece of the address that is not an id or
+    // a table number, its dashes turned to spaces: "/banquet/new-thing" → "New thing". A path made of
+    // nothing else reads "A change", and a removal says so.
+    const words = p.split("/").filter(Boolean).filter((x) => !/^[0-9a-f-]{8,}$|^\d+$/i.test(x) && x !== "api");
+    const last = (words.pop() || "").replace(/[-_]+/g, " ").trim();
+    const name = last ? last.charAt(0).toUpperCase() + last.slice(1) : "A change";
+    return method === "DELETE" ? (last ? "Remove " + last : "Remove something") : name;
   }
 
   // Which TABLE does this action belong to? Used to show, on the table itself, that
@@ -419,8 +469,17 @@
   // { note: "more spicy" }. It travels with the write so the server can refuse instead of
   // silently overwriting a change someone else made on another device in the meantime.
   // Used by the dish-edit modal in both staff panels; see lib/clash.ts fieldClash().
+  // TWO CHANGES MADE IN THE SAME MILLISECOND MUST NOT TIE (sweep #10 T16 round 2, item 17). `at` is the
+  // ONLY thing that orders the queue once it is read back from the device (boot) or a refused change is
+  // put back in its place (requeueInOrder) — and every id is random. So three changes queued in one
+  // instant (a screen that sends several at once with no signal) came back after a reload in the order
+  // of their random ids: driven, 16 reloads in 20 replayed A, B, C as B, A, C or C, A, B. Each change
+  // now gets a time strictly after the one before it — the real clock, or one millisecond past the last
+  // if the clock has not moved — so the order it was made in is the order it is kept in.
+  let lastAt = 0;
+  function nextAt() { const n = Date.now(); lastAt = n > lastAt ? n : lastAt + 1; return lastAt; }
   async function send({ base, method, path, body, panel, label, expect, table }) {
-    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path, base), at: Date.now(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
+    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path, base), at: nextAt(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
     // WHICH TABLE, ON EVERY ROW. The "Needs you" / "Saved on this device" sheet lists changes by
     // label, and a call site that passes its own label ("Set table tag", "Place order") named no
     // table at all — so two changes on tables 5 and 7 rendered as two identical rows with nothing

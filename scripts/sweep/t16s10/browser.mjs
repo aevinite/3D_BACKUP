@@ -6,14 +6,18 @@
 // Every /api/* request is answered by the scenario's own handler, or refused with 599 so a check can
 // never reach a real route by accident.
 import { chromium } from "playwright";
+import { covStart, covStop, covFlush } from "./cov.mjs";
 
 export const BASE = process.env.T16_BASE || "http://localhost:4416";
 export const SITE = process.env.T16_SITE || "https://3-d-backup.vercel.app";
 let browser = null;
 export async function getBrowser() { if (!browser) browser = await chromium.launch(); return browser; }
-export async function closeBrowser() { if (browser) { await browser.close(); browser = null; } }
+export async function closeBrowser() { await covFlush(); if (browser) { await browser.close(); browser = null; } }
 const siteBytes = new Map();
 export async function siteFile(path) {
+  // A mutation run (./mutate.mjs) judges a broken LOCAL copy; the deployed bytes say nothing about it,
+  // and hundreds of runs fetching them made the backup site answer 403 once (round 2). So it never asks.
+  if (process.env.T16_MUT) throw new Error("skip: reads the deployed site — not part of a mutation run");
   if (!siteBytes.has(path)) {
     const r = await fetch(SITE + path, { signal: AbortSignal.timeout(20000) });
     siteBytes.set(path, { status: r.status, type: r.headers.get("content-type") || "", body: await r.text(), cache: r.headers.get("cache-control") || "" });
@@ -24,6 +28,9 @@ export const PACE = "window.LFH_TEST_PACING={first:200,base:300,max:600,wake:40,
 
 /** harness({ scripts, pre, body, from, viewport, reducedMotion, api, offline }) */
 export async function harness(o = {}) {
+  // A page built from the DEPLOYED site's files says nothing about a broken local copy — skip it in a
+  // mutation run, here inside the check (a throw from inside the page's request handler would crash).
+  if (o.from === "site" && process.env.T16_MUT) throw new Error("skip: reads the deployed site — not part of a mutation run");
   const ctx = await (await getBrowser()).newContext({
     viewport: o.viewport || { width: 1280, height: 800 },
     deviceScaleFactor: o.dpr || 1, hasTouch: !!o.touch, isMobile: !!o.touch,
@@ -35,6 +42,11 @@ export async function harness(o = {}) {
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script>${o.pre || ""}</script>${o.head || ""}</head><body>${o.body || ""}${(o.scripts || []).map((s) => { const [f, attrs] = s.split("|"); return `<script src="/panels/${f}"${attrs ? " " + attrs : ""}></script>`; }).join("")}${o.after ? `<script>${o.after}</script>` : ""}</body></html>`;
   await page.route(/\/__t16\/h\.html(\?.*)?$/, (r) => r.fulfill({ contentType: "text/html; charset=utf-8", body: html }));
   if (o.pages) for (const [p, h] of Object.entries(o.pages)) await page.route(`**${p}`, (r) => r.fulfill({ contentType: "text/html; charset=utf-8", body: h }));
+  // MUTATION RUNS (./mutate.mjs): the one panel file under test is answered with the broken copy.
+  if (process.env.T16_MUT_REL && process.env.T16_MUT_REL.startsWith("public/panels/") && o.from !== "site") {
+    const f = process.env.T16_MUT_REL.slice("public/panels".length), body = (await import("node:fs")).readFileSync(process.env.T16_MUT, "utf8");
+    await page.route(new RegExp(f.replace(/[.]/g, "\\.") + "(\\?.*)?$"), (r) => r.fulfill({ contentType: "application/javascript; charset=utf-8", body }));
+  }
   if (o.from === "site") {
     await page.route(/\/panels\/[a-z0-9\-]+\.js(\?.*)?$/, async (r) => {
       const u = new URL(r.request().url()), f = await siteFile(u.pathname);
@@ -50,8 +62,9 @@ export async function harness(o = {}) {
     return r.fulfill({ status: 599, contentType: "application/json", body: '{"error":"t16 harness: no handler"}' });
   });
   if (o.before) await o.before(page);   // routes / a fake clock that must exist BEFORE the page's scripts run
+  await covStart(page);                  // no-op unless T16_COV is set (./cov.mjs)
   await page.goto(BASE + (o.path || "/__t16/h.html"), { waitUntil: "load" });
-  return { page, ctx, errors, sent, close: () => ctx.close().catch(() => {}) };
+  return { page, ctx, errors, sent, close: async () => { await covStop(page); await ctx.close().catch(() => {}); } };
 }
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function until(fn, ms = 6000, step = 60) { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch {} await sleep(step); } return false; }

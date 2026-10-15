@@ -22,6 +22,8 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+// Coverage for sweep #10 T16 round 2 (scripts/sweep/t16s10/cov.mjs) — a no-op unless T16_COV is set.
+import { covStart, covStop } from "./sweep/t16s10/cov.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0, fail = 0;
@@ -40,6 +42,7 @@ if (process.argv.some((a) => a === "--base" || a.startsWith("--base="))) console
 
 const browser = await chromium.launch();
 const page = await (await browser.newContext()).newPage();
+await covStart(page);
 page.on("pageerror", (e) => bad("the panel threw", String(e).slice(0, 120)));
 const onPanel = async () => { await page.goto(BASE + "/start"); await page.goto(BASE + "/panel"); await page.waitForFunction(() => !!window.LFH_BACK); };
 const stillOnPanel = () => /\/panel$/.test(page.url());
@@ -115,6 +118,7 @@ await onPanel();
 await page.goBack();
 if (/\/start$/.test(page.url())) ok("an empty stack lets Back leave, as designed"); else bad("Back with nothing open did not leave", page.url());
 
+await covStop(page);
 await browser.close();
 server.close();
 console.log(`\n${fail ? "❌" : "✅"} panel back button: ${pass} passed, ${fail} failed\n`);

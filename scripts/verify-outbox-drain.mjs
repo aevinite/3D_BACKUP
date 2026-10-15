@@ -36,6 +36,8 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+// Coverage for sweep #10 T16 round 2 (scripts/sweep/t16s10/cov.mjs) — a no-op unless T16_COV is set.
+import { covStart, covStop } from "./sweep/t16s10/cov.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0, fail = 0;
@@ -80,6 +82,13 @@ const server = http.createServer((req, res) => {
       <script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });</script>
       <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>
       <script>document.addEventListener("DOMContentLoaded", function () { window.__r = window.LFH_OUTBOX.send({ base: "", method: "POST", path: "/api/editor/tables/3/pay", body: {}, label: "Settle bill" }); });</script>`);
+  }
+  // THE SAME-INSTANT PAGE (section 16): the queue with no signal, so three changes made at once stay queued.
+  if (req.url === "/page-tie") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(`<!doctype html><meta charset="utf-8"><body><div class="topbar">panel</div>
+      <script>Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });</script>
+      <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>`);
   }
   if (req.url === "/page-boot") {
     res.writeHead(200, { "content-type": "text/html" });
@@ -161,6 +170,7 @@ if (process.argv.some((a) => a === "--base" || a.startsWith("--base="))) {
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
+await covStart(page);
 page.on("pageerror", (e) => bad("the panel threw", String(e).slice(0, 120)));
 
 const fresh = async () => {
@@ -496,6 +506,80 @@ if (!raceMissed) ok("the change is still in the list, every time (4 of 4)"); els
 if (!raceNoTimer) ok("…and it has a next attempt scheduled"); else bad(`no next attempt was scheduled ${raceNoTimer} time(s) in 4`);
 await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
 
+// ── 16. changes made in the same instant keep their order across a reload ────────────────────
+// Sweep #10 T16 round 2, item 17. Every queued change has a random id, and once the queue is read back
+// from the device it is ordered by its time alone — so three changes made in one millisecond came back
+// in the order of their ids: 16 reloads in 20 replayed A, B, C wrongly. Each change now gets a time
+// strictly after the last.
+console.log("\n16) Three changes made in the same instant, then a reload");
+let tieWrong = 0, tieSame = 0;
+for (let i = 0; i < 8; i++) {
+  await page.goto(BASE + "/page-tie", { waitUntil: "load" });
+  await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => !!window.LFH_OUTBOX);
+  const n = await page.evaluate(async () => {
+    const s = (x) => window.LFH_OUTBOX.send({ base: "", method: "POST", path: "/api/editor/tables/1/" + x, body: {}, label: x });
+    await Promise.all([s("A"), s("B"), s("C")]);
+    return new Set(window.LFH_OUTBOX.getSnapshot().queued.map((x) => x.at)).size;
+  });
+  if (n < 3) tieSame++;
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => !!window.LFH_OUTBOX); await wait(250);
+  const o = await page.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.map((x) => x.label[0]).join(""));
+  if (o !== "ABC") tieWrong++;
+}
+if (!tieSame) ok("no two of them share a time (8 of 8)"); else bad(`two changes shared a time ${tieSame} time(s) in 8`);
+if (!tieWrong) ok("…and after a reload they are still in the order they were made (8 of 8)"); else bad(`after a reload the order was wrong ${tieWrong} time(s) in 8`);
+await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
+
+// ── 17. every change the panels queue has a name a person can read (item 21, round 2) ─────────
+// The panels never pass a label, so labelFor() names every queued change on the "saved on this
+// device" sheet and the connection panel. Round 2 found 53 of the 75 write paths the three panels
+// send reading like "3f2a9c1e-77aa… move" or "7 on-the-house". DERIVED, not typed: every
+// api("POST"|"PATCH"|"PUT"|"DELETE", path) call in the three panels is read from their own code
+// today, ids filled in with a real-looking uuid and table numbers with 7, so a new call site is
+// checked the day it lands. A label must start with a capital, carry no id, no bare number and no
+// raw path piece.
+console.log("\n17) Every change the three panels can queue has a readable name");
+{
+  const { readFileSync: rf } = await import("node:fs");
+  const vm = await import("node:vm");
+  const OB = rf(join(ROOT, "public/panels/outbox.js"), "utf8");
+  const i0 = OB.indexOf("  function labelFor("), i1 = OB.indexOf("\n  }\n", i0) + 4;
+  const labelFor = vm.runInNewContext("(function(){" + OB.slice(i0, i1) + "; return labelFor; })()");
+  const U = "3f2a9c1e-77aa-4c1b-9d10-5b6c7d8e9f00";
+  const seen = new Map();
+  for (const [panel, base] of [["editor", "/api/editor"], ["tablet", "/api/tablet"], ["kitchen", "/api/kitchen"]]) {
+    const src = rf(join(ROOT, `public/panels/${panel}/app.js`), "utf8");
+    for (const m of src.matchAll(/api\(\s*"(POST|PATCH|PUT|DELETE)",\s*([`"'])([^`"']+)\2(\s*\+\s*([^,)]+))?/g)) {
+      // The piece after /tables/ is always a table NUMBER in these APIs (whatever the variable is called).
+      let path = m[3].replace(/\/tables\/\$\{[^}]*\}/g, "/tables/7").replace(/\$\{[^}]*(table|tbl|\bt\b|num)[^}]*\}/gi, "7").replace(/\$\{[^}]*\}/g, U);
+      if (m[4]) { const rest = m[5]; if (/kind|state\.tab/.test(rest)) path = path + "items"; else if (/"\/"\s*\+\s*\(?kind/.test(rest)) path = path + "approve"; else path = path + (/\bt\b|table/.test(rest) ? "7" : U) + ((rest.match(/"(\/[a-z-]+)"/) || [])[1] || ""); }
+      if (path.endsWith("/")) path += U;
+      seen.set(`${m[1]} ${base}${path}`, { method: m[1], base, path });
+    }
+  }
+  const bad = [];
+  for (const [k, v] of seen) {
+    const l = labelFor(v.method, v.path, v.base);
+    if (!/^[A-Z]/.test(l) || /[0-9a-f]{8}-[0-9a-f]{4}/i.test(l) || /\b\d+ [a-z]/.test(l) || /\/|_/.test(l)) bad.push(`${k.replace(U, "<id>")} → "${l.replace(U, "<id>")}"`);
+  }
+  if (seen.size >= 60) ok(`${seen.size} write calls read from the three panels' own code`); else bad.push(`only ${seen.size} write calls were found — the reader is broken, not the panels`);
+  if (!bad.length) ok("…every one of them has a readable name (a capital, no id, no bare number, no raw path)");
+  else {
+    for (const b of bad.slice(0, 12)) console.log("     " + b);
+    fail++; console.log(`  ❌ ${bad.length} change(s) would be shown with an unreadable name (first ${Math.min(12, bad.length)} above)`);
+  }
+  // …and the two that used to say something FALSE now say the right thing.
+  const wrong = [["POST", "/platform/" + U + "/status", "Update a delivery-app order"], ["POST", "/items/" + U + "/status", "Update a dish on an order"], ["POST", "/khata/pay", "Record a Pay Later payment"]]
+    .filter(([m, p, want]) => labelFor(m, p, "/api/editor") !== want);
+  if (!wrong.length) ok("…and a delivery-app order, a dish's progress and a Pay Later payment are no longer 'Update availability' / 'Settle bill'");
+  else bad_(wrong);
+  function bad_(w) { fail++; console.log(`  ❌ still named wrongly: ${w.map((x) => x[1].replace(U, "<id>") + " → " + labelFor(x[0], x[1], "/api/editor")).join(" · ")}`); }
+}
+
+await covStop(page);
 await browser.close();
 server.close();
 console.log(`\n${fail ? "❌" : "✅"} outbox drain: ${pass} passed, ${fail} failed\n`);

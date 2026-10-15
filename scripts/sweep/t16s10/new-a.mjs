@@ -4,7 +4,8 @@
 // same-origin harness; netretry is driven in a Node vm with a scripted fetch and a recorded clock.
 /* eslint-disable @typescript-eslint/no-unused-vars -- a check suite: helpers are imported whole */
 import vm from "node:vm";
-import { R, ok, eq, assert, tag, src, code } from "./lib.mjs";
+import { R, ok, eq, assert, tag, src, code, ROOT } from "./lib.mjs";
+import { join } from "node:path";
 import { harness, memo, sleep } from "./browser.mjs";
 
 const done = tag("new-a");
@@ -182,13 +183,13 @@ function loadNR({ responses, onLine = true, hasTimeout = true, randoms = [0.5] }
     AbortSignal: hasTimeout ? { timeout: (ms) => ({ aborted: false, deadlineMs: ms }) } : {},
     fetch: async (url, opts) => { calls.push({ url, opts }); const n = responses.shift(); if (n === undefined) throw new Error("no more scripted answers"); if (typeof n === "function") return n(opts); if (n instanceof Error) throw n; return n; },
   };
-  ctx.window = ctx; vm.createContext(ctx); vm.runInContext(src(NR), ctx);
+  ctx.window = ctx; vm.createContext(ctx); vm.runInContext(src(NR), ctx, { filename: join(ROOT, "public/panels", NR) });
   return { f: ctx.window.LFH_NET.fetch, calls, waits };
 }
 const res = (status) => ({ status });
 const down = () => Object.assign(new Error("Failed to fetch"), { name: "TypeError" });
 const NN = (what, fn) => N(NR, what, fn, "node vm: the real netretry.js, a scripted fetch, a recorded clock");
-NN("it publishes exactly one thing: LFH_NET.fetch", async () => { const c = { navigator: {}, Promise, Object, Math, setTimeout, AbortSignal: {}, fetch: async () => res(200) }; c.window = c; vm.createContext(c); vm.runInContext(src(NR), c); return eq(Object.keys(c.window.LFH_NET), ["fetch"]); });
+NN("it publishes exactly one thing: LFH_NET.fetch", async () => { const c = { navigator: {}, Promise, Object, Math, setTimeout, AbortSignal: {}, fetch: async () => res(200) }; c.window = c; vm.createContext(c); vm.runInContext(src(NR), c, { filename: join(ROOT, "public/panels", NR) }); return eq(Object.keys(c.window.LFH_NET), ["fetch"]); });
 NN("a healthy GET is ONE request, with no wait", async () => { const t = loadNR({ responses: [res(200)] }); const r = await t.f("/a"); return ok(r.status === 200 && t.calls.length === 1 && t.waits.length === 0, `${t.calls.length} call(s), waits ${t.waits.join(",")}`); });
 NN("a POST is sent exactly ONCE, even when it fails at the network", async () => { const t = loadNR({ responses: [down()] }); let threw = false; try { await t.f("/a", { method: "POST" }); } catch { threw = true; } return ok(threw && t.calls.length === 1); });
 NN("…a POST that answers 503 is handed back as it is, never re-sent", async () => { const t = loadNR({ responses: [res(503)] }); const r = await t.f("/a", { method: "POST" }); return ok(r.status === 503 && t.calls.length === 1); });
@@ -217,7 +218,7 @@ NN("…ONE ceiling for all the attempts, not one each", async () => { const t = 
 NN("a caller's own signal is used, never replaced", async () => { const mine = { aborted: false }; const t = loadNR({ responses: [res(200)] }); await t.f("/a", { signal: mine }); return ok(t.calls[0].opts.signal === mine); });
 NN("the caller's options object is not mutated when the ceiling is added", async () => { const o = { method: "GET" }; const t = loadNR({ responses: [res(200)] }); await t.f("/a", o); return ok(!("signal" in o)); });
 NN("a phone with no AbortSignal.timeout still reads (no ceiling, no crash)", async () => { const t = loadNR({ responses: [res(200)], hasTimeout: false }); const r = await t.f("/a"); return ok(r.status === 200 && !t.calls[0].opts); });
-NN("a phone whose AbortSignal.timeout THROWS still reads", async () => { const c = { navigator: { onLine: true }, Promise, Object, Math, Error, setTimeout: (f) => f(), AbortSignal: { get timeout() { throw new Error("nope"); } }, fetch: async () => res(200) }; c.window = c; vm.createContext(c); vm.runInContext(src(NR), c); return ok((await c.window.LFH_NET.fetch("/a")).status === 200); });
+NN("a phone whose AbortSignal.timeout THROWS still reads", async () => { const c = { navigator: { onLine: true }, Promise, Object, Math, Error, setTimeout: (f) => f(), AbortSignal: { get timeout() { throw new Error("nope"); } }, fetch: async () => res(200) }; c.window = c; vm.createContext(c); vm.runInContext(src(NR), c, { filename: join(ROOT, "public/panels", NR) }); return ok((await c.window.LFH_NET.fetch("/a")).status === 200); });
 NN("when OUR ceiling fires, the error is named TimeoutError and reads in English", async () => { const t = loadNR({ responses: [(opts) => { opts.signal.aborted = true; throw Object.assign(new Error("signal timed out"), { name: "TimeoutError" }); }] }); try { await t.f("/a"); return false; } catch (e) { return ok(e.name === "TimeoutError" && e.message === "the server didn't answer in time" && e.timeout === true, e.message); } });
 NN("…but a CALLER's own abort keeps the caller's error exactly", async () => { const mine = { aborted: true }; const t = loadNR({ responses: [Object.assign(new Error("user went away"), { name: "AbortError" })] }); try { await t.f("/a", { signal: mine }); return false; } catch (e) { return ok(e.message === "user went away"); } });
 NN("a ceiling that has already fired stops the retries at once", async () => { const t = loadNR({ responses: [(o) => { o.signal.aborted = true; throw down(); }, res(200)] }); try { await t.f("/a"); return false; } catch (e) { return ok(t.calls.length === 1, `${t.calls.length} call(s)`); } });

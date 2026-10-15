@@ -14,7 +14,7 @@
      • their own pay — salary, what was paid this month, their payment history, any advance
        still to recover. The owner can switch this off per person (can_see_own_pay).
      • their job as read-only facts (joined, designation, shift, weekly off).
-   Nothing is compulsory: the header shows "5 of 8 filled" and every field can be left blank.
+   Nothing is compulsory: the header shows "5 of 8 key details added" and every field can be left blank.
    REJECTED (owner, 2026-10-11) — docs/REJECTED-IDEAS.md → R68: this page does NOT hold the
    waiter's section ("who serves which table"); that stays on Manager settings → Sections. And
    REJECTED (owner, 2026-10-11) — R67: it never lists a permission, given or not given.
@@ -139,8 +139,12 @@
       '<div class="me-mut">' + esc(me.role === "tablet" ? "waiter" : me.role) + " · " + esc(me.username) +
       (job.joined_on ? " · joined " + dateIN(job.joined_on) : "") + "</div></div></div>";
     h += '<div class="me-card me-prog"><div class="me-bar"><i style="width:' + pct + '%"></i></div>' +
-      "<div><b>" + c.filled + " of " + c.total + " details filled</b>" +
-      '<div class="me-mut">' + (c.filled >= c.total ? "All done — thank you." : "Nothing here is compulsory. Fill what you can; you can finish later.") +
+      // The count is of the KEY details only (lib/staffProfileShared.ts), while the screen shows more
+      // boxes than that — so "0 of 8 details filled" over a dozen boxes read like a score the person
+      // was failing (sweep #10 T16 round 2, owner 2026-10-15). It now says what the number counts,
+      // and a person who has added nothing yet is invited, not counted.
+      "<div><b>" + (c.filled <= 0 ? "No details added yet" : c.filled >= c.total ? "All " + c.total + " key details added" : c.filled + " of " + c.total + " key details added") + "</b>" +
+      '<div class="me-mut">' + (c.filled >= c.total ? "Thank you — that's everything." : "Nothing here is compulsory. Add what you like, whenever you like.") +
       "</div></div></div>";
 
     // ── your money (only if the owner allows this person to see it) ───────────
@@ -233,6 +237,14 @@
         expect: me.id ? { table: "staff_users", id: me.id, fields: { "profile.notes": (me.profile || {}).notes ?? null } } : null,
       });
       queued = queued || res2.queued;
+      // WHAT THIS DEVICE SENT IS NOW WHAT IT EDITS FROM (sweep #10 T16 round 2, item 19). The next
+      // save's `expect` reads me.phone; it was only ever refreshed by the re-read below, so when that
+      // read failed — or the save was kept on the device — a second save (adding an email, say) sent
+      // the phone AGAIN, marked as edited from the OLD number. Once the first write had landed the
+      // server's clash rule (lib/clash.ts) refused it: "Someone else changed Phone while you had it
+      // open" — about the person's own change, and on a live save it read "Not saved".
+      me.phone = phone;
+      me.profile = Object.assign({}, me.profile || {}, profile);
       if (queued) {
         if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
         tell("Saved on this device — it will sync when you're back online.", "Saved here for now");
@@ -249,10 +261,16 @@
       //
       // If the refresh cannot be had, the button keeps saying Saved ✓ and the fields keep what was
       // typed — which is exactly what is true. The next open reads it fresh.
+      // …AND A RE-READ THAT GETS NO ANSWER IS NOT A REASON TO WIPE THE SCREEN (sweep #10 T16 round 2,
+      // item 18). Round 1 (item 8) taught render() to say "Couldn't load your profile just now" when a
+      // read fails — and this re-read is a read, so a busy moment straight after a save replaced the
+      // form and its "Saved ✓" with that sentence, about a save the server had accepted. A failed
+      // re-read now keeps what is on screen, exactly as the note above promises.
+      var held = me;
       try {
         await load();
-        render();
-      } catch (e) { /* saved; only the read back failed. Nothing to correct and nothing to confess. */ }
+        if (readFailed) { readFailed = false; me = held; if (btn) btn.disabled = false; } else render();
+      } catch (e) { readFailed = false; me = held; if (btn) btn.disabled = false; /* saved; only the read back failed. Nothing to correct and nothing to confess. */ }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
       tell(e && e.message ? e.message : "Couldn't save. Please try again.", "Not saved");

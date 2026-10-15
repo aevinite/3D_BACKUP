@@ -25,3 +25,40 @@ One commit per item, the number in the message. Every fix has a guard that goes 
 - Manager panel → `LFH_BACK.layer("table-detail", …)` called unguarded (harmless, backstack loads first) — T6–T8.
 - `lib/backStack.ts` (the React twin of backstack.js) may carry the same rewind-race shape as item 3 — not checked here.
 - Generated ledger `T20-S8.md` rows P73981 / P74195 (auditsort) are re-run by `verify:bin-billing-usage`, not by hand.
+
+---
+
+# Round 2 (owner, 2026-10-15: "do all five … replan the whole test … make sure everything should be covered")
+
+All on `sweep10/t16-round2`, one commit per item, each with a guard that goes red on the old code.
+
+| # | what a person lost (or got) | file | how it was confirmed | guard |
+|---|---|---|---|---|
+| 11 | **Report an issue** refused a new phone's 8-12 MB photo with "Photo must be 5 MB or smaller". It is now made smaller and attached. | `issue-raise.js` | driven: a 9 MB photo attaches, a WebP under 5 MB travels | `verify:panel-helpers-driven` §1 |
+| 12 | **My profile & pay** said "0 of 8 details filled" over a dozen boxes. Now "No details added yet" / "3 of 8 key details added". | `myprofile.js` | driven at 0, 3, 8 | §4 |
+| 13 | "Person (A–Z)" opened on a block of nameless rows. A blank now sorts LAST in every A–Z sort. | `auditsort.js` | driven on both lists | §5 |
+| 14 | A first-login save made with **no signal** left the card un-closable until the internet returned. | `maint.js` | driven offline | §3 |
+| 15 | **Owner → Settings → Guest menu** — the owner's own maintenance switch (Live / Offline, asks first). At the default ("Owner only") nobody at the restaurant could take the menu down before this. | `app/owner/settings/page.tsx`, `app/api/owner/settings`, `lib/maintenance.ts` | driven in memory + the real page at 1280/390, both skins looked at | `verify:guest-menu-switch` |
+| 16 | Every **manager** saw "Take guest menu offline" even when it was not handed to them (the confirm then said "ask your admin"). | `maint.js`, `app/api/maintenance` | driven | `verify:guest-menu-switch` §1, helpers §2 |
+| 17 | Changes queued in the **same instant** came back in a random order after a reload (16 of 20). | `outbox.js` | driven | `verify:outbox` §16 |
+| 18 | **REGRESSION from round 1 (item 8):** a busy re-read right after a save replaced My profile & pay with "Couldn't load your profile", about a save the server had kept. | `myprofile.js` | driven | helpers §6 |
+| 19 | A second save on My profile & pay could be refused as "someone else changed your phone" — the person's own change. | `myprofile.js` | driven against the shipped clash rule | helpers §6 |
+| 20 | **Report an issue** sent with no signal dropped the photo / voice note and still said "Saved ✓". | `issue-raise.js` | driven: `image_url: null` | helpers §7 |
+| 21 | 53 of the 75 changes the panels can queue were named like "3f2a9c1e-77aa… move" on the saved-on-this-device sheet; two said the wrong thing ("Update availability", "Settle bill"). | `outbox.js` | every api() write in the three panels read from their code (103) | `verify:outbox` §17 |
+| 22 | Dead `debounce()` in realtime.js (nothing could run it). | `realtime.js` | coverage | `verify:panel-plumbing` (no declared-but-unused helper) |
+| 23 | With no signal, removing a photo / voice note left its button ON, contradicting the offline note. | `issue-raise.js` | found by mutation | helpers §7 |
+| 24 | Dead `off` flag in connbadge.js (computed, never read). | `connbadge.js` | found by mutation | `verify:panel-plumbing` (now every variable) |
+
+## How "everything covered" was measured
+
+- **Coverage** (`scripts/sweep/t16s10/cov.mjs`): V8 coverage of every suite and my browser guards. Never-run lines went **~244 → 0 reachable**. What is left cannot run in a browser that runs these panels (a group after an always-true group, a `globalThis`-less browser, a page with no body) or navigates the page away before a record can be taken (Sign out / signed-out-mid-tap — driven and green: P185622–P185626, P185829–P185831).
+- **Mutation** (`scripts/sweep/t16s10/mutate.mjs`): one deliberate break at a time in a COPY, only checks that RUN the file, a control first. **510 breaks tried, 459 caught**, 1 removed as dead code (item 24), 1 duplicate after a line shift. Five passes until a pass found nothing new.
+
+## The 49 breaks no check catches — and why none can matter
+
+- **`return null` → `undefined`** (11): every caller asks only "is there one?" (`if (!x)` / `== null`). outbox 325, offline 310/319, connbadge 20/237, theme 18, fitnums 148/150, guestbell 235, swipehint 27, shrinkimg 66.
+- **A capability test inside a `try`** (6): if it misjudges, the `catch` lands on the same fallback. netretry 68, realtime 104, offline 593, fitnums 129, errlog 283, issue-raise 198.
+- **A boundary only an exact value reaches** (15): a 1 px tolerance (swipehint 77/91/92/98), the 4 px "moved" mark that only gates the 60 px flick (undobar 184 ×2), exactly 0 ms left (undobar 300), exactly 180 KB / the same byte size (shrinkimg 93/99), a zero-iteration loop (backstack 50), a Back with nothing open that leaves the document (backstack 68), a loop index one past the end that `watch()` already ignores (swipehint 121), and two always-present DOM methods (swipehint 119/136).
+- **A value nobody reads** (5): `ensureClient()`'s three return values (realtime 281/285/289 — every caller ignores them), the pop's re-render signature, which changes either way (connbadge 281), a `console.error` text (owner/settings 256).
+- **Reached only by input a browser never produces** (7): a bitmap of height 0 (shrinkimg 90), computed font size not in px (fitnums 58), nowrap already set (fitnums 28), the minimum-size loop that the next line ends anyway (fitnums 74), the tooltip rule on an element with children (fitnums 104), a keyless row's `at` fallback when it has an id (guestbell 87), the older start style handing each topic the same no-op (realtime 183).
+- **Unreachable by construction** (5): offline 66 (the bar returns for "offline" before asking), auditsort 378 / 498 (an always-true last group; the `window` fallback where `globalThis` exists), errlog 278 (the final `|| ""` when every earlier name is empty), client-error 230 (`where || null` when the screen name always answers), issue-raise 386 (the history entry is already cleared when Back reaches it).

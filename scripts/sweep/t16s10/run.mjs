@@ -7,7 +7,8 @@ const val = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : nu
 const suites = (val("--suite") || "static").split(",");
 for (const s of suites) await import(`./${s.startsWith("new") ? s : "rerun-" + s}.mjs`);
 const only = val("--only") ? new Set(val("--only").split(",")) : null;
-const rows = await runAll({ only, quiet: argv.includes("--quiet") });
+const rows = await runAll({ only, quiet: argv.includes("--quiet"), file: val("--file"), bail: argv.includes("--bail") });
+if (process.env.T16_COV) { const b = await import("./browser.mjs"); await b.closeBrowser(); }   // writes the last pages' coverage
 const n = (m) => rows.filter((r) => r.mark === m).length;
 console.log(`\nt16s10 ${suites.join("+")} — ${rows.length} rows: ${n("✅")} ✅ · ${n("❌")} ❌ · ${n("⏭")} ⏭`);
 if (val("--json")) writeFileSync(val("--json"), JSON.stringify(rows, null, 1));

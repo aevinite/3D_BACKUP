@@ -138,12 +138,21 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   // Now the response is checked, the state only moves when the server really moved it, and a
   // state we could not read says so instead of guessing. `maintOn` is null while unknown.
   let maintOn = false;
+  // MAY THIS PERSON CHANGE IT AT ALL? (sweep #10 T16 round 2, 2026-10-15.) The drawer used to show
+  // "🟢 Take guest menu offline" to EVERY manager; at the default (the admin has not handed the switch
+  // over, or handed it to the owner only) the confirm then ended in "isn't switched on for you — ask
+  // your admin". A power not given is ABSENT, never a button that refuses (R67). The server's read
+  // now says `canChange`; `maintCan` is the last answer it gave — true / false, or null while we have
+  // never had one — and the section is drawn only on true. A read that fails keeps the last answer,
+  // so a manager who has the switch and is mid-incident still sees "couldn't read — tap to check".
+  let maintCan = null;
   async function fetchMaint() {
     try {
       const r = await fetch("/api/maintenance", { cache: "no-store", signal: deadline() });
       if (!r.ok) { maintOn = null; return maintOn; }
       const j = await r.json();
       maintOn = j.maintenance === true;
+      if (j.canChange === true || j.canChange === false) maintCan = j.canChange;
     } catch (e) { maintOn = null; }   // includes the deadline above firing — renderMaint() then says "couldn't read"
     return maintOn;
   }
@@ -510,14 +519,20 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
           // which would read as "protected" while protecting nothing.
           expect: profile.id ? { table: "staff_users", id: profile.id, fields: { phone: profile.phone ?? null } } : null,
         });
-        if (res.queued) { setMsg(detMsg, "Saved on this device — it will sync when you're back online.", true); return; }
+        // A save KEPT ON THE DEVICE counts as done here too (sweep #10 T16 round 2, owner 2026-10-15:
+        // "do all five"). It used to return straight after the message, so during first-login setup
+        // needsProfile stayed true and the card could not be closed — a waiter who signed in with no
+        // signal was stuck behind it until the internet came back. The queue delivers the change
+        // later; if the server then refuses it, it shows in the queue's list, and the next sign-in
+        // asks for the details again because the server still says they are missing.
         const wasSetup = profile.needsProfile;
         profile.name = name; profile.phone = phone; profile.needsProfile = false;
         if (setupPinIn) profile.hasPin = true;
-        setMsg(detMsg, wasSetup ? "All set — welcome aboard! 🎉" : "Saved.", true);
+        setMsg(detMsg, res.queued ? "Saved on this device — it will sync when you're back online." : wasSetup ? "All set — welcome aboard! 🎉" : "Saved.", true);
         setSettingsBtnLabel(false);   // setup done → the everyday "👤 Profile" wording
-        // Re-render as the everyday profile card after first-login setup.
-        if (wasSetup) setTimeout(openDrawer, 700);
+        // Re-render as the everyday profile card after first-login setup (a little longer when the
+        // message is the offline one, so it can be read).
+        if (wasSetup) setTimeout(openDrawer, res.queued ? 1800 : 700);
       // SAY WHAT WENT WRONG. This used to swallow everything as "Network error." — so a refused
       // value, a taken username, and "someone else changed this while you had it open" all read as
       // an internet problem the person could do nothing about.
@@ -609,10 +624,14 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
         }
       }
 
-      // — guest menu live/offline (MANAGERS only; kitchen/tablet never see this) —
+      // — guest menu live/offline (MANAGERS only; kitchen/tablet never see this), and only for a
+      //   manager the admin handed it to — see maintCan above. Built hidden, shown once the server
+      //   has said yes, so a manager without the power never sees it appear and vanish. —
       if (isManager) {
         const maintBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)", width: "100%" } }, ["…"]);
+        const maintSec = el("div", { class: "lfh-sec", hidden: true }, [el("h3", null, ["Guest menu"]), maintBtn]);
         const renderMaint = () => {
+          maintSec.hidden = maintCan !== true;
           // null = we could not read it. Say so and offer the read again, rather than paint a
           // confident answer about whether guests can order.
           if (maintOn === null) {
@@ -637,11 +656,9 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
               { title: "Nothing changed" });
           }
         });
+        if (maintCan === true) renderMaint();   // known from an earlier open: no flash on the way in
         fetchMaint().then(renderMaint);
-        sections.push(el("div", { class: "lfh-sec" }, [
-          el("h3", null, ["Guest menu"]),
-          maintBtn,
-        ]));
+        sections.push(maintSec);
       }
 
       // — log out —

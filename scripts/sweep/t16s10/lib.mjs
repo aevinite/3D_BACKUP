@@ -27,6 +27,7 @@ export const ROUTES = {
   health: "app/api/health/route.ts",
   clientError: "app/api/log/client-error/route.ts",
   maintenance: "app/api/maintenance/route.ts",
+  ownerSettings: "app/api/owner/settings/route.ts",
 };
 const cache = new Map();
 /** The file's text as it is on disk today. Throws if it is missing — a check must never read nothing. */
@@ -35,7 +36,9 @@ export function src(rel) {
   if (!cache.has(p)) {
     const abs = join(ROOT, p);
     if (!existsSync(abs)) throw new Error(`t16s10: ${p} is not in this checkout`);
-    cache.set(p, readFileSync(abs, "utf8"));
+    // MUTATION RUNS (./mutate.mjs): one file is swapped for a deliberately broken copy, everywhere it
+    // is read — here, in the browser harness and in the route loader. Unset, nothing changes.
+    cache.set(p, process.env.T16_MUT_REL === p ? readFileSync(process.env.T16_MUT, "utf8") : readFileSync(abs, "utf8"));
   }
   return cache.get(p);
 }
@@ -79,7 +82,10 @@ export const lineOf = (text, idx) => text.slice(0, idx).split("\n").length;
 export function git(...args) { return execFileSync("git", args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }); }
 export function originMain(rel) { try { return git("show", `origin/main:${rel}`); } catch { return null; } }
 export function npmRun(script, args = []) {
-  try { return { ok: true, out: execFileSync("npm", ["run", "-s", script, "--", ...args], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 }) }; }
+  // A guard runs as it would for anyone: none of this harness's coverage / mutation settings leak into it
+  // (a coverage run once handed T16_NODE_ROUTES to a guard started without the loader, and it went red).
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(T16_|NODE_V8_COVERAGE$)/.test(k)));
+  try { return { ok: true, out: execFileSync("npm", ["run", "-s", script, "--", ...args], { cwd: ROOT, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 }) }; }
   catch (e) { return { ok: false, out: String(e.stdout || "") + String(e.stderr || "") }; }
 }
 
@@ -97,16 +103,18 @@ export function eq(a, b, what = "") {
 }
 export function assert(c, msg = "assertion failed") { if (!c) throw new Error(msg); return true; }
 
-export async function runAll({ only = null, suites = null, quiet = false } = {}) {
+export async function runAll({ only = null, suites = null, quiet = false, file = null, bail = false } = {}) {
   const seen = new Set();
   for (const d of defs) { if (seen.has(d.id)) throw new Error(`t16s10: duplicate id ${d.id}`); seen.add(d.id); }
   const rows = [];
   for (const d of defs) {
     if (only && !only.has(d.id)) continue;
     if (suites && !suites.has(d.suite)) continue;
+    // --file: only the rows ABOUT one file (a mutation run), matched on the row's file field.
+    if (file && !(d.file === file || d.file === file.replace(/^public\/panels\//, "") || ("public/panels/" + d.file) === file)) continue;
     let res, note = "";
     const t0 = Date.now();
-    try { res = await d.fn(); } catch (e) { res = false; note = `threw: ${(e && e.message) || e}`.slice(0, 220); }
+    try { res = await d.fn(); } catch (e) { const m = String((e && e.message) || e); if (m.startsWith("skip:")) res = m; else { res = false; note = `threw: ${m}`.slice(0, 220); } }
     let mark;
     if (typeof res === "string" && res.startsWith("skip:")) { mark = "⏭"; note = res.slice(5).trim(); }
     else if (res && typeof res === "object" && "ok" in res) { mark = res.ok ? "✅" : "❌"; note = res.note || note; }
@@ -114,6 +122,8 @@ export async function runAll({ only = null, suites = null, quiet = false } = {})
     else mark = res === false ? "❌" : "✅";
     rows.push({ id: d.id, file: d.file, what: d.what, how: d.how || "", mark, note: String(note).replace(/\s+/g, " ").slice(0, 300), ms: Date.now() - t0 });
     if (!quiet && mark !== "✅") console.log(`  ${mark} ${d.id}  ${d.what}${note ? ` — ${note}` : ""}`);
+    else if (process.env.T16_PROGRESS) console.log(`  ${mark} ${d.id} ${Date.now() - t0}ms`);   // a long run, watched as it goes
+    if (bail && mark === "❌") { console.log(`❌ ${d.id}`); break; }
   }
   return rows;
 }
