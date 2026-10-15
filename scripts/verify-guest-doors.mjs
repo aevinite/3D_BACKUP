@@ -1150,7 +1150,7 @@ flush();
     const def = migs.filter((f) => /FUNCTION[^(]*lfh_call_waiter_table/.test(read(`supabase/migrations/${f}`))).pop() || "";
     const body = def ? read(`supabase/migrations/${def}`) : "";
     check(`item 29 — the newest definition of the waiter call refuses a table that is not a whole number (${def || "no migration"})`,
-      /IF v_t !~ '\^\\d\{1,9\}\$' OR v_t::int < 1 THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body));
+      /IF v_t !~ '\^\\d\{1,9\}\$' THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF v_t::int < 1 THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && !/!~ '\^\\d\{1,9\}\$' OR /.test(body));
     check("item 29 — …and a table above the floor plan, with the same sentence an order gets",
       /IF COALESCE\(v_max, 0\) > 0 AND v_t::int > v_max THEN[\s\S]{0,140}'unknown_table'[\s\S]{0,80}Table %s doesn''t exist — tables are 1–%s\./.test(body));
     check("item 29 — …and stores the table canonically (\"007\" is table 7)", /v_t := \(v_t::int\)::text;/.test(body));
@@ -1182,6 +1182,50 @@ flush();
     check("item 31 — …and tries by itself up to three times, spread out, only for a server-side failure and only on screen",
       /const AUTO_WAITS_MS = \[4000, 12000, 30000\];/.test(e) && /if \(!error\?\.digest \|\| isStaleCodeError/.test(e) && /document\.visibilityState !== "visible"/.test(e) && /0\.85 \+ Math\.random\(\) \* 0\.3/.test(e));
     check("item 31 — the root error screen's button asks the server again too", /\(retry \|\| reset\)\(\)/.test(g)); }
+  // ── found by round 3's full test (owner, 2026-10-15: "do a full bug test … check every single bit") ──
+  // item 32 — the saved list a screen draws from is a COPY, so React never sees a row change under it
+  { const o = r3("lib/guestOutbox.ts");
+    check("item 32 — the published saved list holds copies of its rows, never the rows the queue goes on editing",
+      /function recompute\(\) \{ snapshot = \{ queued: queued\.map\(\(x\) => \(\{ \.\.\.x \}\)\), failed: failed\.map\(\(x\) => \(\{ \.\.\.x \}\)\)/.test(o));
+  // item 33 — taking back the last saved call leaves no retry timer behind
+    check("item 33 — taking back the last waiting call clears the retry timer (and only then)",
+      /await removeItem\(id\);\s*if \(!queued\.length && retryTimer\) \{ clearTimeout\(retryTimer\); retryTimer = null; retryStep = 0; \}/.test(o)); }
+  // item 34 — one corrupted entry in the phone's saved orders can no longer take the whole menu down
+  { const st = r3("lib/orderStatus.ts");
+    check("item 34 — the saved orders are read entry by entry: anything without a usable id is left out, every field a screen reads is made safe",
+      /if \(!o \|\| typeof o !== "object" \|\| Array\.isArray\(o\) \|\| typeof o\.id !== "string" \|\| !o\.id\) continue;/.test(st) && /placedAt: Number\.isFinite\(placedAt\) \? placedAt : 0/.test(st) && /: "received",/.test(st));
+  // item 35 — ONE way an order joins the strip
+    check("item 35 — following an order has one door (trackActiveOrder), which skips an order already followed",
+      /export function trackActiveOrder\(/.test(st) && /if \(list\.some\(\(x\) => x\.id === o\.id\)\) return false;/.test(st));
+    const writers = ["components/CartPanel.tsx", "lib/guestOutbox.ts"].filter((f) => /(tset|tsetFor)\("lfh_active_orders"/.test(r3(f)));
+    check(`item 35 — …and nothing else writes the followed-orders list by hand (${writers.join(", ") || "none"})`, !writers.length); }
+  // item 36 — a guest order is for a table that exists (migration 424 + both guest doors)
+  { const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+    const def = migs.filter((f) => /FUNCTION[^(]*lfh_place_order_public/.test(read(`supabase/migrations/${f}`))).pop() || "";
+    const body = def ? read(`supabase/migrations/${def}`) : "";
+    check(`item 36 — the newest guest-order function refuses a missing or non-number table, before the rate limit (${def || "none"})`,
+      /IF v_tbl IS NULL THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF btrim\(v_tbl\) !~ '\^\\d\{1,9\}\$' THEN/.test(body) && body.indexOf("IF v_tbl IS NULL THEN") < body.indexOf("lfh_rate_check(v_rid, 'guest_order'"));
+    check("item 36 — …and stores the table canonically", /v_tbl := \(btrim\(v_tbl\)::int\)::text;/.test(body));
+    const plan = r3("lib/planTable.ts"), po = r3("app/api/guest/place-order/route.ts"), cw = r3("app/api/guest/call-waiter/route.ts");
+    check("item 36 — one helper names a guest's table the way the floor does (a whole number, \"007\" → \"7\")", /export function guestTable\(v: unknown\): string \| null \{/.test(plan));
+    check("item 36 — both guest doors refuse a table that is not one before asking the database, and pass on the canonical one",
+      [po, cw].every((t) => /const table = guestTable\(b\.table\);\s*if \(!table\) return NextResponse\.json\(\{ ok: false, reason: "unknown_table" \}, \{ status: 400 \}\);/.test(t)) && /p_table: table,/.test(po) && /p_table: table,/.test(cw)); }
+  // item 37 — a refused leave did not land
+  { const lv = r3("app/api/guest/leave/route.ts");
+    check("item 37 — the leave door counts a leave as landed only when it was not refused and not already done",
+      /const leaveLanded = !!d && d\.ok !== false && d\.already_gone !== true;/.test(lv)); }
+  // item 38 — every small control on the ordering screens can be hit with a thumb
+  { const sel = [".gob-x", ".cart-back", "#cart-panel .nav-btn", ".cart-qty-btn", ".live-order-fixlink", ".oc-choice", ".cart-edit-btn", ".remove-item", ".pairing-add", ".allergy-toggle", ".order-confirm-close", ".cart-tabs button"];
+    const rule = (css.match(/((?:[.#][^{}]*::after,?\s*)+)\{\s*content: ""; position: absolute; left: 50%; top: 50%;\s*width: max\(100%, 44px\); height: max\(100%, 44px\); transform: translate\(-50%, -50%\);\s*\}/) || [])[1] || "";
+    const missing = sel.filter((x) => !rule.includes(x + "::after"));
+    check(`item 38 — a 44×44 tap area behind every small ✕, Back, −/+, tab, chip and link on the ordering screens (${missing.join(", ") || "all " + sel.length})`, !!rule && !missing.length);
+    check("item 38 — …on a control that is positioned for it", /\.cart-edit-btn, \.remove-item, \.pairing-add, \.allergy-toggle \{ position: relative; \}/.test(css));
+    const cp = r3("components/CartPanel.tsx");
+    check("item 38 — the bill's − and + carry the class that gives them their tap area", (cp.match(/className="cart-qty-btn"/g) || []).length === 2); }
+  // item 39 — no styles left for screens that no longer exist
+  { const gone = ["ot-sheet", "ot-hide-link", "ot-cancelled-note", "ot-table-row", "ot-save", "order-confirm-done", "allergy-banner", "allergy-popup", "cart-item-warn"];
+    const left = gone.filter((c) => new RegExp(`\\.${c}\\b`).test(css));
+    check(`item 39 — the retired detail sheet, success step, allergy banner and warn line have no styles left (${left.join(", ") || "none"})`, !left.length); }
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
