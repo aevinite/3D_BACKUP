@@ -1123,6 +1123,12 @@ async function askWhoPrints(body) {
   }
 }
 
+// ── A HAND TAP STILL PRINTS WHILE PRINTING IS STOPPED (sweep #10 T11 round 2, item 8) ──────────────
+// MY CALL (owner handed this back on 2026-10-16: "do all the decision"). The admin's Stop holds every
+// AUTOMATIC ticket (item 4: no queue, no net, no "print here"). A cook pressing 🖨 is a person asking for
+// one sheet of paper on purpose, on this screen's own printer, so that is left alone: stopping the queue
+// is about paper nobody asked for piling out, not about forbidding a cook a ticket. The lever, if that
+// is wrong: refuse here when `state.printRefused === "paused"`, with the same words the 🖨 sheet uses.
 async function reprintOrder(id) {
   const o = (state.orders || []).find((x) => x.id === id);
   if (!o) { toast("That order isn't on the board any more."); return; }

@@ -189,3 +189,9 @@ row("P180569", "item 7 · the load script accepts and serves through the waiter'
 row("P180570", "item 7 · the kitchen panel itself never sends 'served' or calls accept", () =>
   (!/status: "served"/.test(APPC()) && !/\/orders\/\$\{[^}]+\}\/accept/.test(APPC())) || "the panel sends a move its server no longer takes");
 
+// ══ ROUND 2 · ITEM 8 · MY CALL: a cook's own 🖨 still prints while printing is stopped — P180571 ══
+row("P180571", "item 8 · the manual 🖨 path has no stop check (MY CALL, written down at reprintOrder)", () => {
+  const a = APPC(); const i = a.indexOf("async function reprintOrder("), j = a.indexOf("async function reprintPlatform(");
+  const body = a.slice(i, j);
+  return (i > 0 && !/paused/.test(body) && /MY CALL \(owner handed this back/.test(src("public/panels/kitchen/app.js"))) || "the hand-print path changed, or the decision note is gone";
+});
