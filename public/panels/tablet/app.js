@@ -1504,9 +1504,11 @@ const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 // deliberately chose a small number keeps it (4 stays 4). A PC is untouched: a mouse reports
 // `pointer: fine`, so `coarse` is what tells the two apart, exactly as the CSS does it.
 //
-// ⚠️ AND BELOW TABLET WIDTH THE SCREEN BANDS OVERRIDE ALL OF IT (owner, 2026-08-15): a phone draws
-// 2 per row and a phone turned sideways draws 4, in CSS, whatever this function returns. The cap
-// above is what decides a TABLET.
+// ⚠️ AND ON A SMALLER TOUCH SCREEN THE STYLESHEET'S BAND OVERRIDES ALL OF IT: any touch screen whose
+// two edges are both under 1150px — a phone either way up, an iPad held upright — draws FOUR per row
+// (style.css, "matching the manager's floor", owner 2026-09-03), whatever this function returns.
+// The cap above is what decides a tablet held sideways and anything wider. (This note said "a phone
+// draws 2 per row" until sweep #10 T12 round 2 — the band had moved to 4 and the note had not.)
 //
 // THE MANAGER FLOOR NOW HAS THE SAME CAP (2026-08-16). It used to be this panel's alone, so the two
 // floors showed different counts on the same iPad — 6 here, 12 there. That was never a decision,

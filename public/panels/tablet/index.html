@@ -95,7 +95,9 @@
   <!-- What the GUEST MENU is waiting for (owner, 2026-08-13): the 🔔 in the top bar + its sheet.
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
-       After backstack.js, because its sheet registers a back layer. -->
+       It loads BEFORE backstack.js and that is fine: it reaches LFH_BACK only when its sheet opens,
+       long after every tag here has run. (This line used to say "After backstack.js", which was
+       never the order — sweep #10 T12 round 2.) -->
   <script src="/panels/guestbell.js?v=df6b7ef1"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=0ed28480"></script>
@@ -119,6 +121,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=49856d75"></script>
-  <script src="app.js?v=739d12a5"></script>
+  <script src="app.js?v=c493487d"></script>
 </body>
 </html>
