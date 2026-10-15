@@ -1,4 +1,4 @@
--- 422 · a table that does not exist cannot call a waiter (owner, 2026-10-15)
+-- 423 · a table that does not exist cannot call a waiter (owner, 2026-10-15)
 --
 -- WHY. Owner, on sweep #10 terminal 3's item 29: "the table which are not there they shouldn't be
 -- able to call … if the thing doesn't even exist then why it is being called". The guest bell
@@ -39,13 +39,18 @@ DECLARE
   v_t text := NULLIF(btrim(p_table), '');
   v_note text := NULLIF(btrim(p_note), '');
   v_sid uuid;
-  v_max int;                 -- NEW (422): this restaurant's highest real table
+  v_max int;                 -- NEW (423): this restaurant's highest real table
 BEGIN
   IF v_t IS NULL THEN RETURN json_build_object('ok', false, 'reason', 'no_table'); END IF;
-  -- NEW (422): THE TABLE MUST EXIST AT THIS RESTAURANT — migration 281's rule for an order, now for a
+  -- NEW (423): THE TABLE MUST EXIST AT THIS RESTAURANT — migration 281's rule for an order, now for a
   -- call. A whole number (at most 9 digits, so the cast below can never overflow), 1 or more, and not
   -- above the floor plan when there is one.
-  IF v_t !~ '^\d{1,9}$' OR v_t::int < 1 THEN
+  -- Two separate tests, never `A OR B`: Postgres does not promise to evaluate the left side first, and
+  -- `'abc'::int` raises an error instead of answering.
+  IF v_t !~ '^\d{1,9}$' THEN
+    RETURN json_build_object('ok', false, 'reason', 'unknown_table', 'error', 'That table number isn''t valid.');
+  END IF;
+  IF v_t::int < 1 THEN
     RETURN json_build_object('ok', false, 'reason', 'unknown_table', 'error', 'That table number isn''t valid.');
   END IF;
   v_t := (v_t::int)::text;   -- canonical: "007" is table 7, the tile the floor draws

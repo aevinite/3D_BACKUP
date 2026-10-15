@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { offPlanTable } from "@/lib/planTable";
+import { offPlanTable, guestTable } from "@/lib/planTable";
 import { invalidateFloor } from "@/lib/floorSummary";
 // The restaurant a session token belongs to — ONE copy for the three writing doors (sweep #10 T3
 // round 2, item 7): `lfh_call_waiter` (migration 084) answers `{ok:true}` and nothing else, so an
@@ -184,10 +184,14 @@ async function postImpl(req: NextRequest): Promise<Response> {
   if (!rid) return NextResponse.json({ ok: false, reason: "unknown_restaurant" }, { status: 400 });
   // `strict` — a guest is locked to a table on the floor plan (item 10); the +500 counter margin is
   // for the STAFF doors, which are the ones that open a parcel or takeaway counter.
-  if (await offPlanTable(rid, b.table, { strict: true })) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
+  // A guest's table is a real floor table, written the way the floor writes it (round 3; migration 423
+  // draws the same line in the database).
+  const table = guestTable(b.table);
+  if (!table) return NextResponse.json({ ok: false, reason: "unknown_table" }, { status: 400 });
+  if (await offPlanTable(rid, table, { strict: true })) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
 
   const { data, error } = await sb.rpc("lfh_call_waiter_table", {
-    p_table: b.table || null,
+    p_table: table,
     p_note: reason || null,
     p_restaurant_id: rid,
   });

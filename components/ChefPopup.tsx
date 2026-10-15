@@ -204,7 +204,7 @@ export default function ChefPopup() {
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "You've a few requests pending", subtitle: "staff are on the way", kicker: "service", icon: "🛎" } }));
         window.dispatchEvent(new Event("lfh:close-all"));
       } else if (res.reason === "unknown_table" || res.reason === "off_plan_table") {
-        // ── A TABLE THAT DOES NOT EXIST CANNOT CALL (owner, 2026-10-15, migration 422) ────────────────
+        // ── A TABLE THAT DOES NOT EXIST CANNOT CALL (owner, 2026-10-15, migration 423) ────────────────
         // The database refuses a number that is not on this restaurant's floor plan. The popup stays
         // open with the box flagged and the database's own sentence ("Table 45 doesn't exist — tables
         // are 1–30.") so the diner fixes the number instead of being told to "ask a member of staff".

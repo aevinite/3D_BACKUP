@@ -241,7 +241,7 @@ export interface OrderInput {
 // NOT newly created (a recent duplicate, or the table already has 6 pending). The
 // caller uses this to tell the guest the truth instead of always saying "sent"
 // (audit fix 2026-07-06).
-// `error` is the database's own sentence when it has one — today only `unknown_table` (mig 422:
+// `error` is the database's own sentence when it has one — today only `unknown_table` (mig 423:
 // "Table 45 doesn't exist — tables are 1–30."), which names the number the diner should check.
 export interface CallWaiterResult { ok: boolean; reason?: string; error?: string }
 

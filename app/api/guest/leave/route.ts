@@ -74,7 +74,14 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // This door alone had no fallback: an old saved leave with no `restaurantId` left the snapshot
   // standing, while its two siblings already asked the token. Asked only when the leave really
   // changed something, so an `already_gone` replay costs no read at all.
-  const leaveLanded = !(data && typeof data === "object" && (data as { already_gone?: unknown }).already_gone === true);
+  //
+  // …AND A REFUSED LEAVE DID NOT LAND EITHER (sweep #10 T3 round 3). This tested `already_gone` alone, so
+  // `{ ok: false, reason: "invalid_token" }` read as landed: the token was looked up (two reads) and the
+  // floor snapshot dropped, for a leave the database had just refused. callLanded() in the call door has
+  // always answered `ok: false` with "nothing changed"; this now asks the same three things it does —
+  // an answer at all, not refused, not already done.
+  const d = data && typeof data === "object" ? (data as { ok?: unknown; already_gone?: unknown }) : null;
+  const leaveLanded = !!d && d.ok !== false && d.already_gone !== true;
   const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : (leaveLanded ? await restaurantOfToken(b.token) : "");
   if (rid && leaveLanded) invalidateFloor(rid);
   else if (!rid && leaveLanded) console.warn("[guest/leave] no resolvable restaurant — floor snapshot not dropped");
