@@ -188,8 +188,13 @@ check("a FAILED tenant resolve does not fall back to restaurant #1",
   /\.catch\(/.test(resolveTail) && /setId\(""\)/.test(resolveTail));
 check("…and it does not declare itself `ready` on the way past",
   /\.catch\(\(\) => \{[\s\S]{0,400}setReady\(false\)/.test(resolveTail));
-check("…while a lookup that SUCCEEDS with no row still resolves to #1 (a slug nobody owns is a different answer)",
-  /setId\(DEFAULT_RESTAURANT_ID\); setName\(null\); setReady\(true\)/.test(resolveTail));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15) — the same owner rule as item 21 ("make sure this never
+// happens"), carried one step further. A lookup that SUCCEEDS with no row used to resolve to #1, and the
+// not-found page that answers it still mounts every guest widget: measured on the built app, each then
+// asked the database about French House (settings, ban list, customer greeting). It now answers like the
+// failed lookup — no id, not ready. §18 below holds the rule; this row now asserts the new answer.
+check("…and a lookup that SUCCEEDS with no row (a slug nobody owns) is no restaurant too — never #1",
+  /setId\(""\); setName\(null\); setReady\(false\);/.test(resolveTail) && !/setId\(DEFAULT_RESTAURANT_ID\); setName\(null\); setReady\(true\)/.test(resolveTail));
 check("the server half the empty id relies on is still there — a guest write with no restaurant is REFUSED",
   ["app/api/guest/place-order/route.ts", "app/api/guest/call-waiter/route.ts"].every((f) => {
     const s = read(f);
@@ -1226,6 +1231,20 @@ flush();
   { const gone = ["ot-sheet", "ot-hide-link", "ot-cancelled-note", "ot-table-row", "ot-save", "order-confirm-done", "allergy-banner", "allergy-popup", "cart-item-warn"];
     const left = gone.filter((c) => new RegExp(`\\.${c}\\b`).test(css));
     check(`item 39 — the retired detail sheet, success step, allergy banner and warn line have no styles left (${left.join(", ") || "none"})`, !left.length); }
+}
+// ── 18. A SLUG NOBODY OWNS IS "NO RESTAURANT", NEVER RESTAURANT #1 (sweep #10 T4 round 2, 2026-10-15) ──
+// The not-found page for /r/<a slug nobody owns>/… still mounts every guest widget (GuestChrome sits in
+// the root layout). When the lookup answered null, lib/restaurant-context handed them restaurant #1 and
+// `ready`, so each asked the database about French House — its settings, its ban list, its customer
+// greeting — on a page that is not French House. Both "not found" answers must now be "no id, not ready".
+{
+  say("\n── 18. a slug nobody owns is no restaurant, never restaurant #1 (sweep #10 T4 round 2) ──");
+  const ctxSrc = codeOnly(read("lib/restaurant-context.tsx"));
+  const then = (ctxSrc.match(/\.then\(\(r\) => \{[\s\S]*?\}\)/) || [""])[0];
+  check("item — a lookup that found NO restaurant leaves no id and never says ready", /if \(r\?\.id\) \{ setId\(r\.id\); setName\(r\.name \|\| null\); setReady\(true\); return; \}\s*setId\(""\); setName\(null\); setReady\(false\);/.test(then));
+  check("item — …and nothing in that answer reaches for restaurant #1", !!then && !/DEFAULT_RESTAURANT_ID/.test(then));
+  check("item — the failed lookup still answers the same way (no id, not ready)", /\.catch\(\(\) => \{[\s\S]{0,120}setId\(""\);[\s\S]{0,200}setReady\(false\);/.test(ctxSrc));
+  check("item — the hook every widget reads hands out \"\" until the restaurant is settled", /return ready \? id : "";/.test(ctxSrc));
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
