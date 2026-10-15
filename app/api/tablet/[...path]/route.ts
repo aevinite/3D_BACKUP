@@ -66,6 +66,19 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
       ? NextResponse.json({ error: "Server can't reach the database — retrying." }, { status: 503 })
       : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
   }
+  // ── THE WAITER'S OWN LOGIN, OR THE ADMIN — NOBODY ELSE (sweep #10 T11 round 2, item 9) ───────────
+  // requireRole("tablet") also passes a MANAGER and an OWNER (lib/userAuth → roleSatisfies). No screen
+  // of theirs calls this route — /tablet and /r/<slug>/tablet admit the waiter role only (lib/panelGate)
+  // — and the wider door cost two things, the same two the kitchen route had (its item 2):
+  //   · a MANAGER was judged here by the WAITERS' switches (tabletMode reads settings.tablet_*), not by
+  //     their own manager permissions, so a power the admin had switched off for a manager on the
+  //     manager panel could still be used through this route;
+  //   · an OWNER's session was answered with the restaurant on their staff row — a shared "home"
+  //     namespace, not always one they own.
+  // The admin super-user (user === null) is unchanged: the console's view-as still opens every floor.
+  if (g.user && g.user.role !== "tablet") {
+    return NextResponse.json({ error: "This is the waiter tablet's connection — sign in with the waiter login to use it." }, { status: 403 });
+  }
   return { user: g.user };
 }
 // (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which

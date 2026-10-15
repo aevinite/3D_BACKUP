@@ -195,3 +195,12 @@ row("P180571", "item 8 · the manual 🖨 path has no stop check (MY CALL, writt
   const body = a.slice(i, j);
   return (i > 0 && !/paused/.test(body) && /MY CALL \(owner handed this back/.test(src("public/panels/kitchen/app.js"))) || "the hand-print path changed, or the decision note is gone";
 });
+
+// ══ ROUND 2 · ITEM 9 · the waiter's server answers the waiter login and the admin — P180572–P180573 ══
+const TABGATE = () => { const t = code(src("app/api/tablet/[...path]/route.ts")); const i = t.indexOf("async function gate("); const j = t.indexOf("\n}", i); return i < 0 || j < 0 ? "" : t.slice(i, j + 2); };
+row("P180572", "item 9 · the waiter route refuses any signed-in role other than tablet (403, plain sentence)", () =>
+  hasRe(TABGATE(), /if \(g\.user && g\.user\.role !== "tablet"\) \{\s*return NextResponse\.json\(\{ error: "[^"]*waiter login[^"]*" \}, \{ status: 403 \}\);/));
+row("P180573", "item 9 · …after the sign-in check, so a missing login is still the 401 bounce and the admin still passes", () => {
+  const g = TABGATE(); const a = g.indexOf("if (!g.ok)"), b = g.indexOf('g.user.role !== "tablet"');
+  return (a > 0 && b > a && /const g = await requireRole\(req, "tablet"\);/.test(g)) || "order changed";
+});
