@@ -554,6 +554,12 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
       if (!owned.includes(urlRid)) return err("You can only edit restaurants you own.", 403);
       return urlRid;
     }
+    // AN OWNER MUST NAME THE RESTAURANT (sweep #10 T11 round 2, item 10). Without ?rid this fell through
+    // to panelRestaurantId → the owner's staff row, a shared "home" namespace that is not always one
+    // they own, so an owner's request with no restaurant named was answered about THAT restaurant. Every
+    // owner screen that uses this route (Manager mode, the owner's menu editor) always sends ?rid, so
+    // the only request this refuses is one that names nothing.
+    return err("Open this from the owner panel — it says which of your restaurants to show.", 400);
   }
   const rid = panelRestaurantId(req, g);
   // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.

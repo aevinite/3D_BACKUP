@@ -94,6 +94,14 @@ const req = (path, { method = "POST", body = null, query = "" } = {}) =>
 const ctx = (path) => ({ params: Promise.resolve({ path: path.split("/") }) });
 
 const call = async (verb, path, opts = {}) => {
+  // AN OWNER'S SCREENS ALWAYS NAME THE RESTAURANT (sweep #10 T11 round 2, item 10): Manager mode and the
+  // owner's menu editor send ?rid, and an owner request that names nothing is now refused. So an owner
+  // call here carries the ?rid the real screen sends, for the restaurant this world says they own.
+  if (G.ACTOR && G.ACTOR.user && G.ACTOR.user.role === "owner" && !/[?&]rid=/.test(opts.query || "")) {
+    opts = { ...opts, query: (opts.query ? opts.query + "&" : "?") + "rid=" + RID };
+    G.FIX.restaurant_owners ||= [];
+    if (!G.FIX.restaurant_owners.some((x) => x.user_id === G.ACTOR.user.id && x.restaurant_id === RID)) G.FIX.restaurant_owners.push({ user_id: G.ACTOR.user.id, restaurant_id: RID });
+  }
   const r = await route[verb](req(path, { ...opts, method: verb }), ctx(path));
   let json = {};
   try { json = await r.clone().json(); } catch {}
@@ -286,7 +294,10 @@ console.log("\nS10-T9 item 3 · POST /dish-photo and the Edit-menu switch");
   const photoReq = () => {
     const fd = new FormData();
     fd.append("file", new File([new Uint8Array(8)], "dish.png", { type: "image/png" }));
-    return new NextRequest("http://localhost/api/editor/dish-photo", { method: "POST", headers: { cookie: "aevidine_admin_rid=" + RID }, body: fd });
+    // An owner's screen names its restaurant (sweep #10 T11 round 2, item 10) — see `call` above.
+    const owner = G.ACTOR && G.ACTOR.user && G.ACTOR.user.role === "owner";
+    if (owner) { G.FIX.restaurant_owners ||= []; if (!G.FIX.restaurant_owners.some((x) => x.user_id === G.ACTOR.user.id)) G.FIX.restaurant_owners.push({ user_id: G.ACTOR.user.id, restaurant_id: RID }); }
+    return new NextRequest("http://localhost/api/editor/dish-photo" + (owner ? "?rid=" + RID : ""), { method: "POST", headers: { cookie: "aevidine_admin_rid=" + RID }, body: fd });
   };
   const send = async () => { const r = await route.POST(photoReq(), ctx("dish-photo")); let j = {}; try { j = await r.clone().json(); } catch {} return { status: r.status, ...j }; };
   const EDITOR_OFF = { menus: { manager: { editor: false } } };

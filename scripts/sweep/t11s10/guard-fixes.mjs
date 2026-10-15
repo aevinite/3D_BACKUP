@@ -204,3 +204,9 @@ row("P180573", "item 9 · …after the sign-in check, so a missing login is stil
   const g = TABGATE(); const a = g.indexOf("if (!g.ok)"), b = g.indexOf('g.user.role !== "tablet"');
   return (a > 0 && b > a && /const g = await requireRole\(req, "tablet"\);/.test(g)) || "order changed";
 });
+// ══ ROUND 2 · ITEM 10 · an owner on the manager route must name the restaurant — P180574 ══
+row("P180574", "item 10 · an owner request with no ?rid is refused before the staff-row fallback is reached", () => {
+  const e = code(src("app/api/editor/[...path]/route.ts")); const i = e.indexOf("async function editorScope("); const blk = e.slice(i, i + 1600);
+  const refuse = blk.indexOf('return err("Open this from the owner panel'), fall = blk.indexOf("const rid = panelRestaurantId(req, g);");
+  return (i > 0 && refuse > 0 && fall > refuse) || "the refusal is missing or comes after the fallback";
+});
