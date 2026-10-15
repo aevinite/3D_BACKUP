@@ -67,7 +67,7 @@
   <div id="toasts" class="toasts"></div>
   <!-- The are-you-sure dialog used before sending an order to the kitchen. -->
   <div class="confirm-overlay" id="confirmOverlay" hidden>
-    <div class="confirm-box">
+    <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmText">
       <p id="confirmText"></p>
       <div class="confirm-actions">
         <button class="btn" id="confirmNo">Cancel</button>
@@ -121,6 +121,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=49856d75"></script>
-  <script src="app.js?v=f013bf42"></script>
+  <script src="app.js?v=d7427a15"></script>
 </body>
 </html>
