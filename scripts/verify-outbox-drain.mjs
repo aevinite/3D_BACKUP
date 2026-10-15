@@ -567,8 +567,10 @@ console.log("\n17) Every change the three panels can queue has a readable name")
   }
   if (seen.size >= 60) ok(`${seen.size} write calls read from the three panels' own code`); else bad.push(`only ${seen.size} write calls were found — the reader is broken, not the panels`);
   if (!bad.length) ok("…every one of them has a readable name (a capital, no id, no bare number, no raw path)");
-  else bad.slice(0, 12).forEach((b) => bad === null || console.log("     " + b)), badLabel(bad);
-  function badLabel(list) { fail++; console.log(`  ❌ ${list.length} change(s) would be shown with an unreadable name (first ${Math.min(12, list.length)} above)`); }
+  else {
+    for (const b of bad.slice(0, 12)) console.log("     " + b);
+    fail++; console.log(`  ❌ ${bad.length} change(s) would be shown with an unreadable name (first ${Math.min(12, bad.length)} above)`);
+  }
   // …and the two that used to say something FALSE now say the right thing.
   const wrong = [["POST", "/platform/" + U + "/status", "Update a delivery-app order"], ["POST", "/items/" + U + "/status", "Update a dish on an order"], ["POST", "/khata/pay", "Record a Pay Later payment"]]
     .filter(([m, p, want]) => labelFor(m, p, "/api/editor") !== want);

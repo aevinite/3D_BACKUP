@@ -77,7 +77,7 @@ const until = async (fn, ms = 8000) => { const t = Date.now() + ms; while (Date.
 // ── 1. a big photo ───────────────────────────────────────────────────────────────────────────
 console.log("\n1) Report an issue — a big phone photo is made smaller, not refused");
 // A 3000×3000 photo of noise at JPEG quality 1 — the shape of a new phone's camera, well over 5 MB.
-const PICK = (bytesWanted) => `(async () => {
+const PICK = () => `(async () => {
   const c = document.createElement("canvas"); c.width = 3000; c.height = 3000; const x = c.getContext("2d");
   const d = x.createImageData(3000, 3000); for (let i = 0; i < d.data.length; i++) d.data[i] = (Math.random() * 256) | 0; x.putImageData(d, 0, 0);
   const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 1));
@@ -104,7 +104,7 @@ await until(() => p.evaluate(() => /too big/.test(document.getElementById("lfhir
 const refused = await p.evaluate(() => ({ s: document.getElementById("lfhirStatus").textContent, img: !!document.querySelector("#lfhirPrevs img") }));
 ok(!refused.img && /too big to send\. Take a new one, or pick a smaller picture\./.test(refused.s), "where it cannot be shrunk it is refused — saying what to do, not '5 MB'", refused.s);
 // …and a shrink that is still too big is refused the same way, never attached.
-await p.goto(BASE + "/issue"); await p.evaluate(() => { window.LFH_IMG.shrink = async (f) => ({ file: new File([new Uint8Array(6 * 1024 * 1024)], "x.webp", { type: "image/webp" }) }); });
+await p.goto(BASE + "/issue"); await p.evaluate(() => { window.LFH_IMG.shrink = async () => ({ file: new File([new Uint8Array(6 * 1024 * 1024)], "x.webp", { type: "image/webp" }) }); });
 await openIssue(); await p.evaluate(PICK());
 await until(() => p.evaluate(() => /too big/.test(document.getElementById("lfhirStatus").textContent)), 8000);
 ok(await p.evaluate(() => !document.querySelector("#lfhirPrevs img") && /too big/.test(document.getElementById("lfhirStatus").textContent)), "a photo still over 5 MB after shrinking is refused, never attached");
