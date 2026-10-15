@@ -113,8 +113,9 @@ R("P19342", RT, "Latency is measured from breadcrumbs the panel already receives
 });
 R("P19343", RT, "The realtime client comes from our own origin, never a public CDN", () => /import\("\/vendor\/supabase\.js"\)/.test(code(RT)) && !/jsdelivr|unpkg|cdnjs/.test(code(RT)));
 R("P19344", RT, "`debounce()` is dead code — burstDebounce replaced it", () => {
-  const c = code(RT), calls = count(c, /\bdebounce\(/);
-  return ok(calls === 1, `declared once, called ${calls - 1} times — harmless, recorded as P19599 judges`);
+  // Round 2 (item 22) deleted it, and verify:panel-plumbing now refuses any declared-but-unused helper.
+  const c = code(RT), calls = count(c, /\bdebounce\(/), burst = count(c, /\bburstDebounce\(/);
+  return ok(calls === 0 && burst >= 1, `debounce() is gone (round 2, item 22); burstDebounce does the job (${burst} uses)`);
 });
 // ═════════════ connbadge.js ═════════════
 R("P19345", CB, "The four latency tiers match latencyTier() in lib/connectionStatus.ts, thresholds and labels", () => {

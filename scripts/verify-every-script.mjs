@@ -125,6 +125,7 @@ const EXPLAINED_WRITES = {
   "scripts/sweep/t3/s9-checks.mjs": "each POST is shaped to be refused (bad table, 201 lines, no token, junk body) and asserts the refusal",
   "scripts/sweep/t27r2/d-settings.mjs": "its settings saves are undone by the harness's whole-row snapshot; table 1's QR code is put back by itself (item 80)",
   "scripts/verify-t10-manager-writes.mjs": "hermetic — the manager and tablet routes run in-process against the in-memory stub (scripts/panel-stubs), a fresh world per check; its POSTs never leave the process",
+  "scripts/sweep/t16s10/new-l.mjs": "hermetic — its `method: \"POST\"` writes go through outbox.js on a harness page whose every /api/ request is answered by the test (browser.mjs), never a network call",
   "scripts/sweep/t16s10/new-a.mjs": "hermetic — its `method: \"POST\"` calls go to netretry.js loaded in memory with a scripted fake fetch (loadNR), never a network call",
   "scripts/sweep/t3s10/r2-i-matrix.mjs": "hermetic — the four guest doors run in-process against the stand-in database (./stubs, G.reset() before every cell); its `method: \"POST\"` is the NextRequest it hands the route, never a network call",
   "scripts/t17-harness/u-close-last.mjs": "hermetic — the route runs in-process against the in-memory stub (./sb.mjs), wiped before each check",
