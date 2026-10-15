@@ -22,11 +22,13 @@ import { ROOT, MY_FILES, ROUTES } from "./lib.mjs";
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
 const MAX = Number(arg("max", 60)), WORKERS = Number(arg("workers", 4)), SEED = Number(arg("seed", 1)), OUT = arg("json", "");
 const SKIP = new Set((arg("skip", "") || "").split(",").filter(Boolean));   // "file:line:col:op" already tried (convergence)
+// --keys=<json file of "file:line:col:op">: re-run EXACTLY those breaks (the survivors of a previous pass).
+const ONLY = arg("keys", "") ? new Set(JSON.parse(readFileSync(arg("keys", ""), "utf8"))) : null;
 const ALL = [...MY_FILES.map((f) => "public/panels/" + f), ROUTES.health, ROUTES.clientError, ROUTES.maintenance, "lib/maintenance.ts", ROUTES.ownerSettings];
 const FILES = arg("files", "") ? arg("files", "").split(",").map((f) => ALL.find((x) => x.endsWith("/" + f) || x === f)).filter(Boolean) : ALL;
 // Only suites whose checks RUN the code (no text-reading suites, and none that need a login on the
 // live dev server — those run the server's own, unbroken copy and only slow this down).
-const SUITES = "node,browser,browser2,new-a,new-b,new-c,new-f,new-g,new-h,new-i,new-j,new-k";
+const SUITES = "node,browser,browser2,new-a,new-b,new-c,new-f,new-g,new-h,new-i,new-j,new-k,new-l,new-m,new-n";
 // The route files are also driven by two in-memory guards; they read the broken copy through the same
 // loader (routes.mjs + hooks.mjs), so they count as checks that RUN it.
 const NODE_GUARDS = ["scripts/verify-guest-menu-switch.mjs", "scripts/verify-public-endpoints.mjs"];
@@ -90,7 +92,7 @@ for (const rel of FILES) {
     const mask = codeMask(L);
     for (const op of OPS) for (const m of L.matchAll(op.re)) if (mask[m.index] && mask[m.index + m[0].length - 1]) {
       const key = `${rel}:${k + 1}:${m.index}:${op.name}`;
-      if (!SKIP.has(key)) sites.push({ rel, line: k + 1, col: m.index, len: m[0].length, to: op.to, name: op.name, key });
+      if (!SKIP.has(key) && (!ONLY || ONLY.has(key))) sites.push({ rel, line: k + 1, col: m.index, len: m[0].length, to: op.to, name: op.name, key });
     }
   }
   // A seeded shuffle, then the first MAX — a fresh seed draws a different sample (convergence).
@@ -98,7 +100,8 @@ for (const rel of FILES) {
   // The breaks most likely to be real bugs first: a dropped "not", true/false, and/or, ===/!==.
   const band = (n) => (/drop !|true|false|null/.test(n) ? 0 : /&&|\|\||===|!==|\?\?/.test(n) ? 1 : 2);
   sites.sort((a, b) => band(a.name) - band(b.name));
-  const chosen = sites.slice(0, MAX);
+  const chosen = ONLY ? sites : sites.slice(0, MAX);
+  if (!chosen.length) continue;
   const dir = join(base, basename(rel).replace(/\W/g, "_")); mkdirSync(dir, { recursive: true });
   const ctl = join(dir, "control" + ext); writeFileSync(ctl, text);
   const c = await runCopy(rel, ctl);

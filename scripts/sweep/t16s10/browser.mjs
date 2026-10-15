@@ -28,6 +28,9 @@ export const PACE = "window.LFH_TEST_PACING={first:200,base:300,max:600,wake:40,
 
 /** harness({ scripts, pre, body, from, viewport, reducedMotion, api, offline }) */
 export async function harness(o = {}) {
+  // A page built from the DEPLOYED site's files says nothing about a broken local copy — skip it in a
+  // mutation run, here inside the check (a throw from inside the page's request handler would crash).
+  if (o.from === "site" && process.env.T16_MUT) throw new Error("skip: reads the deployed site — not part of a mutation run");
   const ctx = await (await getBrowser()).newContext({
     viewport: o.viewport || { width: 1280, height: 800 },
     deviceScaleFactor: o.dpr || 1, hasTouch: !!o.touch, isMobile: !!o.touch,

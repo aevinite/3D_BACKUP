@@ -567,7 +567,7 @@ has("guestbell.js", /rows: all\.slice\(0, 50\)/,
     const decl = [...c.matchAll(/(?:^|[;{}\n])\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|[;{(\n,])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)].map((m) => m[1] || m[2]);
     for (const n of new Set(decl)) {
       const uses = (c.match(new RegExp("(^|[^\\w$.])" + n.replace(/\$/g, "\\$") + "(?![\\w$])", "g")) || []).length;
-      if (uses < 2) fails.push(`${f}: ${n}() is declared and never used — dead code a reader trusts and nothing runs (delete it, or use it)`);
+      if (uses < 2) fails.push(`${f}: ${n} is declared and never used — dead code a reader trusts and nothing runs (delete it, or use it)`);
     }
   }
 }
