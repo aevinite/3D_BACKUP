@@ -26,7 +26,7 @@ export const STATUS_COPY: Record<OrderStatus, { label: string; sub: string; icon
 // The localStorage key under which this device's in-progress orders are saved.
 // Tenant-scoped (lfh_active_orders:<slug>) so one restaurant's live order bar
 // never floats over another restaurant's menu on the same phone.
-import { tget, tset } from "./tenantStorage";
+import { tget, tset, tgetFor, tsetFor } from "./tenantStorage";
 export const ACTIVE_ORDERS_KEY = "lfh_active_orders";
 // ── OBITUARY: POLL_MS = 1500 (deleted 2026-09-18) ────────────────────────────────────────────────
 // A guest's order status used to be re-read every 1.5 SECONDS. Realtime replaced it long ago —
@@ -84,17 +84,59 @@ export const isFinalStatus = (s: OrderStatus) => s === "served" || s === "cancel
 // Load this device's saved orders out of localStorage and hand them back as a list.
 // Everything is wrapped in try/catch so that bad/missing saved data never crashes
 // the page — we just return an empty list instead.
-export const readActiveOrders = (): ActiveOrder[] => {
+/** One saved list, from its stored text: only real orders, with every field a screen reads made safe. */
+function parseActive(raw: string | null): ActiveOrder[] {
   try {
-    const raw = tget(ACTIVE_ORDERS_KEY);
     // localStorage stores text, so JSON.parse turns that text back into a list.
     const list = raw ? JSON.parse(raw) : [];
-    // Double-check it really is a list before trusting it.
-    return Array.isArray(list) ? list : [];
+    // Double-check it really is a list before trusting it…
+    if (!Array.isArray(list)) return [];
+    // …AND THAT EACH ENTRY REALLY IS AN ORDER (sweep #10 T3 round 3). The comment above promised that bad
+    // saved data never crashes the page, but only the LIST was checked: one `null`, number or half-written
+    // entry inside it threw "Cannot read properties of null (reading 'dismissed')" in liveActiveOrders —
+    // which runs while the order strip and the bill draw — so the whole guest menu fell onto its error
+    // screen, and stayed there on every reload, until the phone's storage was cleared. Measured by the
+    // round-3 status suite (R3-D04). An entry with no usable id is left out; the fields every screen
+    // reads are made safe; an unknown status reads as "received" until the next status check corrects it.
+    const out: ActiveOrder[] = [];
+    for (const o of list) {
+      if (!o || typeof o !== "object" || Array.isArray(o) || typeof o.id !== "string" || !o.id) continue;
+      const placedAt = Number(o.placedAt);
+      out.push({
+        ...o,
+        tableNumber: String(o.tableNumber ?? ""),
+        total: Number(o.total) || 0,
+        itemCount: Number(o.itemCount) || 0,
+        items: Array.isArray(o.items) ? o.items : undefined,
+        status: (STEPS as string[]).includes(o.status) || o.status === "cancelled" ? o.status : "received",
+        // no usable time → it can never age out of the strip, so treat it as long gone instead
+        placedAt: Number.isFinite(placedAt) ? placedAt : 0,
+      });
+    }
+    return out;
   } catch {
     return [];
   }
-};
+}
+export const readActiveOrders = (): ActiveOrder[] => parseActive(tget(ACTIVE_ORDERS_KEY));
+
+/**
+ * START FOLLOWING AN ORDER on this device — the ONE way an order joins the strip (sweep #10 T3 round 3).
+ * There were three copies of this: two in components/CartPanel.tsx (the seated and the QR path) and one in
+ * lib/guestOutbox.ts (a saved order that has just been delivered). Only the outbox's skipped an order
+ * already followed, and none of them cleaned a corrupted list. `slug` names the restaurant the order
+ * belongs to when the tab may be on another (the outbox can flush from anywhere); otherwise this one.
+ * Returns false when the order was already being followed.
+ */
+export function trackActiveOrder(o: Omit<ActiveOrder, "status" | "placedAt">, slug?: string): boolean {
+  const list = parseActive(slug ? tgetFor(ACTIVE_ORDERS_KEY, slug) : tget(ACTIVE_ORDERS_KEY));
+  if (list.some((x) => x.id === o.id)) return false;
+  list.push({ ...o, status: "received", placedAt: Date.now() });
+  const text = JSON.stringify(list);
+  if (slug) tsetFor(ACTIVE_ORDERS_KEY, slug, text); else tset(ACTIVE_ORDERS_KEY, text);
+  try { window.dispatchEvent(new Event("lfh:order-placed")); } catch { /* not in a browser */ }   // wake the tracker
+  return true;
+}
 
 // Save the given list of orders back into localStorage (as text via JSON.stringify).
 // Quietly does nothing if saving fails (e.g. storage full or private mode).

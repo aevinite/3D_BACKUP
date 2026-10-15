@@ -30,6 +30,7 @@ import {
   liveActiveOrders,
   isFinalStatus,
   RT_BACKUP_MS,
+  trackActiveOrder,
 } from "@/lib/orderStatus";
 
 // A single chosen option on a dish (e.g. group "Size", label "Large", +price).
@@ -801,14 +802,8 @@ export default function CartPanel() {
           return;
         }
         if (!d?.ok || !d.orderId) return; // order cancelled / failed — the gate showed its own message
-        try {
-          // Save into the "active orders" list so the OrderTracker shows it.
-          const raw = tget("lfh_active_orders");
-          const arr = (() => { const p = raw ? JSON.parse(raw) : []; return Array.isArray(p) ? p : []; })();
-          arr.push({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS, status: "received", placedAt: Date.now() });
-          tset("lfh_active_orders", JSON.stringify(arr));
-          window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
-        } catch {}
+        // Follow it on the strip (lib/orderStatus.ts — the one way an order joins it).
+        try { trackActiveOrder({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS }); } catch {}
         // Empty the cart and reset the allergy fields, then refresh + close.
         setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
         window.dispatchEvent(new Event("lfh:cart-updated"));
@@ -885,22 +880,8 @@ export default function CartPanel() {
       }, restaurantId, orderKeyRef.current.id);
       orderKeyRef.current = null; // placed OK → next tap is a new order
       // Remember this order on THIS device so the guest can follow its status.
-      try {
-        const raw = tget("lfh_active_orders");
-        const list = raw ? JSON.parse(raw) : [];
-        const active = Array.isArray(list) ? list : [];
-        active.push({ // add this order to the live-tracking list
-          id: orderId,
-          tableNumber: tableTrim,
-          total: recordTotal, // USD — converted at render time like all order records (0 = tax never known)
-          itemCount,
-          items: cart.map((it) => ({ title: it.title, qty: it.qty })),
-          status: "received",
-          placedAt: Date.now(),
-        });
-        tset("lfh_active_orders", JSON.stringify(active));
-        window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
-      } catch {}
+      // (lib/orderStatus.ts — the one way an order joins the strip; total in USD, 0 = tax never known)
+      try { trackActiveOrder({ id: orderId, tableNumber: tableTrim, total: recordTotal, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }); } catch {}
       // Pop a success toast confirming the order went to the kitchen.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: "Order placed",
@@ -1265,9 +1246,9 @@ export default function CartPanel() {
                   {/* Quantity, Edit and the bin — on EVERY dish (owner: "THERE SHOULD BE EDIT AND
                       QUANTY BUTTON FOR EVERY DISH"), never hidden behind a tap. */}
                   <div className="cart-item-controls">
-                    <button type="button" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
+                    <button type="button" className="cart-qty-btn" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
                     <span style={{ minWidth: "26px", textAlign: "center", fontSize: "13px", fontWeight: 800, color: "var(--text)" }}>{item.qty}</span>
-                    <button type="button" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
+                    <button type="button" className="cart-qty-btn" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
                     {canEdit(item.id) && (
                       <button type="button" className="cart-edit-btn" onClick={() => editLine(item)}>
                         <i className="fas fa-pen"></i> Edit
