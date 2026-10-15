@@ -38,6 +38,9 @@ const FILES = [
   "backstack.js", "undobar.js", "realtime.js", "connbadge.js", "guestbell.js", "swipehint.js",
   "theme.js", "fitnums.js", "myprofile.js", "errlog.js", "maint.js", "issue-raise.js",
   "outbox.js", "editor/inventory.js",
+  // …and the five the dead-helper rule reads too (sweep #10 T16 round 2, items 22/24): without them the
+  // live run reported them "missing" rather than checking the served copies.
+  "offline.js", "netretry.js", "swreg.js", "shrinkimg.js", "auditsort.js",
 ];
 
 const mirror = mkdtempSync(join(tmpdir(), "lfh-live-panels-"));

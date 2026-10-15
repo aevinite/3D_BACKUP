@@ -68,13 +68,20 @@ R("P45593", "issue-raise.js", "issue-raise raises no error on the live bytes", a
 R("P15011", "public/panels/vendor/chart.umd.min.js", "The Dashboard's graphs draw with the vendored charts library", async () => {
   const b = await chromium.launch(); let p = null; try {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } }); await loginAs(ctx, "manager", BASE);
+    // The graphs only draw where there IS data, and a test restaurant can have no paid sale today
+    // (round 2: every card read "No sales in this range yet"). So ask for the widest range the admin
+    // allows a manager — the panel clamps it back to today if it is not allowed.
+    await ctx.addInitScript(() => { try { localStorage.setItem("lfh_dash_range", "last30"); } catch (e) {} });
     p = await ctx.newPage(); await covStart(p);
     await p.route("**/api/**", (r) => (["GET", "HEAD"].includes(r.request().method()) ? r.continue() : r.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })));
     await p.goto(`${BASE}/panels/editor/index.html`, { waitUntil: "load", timeout: 120000 }); await p.waitForFunction(() => !!window.LFH_OUTBOX, null, { timeout: 60000 }); await sleep(1500);
     const opened = await p.evaluate(() => { const t = document.querySelector('button.tab[data-tab="dash"]'); if (t) { t.click(); return true; } return false; });
     await sleep(6000);
     const r = await p.evaluate(() => { const cs = [...document.querySelectorAll("canvas")].filter((c) => c.offsetParent && c.width > 0); let drawn = 0; for (const c of cs) { try { const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 400) if (d[i]) { drawn++; break; } } catch (e) {} } return { lib: !!window.Chart, canvases: cs.length, drawn }; });
-    return ok(opened && r.lib && r.canvases > 0 && r.drawn > 0, JSON.stringify(r));
+    // Drawn graphs — or, when there is genuinely nothing to plot, every chart card SAYS so in words
+    // (an empty card with nothing written on it would be the fault).
+    const empty = await p.evaluate(() => [...document.querySelectorAll("*")].filter((n) => n.children.length === 0 && /No (sales|orders|dishes)[^.]* in this range yet/.test(n.textContent || "")).length);
+    return ok(opened && r.lib && ((r.canvases > 0 && r.drawn > 0) || (r.canvases === 0 && empty >= 3)), JSON.stringify({ ...r, emptyCardsSayingSo: empty }));
   } finally { if (p) await covStop(p).catch(() => {}); await b.close(); }
 }, "headless: the manager panel's Dashboard on :4416, writes answered by the test");
 
