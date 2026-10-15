@@ -553,6 +553,24 @@ has("guestbell.js", /rows: all\.slice\(0, 50\)/,
   }
 }
 
+// NO DEAD HELPER IN A SHARED FILE (sweep #10 T16 round 2, item 22). A coverage run found realtime.js
+// still declaring a debounce() nothing had called since burstDebounce took its job on 2026-08-06 — code
+// a reader trusts and nothing runs. Every function DECLARED in these files (a `function x(` statement,
+// or a `const x = …=>` / `= function`) must be named somewhere else in the same file. Named function
+// EXPRESSIONS (returned, assigned, run on the spot) are not declarations and are not counted.
+{
+  const SHARED = ["outbox.js", "offline.js", "netretry.js", "realtime.js", "connbadge.js", "errlog.js", "theme.js", "fitnums.js", "backstack.js", "undobar.js", "guestbell.js", "myprofile.js", "maint.js", "issue-raise.js", "swipehint.js", "swreg.js", "shrinkimg.js", "auditsort.js"];
+  for (const f of SHARED) {
+    let raw = ""; try { raw = fs.readFileSync(path.join(ROOT, "public/panels", f), "utf8"); } catch { fails.push(`${f}: missing — the dead-helper check had nothing to read`); continue; }
+    const c = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\\])\/\/.*$/gm, "$1");
+    const decl = [...c.matchAll(/(?:^|[;{}\n])\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|[;{}\n])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/g)].map((m) => m[1] || m[2]);
+    for (const n of new Set(decl)) {
+      const uses = (c.match(new RegExp("(^|[^\\w$.])" + n.replace(/\$/g, "\\$") + "(?![\\w$])", "g")) || []).length;
+      if (uses < 2) fails.push(`${f}: ${n}() is declared and never used — dead code a reader trusts and nothing runs (delete it, or call it)`);
+    }
+  }
+}
+
 if (fails.length) {
   console.error("\n✗ shared panel plumbing — " + fails.length + " check(s) failed:\n");
   for (const f of fails) console.error("  · " + f);

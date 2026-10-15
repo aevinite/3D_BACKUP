@@ -131,7 +131,9 @@
     return p;
   }
 
-  function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
+  // (A plain debounce(fn, ms) helper lived here; nothing had called it since burstDebounce below
+  // took over the job on 2026-08-06. Removed in sweep #10 T16 round 2, item 22 — a coverage run
+  // showed it could never run.)
 
   // catchUp() is a sibling of start(), not inside it, so the "hold this panel open while hidden"
   // answer has to live here for both to read. Set by start() when a caller passes keepAlive.
@@ -140,7 +142,7 @@
 
   // A BURST COALESCES HARDER THAN A TRICKLE (improvement #12, 2026-08-06).
   //
-  // The plain 200ms debounce above collapses a Preparing→Ready→Served flurry into one refetch,
+  // A plain 200ms debounce collapses a Preparing→Ready→Served flurry into one refetch,
   // which is what makes the boards feel instant. What it does NOT collapse is a device DRAINING
   // its offline queue: those replays go one at a time, each awaiting its own round trip, so twenty
   // saved changes arrive spread over several seconds — every one of them outside the 200ms window,
