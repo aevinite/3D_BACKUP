@@ -1105,6 +1105,21 @@ flush();
     check("item 21 — an unknown answer to a QR call is said honestly, never as 'Already sent'",
       /\} else if \(res\.reason === "already_sent"\) \{/.test(c) && /message: "Couldn't call staff from here"/.test(c)); }
 }
+// ── 14. ROUND 3 OF SWEEP #10 T3 — THE SEVEN THE OWNER PICKED ON 2026-10-15 (items 25–31) ──────────
+//
+// One sub-block per item, asserted on the CODE (comments stripped). The behaviour behind each is also
+// DRIVEN (scripts/sweep/t3s10/r3), and each guard was broken once on purpose and seen red.
+{
+  say("\n── 14. sweep #10 T3 round 3 — items 25 to 31 ──");
+  const r3 = (p) => codeOnly(read(p));
+  const css = r3("app/globals.css");
+  // item 25 — the buttons' shine moves by transform, never by `left`, and is defined once
+  { const kf = [...css.matchAll(/@keyframes (shimmer|shimmerBack)\s*\{([^{}]*\{[^}]*\}[^{}]*)*\}/g)];
+    check(`item 25 — one shine keyframe, not three (${kf.length} found)`, kf.length === 1 && kf[0][1] === "shimmer");
+    check("item 25 — the shine slides with transform, so it costs no layout on every frame",
+      !!kf[0] && /transform:\s*translateX\(-100%\)/.test(kf[0][0]) && !/\bleft\s*:/.test(kf[0][0]));
+    check("item 25 — none of the three shining buttons starts its stripe with `left: -100%` any more",
+      !/(\.back-btn|\.ar-btn|\.btn-cyan)::before\s*\{[^}]*left:\s*-100%/.test(css)); }}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
