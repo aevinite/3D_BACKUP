@@ -1233,6 +1233,11 @@ flush();
   { const gone = ["ot-sheet", "ot-hide-link", "ot-cancelled-note", "ot-table-row", "ot-save", "order-confirm-done", "allergy-banner", "allergy-popup", "cart-item-warn"];
     const left = gone.filter((c) => new RegExp(`\\.${c}\\b`).test(css));
     check(`item 39 — the retired detail sheet, success step, allergy banner and warn line have no styles left (${left.join(", ") || "none"})`, !left.length); }
+  // item 41 (owner, 2026-10-16) — on a phone the bill's bin kept only 25 of its 44 px: its row was too narrow
+  { const bin = (css.match(/\.cart-item-controls \.remove-item \{[^}]*\}/) || [""])[0];
+    check("item 41 — the bill's bin can never be squeezed by its row", /flex: none;/.test(bin) && /width: 44px; height: 44px;/.test(bin));
+    check("item 41 — under 380 px the bill's −, +, Edit and bin start under the photo, where they fit", /@media \(max-width: 379px\) \{ \.cart-item-controls \{ grid-column: 1 \/ 4; \} \}/.test(css));
+    check("item 41 — under 340 px their gaps go to 5 px, the only way a 320 px phone fits them", /@media \(max-width: 339px\) \{ \.cart-item-controls \{ gap: 5px; \} \}/.test(css)); }
 }
 // ── 18. A SLUG NOBODY OWNS IS "NO RESTAURANT", NEVER RESTAURANT #1 (sweep #10 T4 round 2, 2026-10-15) ──
 // The not-found page for /r/<a slug nobody owns>/… still mounts every guest widget (GuestChrome sits in
