@@ -1521,6 +1521,19 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── A FREE TABLE ON A PHONE STILL SAYS "FREE" (sweep #10 T12 round 2, item 12) ─────────────────────
+// At four per row a phone tile is ~50px inside, and the container rule that drops the served COUNT
+// (it has its bar) also dropped the plain state line — a free table read as a bare number.
+{
+  const css = fs.readFileSync(path.join(ROOT, CSS), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  check(
+    "tablet: on a narrow tile the plain state word (Free, Wants in) stays while the count goes",
+    /@container \(max-width: 56px\) \{ \.t-linenum \{ display: none; \} \}/.test(css)
+      && /@container \(max-width: 56px\) \{ \.t-line-plain \.t-linenum \{ display: block;/.test(css),
+    `${CSS}: the plain line IS the state on a free tile — keep it under 56px, smaller, instead of hiding it.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");
