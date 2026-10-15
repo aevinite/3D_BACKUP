@@ -115,6 +115,9 @@
    *  api      — the panel's own api(method, path) helper (carries its auth + action id)
    *  required — true when this restaurant refuses a bill without the details
    *  print    — whether these lines will appear on the printed bill (shown as a hint)
+   *  loyalty  — true ONLY when this restaurant has Loyalty points switched on. The privacy line names
+   *             rewards only then (owner, 2026-10-16: a feature a restaurant was not given leaves no
+   *             trace — "they should not know that that feature exists"). Absent = off.
    *  prefill  — { phone, name } this BILL already carries (owner, 2026-07-30: reopening a
    *             bill and re-issuing its invoice brings back that session's own customer,
    *             filled in and editable — nobody retypes it, and it never leaks between tables)
@@ -140,7 +143,7 @@
             <div class="bcust-htxt">
               <h3>${esc(o.title || "Who is this bill for?")}</h3>
               <p>Mobile first — if they have eaten here before, the name fills itself in.${o.print === false ? " Saved, but <b>not printed</b> on the bill." : ""}</p>
-              <p class="bcust-why">The number is kept only to recognise a returning guest and for their bill history — so repeat customers can be rewarded later. It is never shared or used for marketing.</p>
+              <p class="bcust-why">The number is kept only to recognise a returning guest and for their bill history${o.loyalty === true ? " — so repeat customers can be rewarded later" : ""}. It is never shared or used for marketing.</p>
             </div>
             <button class="tbl-modal-close bcust-x" aria-label="Close">✕</button>
           </div>

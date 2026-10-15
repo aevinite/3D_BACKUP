@@ -178,6 +178,10 @@ export function billIdentity(
   settings: Record<string, unknown>,
   restaurant: Record<string, unknown>,
 ): BillIdentity;
+/** Is a `settings.modules` bag module (mig 326 — Loyalty points) ON for this restaurant? Allowed by
+ *  Aevidine and, when the owner controls it, enabled. Same rule as lib/tableTags.ts moduleBagLadder().
+ *  For what a screen SAYS only — the server stays the authority for anything that moves points. */
+export function moduleOn(settings: Record<string, unknown> | null | undefined, key: string): boolean;
 export function splitTax(
   taxWhole: number,
   comps: { label?: string; rate?: number }[],

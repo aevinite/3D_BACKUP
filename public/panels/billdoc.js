@@ -265,6 +265,23 @@
     };
   }
 
+  /* moduleOn(settings, key) — IS A SWITCHED MODULE ON FOR THIS RESTAURANT? (owner, 2026-10-16)
+     *"if you don't even provide a feature, they should not know that that feature exists."* A module
+     that lives in the `settings.modules` bag (mig 326 — Loyalty points is the first) is ON only when
+     Aevidine has ALLOWED it and, if the owner controls it, the owner has it enabled. The identical rule
+     is lib/tableTags.ts → moduleBagLadder().effective on the server; this file takes no imports, so
+     the rule is repeated here for the panels and the previews, and verify:print-helper runs both over
+     every combination. An absent entry is OFF — a restaurant nobody touched never sees a hint.
+     The SERVER stays the authority for anything that moves points; this is for what a screen SAYS. */
+  function moduleOn(settings, key) {
+    var m = (settings || {}).modules;
+    var e = (m && typeof m === "object" && m[key] && typeof m[key] === "object") ? m[key] : {};
+    var allowed = e.allowed === true;
+    var ownerControl = e.owner_control === true;
+    var enabled = e.enabled !== false;
+    return allowed && (!ownerControl || enabled);
+  }
+
   /* billRows(d) — the whole-rupee money rows a bill SHOWS, worked out once so the paper and every
      screen quote the same figures and every one of them ADDS UP.
 
@@ -2352,6 +2369,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     kotLineHtml: kotLineHtml,
     kotWhen: kotWhen,
     billIdentity: billIdentity,
+    moduleOn: moduleOn,
     splitTax: splitTax,
     discPct: discPct,
     phone10: phone10,

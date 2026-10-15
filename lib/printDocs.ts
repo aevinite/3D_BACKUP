@@ -10,7 +10,7 @@
 // It also means a job cannot print a stale bill: the document is built at the moment of printing,
 // from the rows as they are then.
 import BILLDOC from "@/public/panels/billdoc.js";
-import { loyaltyStateFor, settledTotalOf } from "@/lib/loyalty";
+import { loyaltyStateFor, loyaltyRules, settledTotalOf } from "@/lib/loyalty";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
@@ -481,6 +481,15 @@ export async function sampleBillHtml(rid: string): Promise<string> {
     subtotal, taxable_base: subtotal, nontax_amount: 0, discount: 0,
     created_at: new Date().toISOString(), deleted_at: null,
   } as Record<string, unknown>;
+  // THE POINTS LINES, ONLY WHERE LOYALTY IS ON (owner, 2026-10-16) — so a restaurant testing its
+  // paper sees the paper its guests get, and one without the module sees no hint of it. loyaltyRules()
+  // asks the server's own ladder first and answers { on:false } without a read when the module is off;
+  // when it is on it carries THIS restaurant's earning rule, so the sample earns what a real bill would.
+  const rules = await loyaltyRules(rid).catch(() => ({ on: false } as { on: boolean; earn_per_100?: number; min_redeem?: number }));
+  const sampleTotal = BILLDOC.billMoney([order], settings).total;
+  const loyalty = rules.on
+    ? (() => { const earn = Math.floor((sampleTotal * (rules.earn_per_100 ?? 5)) / 100); return { earn, balance: 120, toNext: Math.max(0, (rules.min_redeem ?? 100) - (120 + earn)) }; })()
+    : null;
   return testBand(BILLDOC.billDocHtml({
     ...BILLDOC.billData({
       settings, restaurant: (restQ.data || {}) as Record<string, unknown>,
@@ -492,6 +501,7 @@ export async function sampleBillHtml(rid: string): Promise<string> {
       autoPrint: false,
     }),
     noBar: true,
+    loyalty,
   }));
 }
 

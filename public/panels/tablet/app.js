@@ -4531,7 +4531,9 @@ async function genInvoice(sid) {
     // customer (owner, 2026-07-30) — scoped to this session id, never another table's.
     const sess = (state.data.sessions || []).find((x) => x.id === sid);
     const prefill = sess && sess.cust_phone ? { phone: sess.cust_phone, name: sess.cust_name } : null;
-    const cust = await LFH_BILLCUST.ask({ api, required: true, print: s.bill_customer_print !== false, prefill });
+    const cust = await LFH_BILLCUST.ask({ api, required: true, print: s.bill_customer_print !== false, prefill,
+    // rewards are named on the sheet only where Loyalty is switched on (owner, 2026-10-16 — no trace when off)
+    loyalty: !!(window.LFH_BILLDOC && LFH_BILLDOC.moduleOn && LFH_BILLDOC.moduleOn(s, "loyalty")) });
     if (!cust) return;                                // backed out — nothing is issued
     body = { cust_phone: cust.phone, cust_name: cust.name };
   }
@@ -4624,7 +4626,7 @@ function openDiscountModal(order, opts = {}) {
       <div class="disc-cap-note" style="display:none;margin-top:10px;padding:9px 11px;border-radius:9px;font-size:12.5px;font-weight:600;line-height:1.45;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.45);color:#fca5a5"></div>
       <div style="margin-top:8px;text-align:center;font-size:12px;color:var(--muted)">Change any one of the three — the other two follow.</div>
       <div style="font-size:13px;font-weight:700;margin:15px 0 6px">Reason <span style="color:var(--muted);font-weight:400">(optional)</span></div>
-      <input type="text" class="disc-note-input" maxlength="200" placeholder="e.g. loyalty, comp, manager approval" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px">
+      <input type="text" class="disc-note-input" maxlength="200" placeholder="e.g. regular guest, comp, manager approval" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px">
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)">
       ${current > 0 ? `<button class="btn danger disc-remove-btn">Remove</button><span style="flex:1"></span>` : ""}

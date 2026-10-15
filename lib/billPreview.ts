@@ -194,6 +194,16 @@ export function billPreviewHtml(settingsIn: Settings, mode: BillMode, restaurant
   // Printing the customer's details is the restaurant's own switch — respect it here too, or
   // the preview would promise a line the printer leaves off.
   const showCust = settings.bill_customer_print !== false;
+  // LOYALTY POINTS ONLY WHERE THE RESTAURANT HAS THEM (owner, 2026-10-16: "the preview will also
+  // change … while that feature is on. Otherwise, there wouldn't be any kind of clue"). Off → the
+  // sample is byte-for-byte what it was, with no word about points. On → the same two lines a real
+  // bill prints, worked out at mig 401's default rule (5 points per ₹100, 100 to spend) because this
+  // page cannot read the restaurant's own rule table; the test print in lib/printDocs.ts reads it.
+  // BILLDOC.moduleOn is the same allowed/owner-control/enabled rule the server's ladder uses.
+  const loyaltyOn = BILLDOC.moduleOn(settings, "loyalty");
+  const sampleBalance = 120;
+  const sampleEarn = Math.floor((total * 5) / 100);
+  const loyalty = loyaltyOn ? { earn: sampleEarn, balance: sampleBalance, toNext: Math.max(0, 100 - (sampleBalance + sampleEarn)) } : null;
 
   return BILLDOC.billDocHtml({
     logo: /^https?:\/\//i.test(s(restaurant.logo_url)) ? s(restaurant.logo_url) : "",
@@ -224,10 +234,12 @@ export function billPreviewHtml(settingsIn: Settings, mode: BillMode, restaurant
       ? "MRP items are sold at their printed price — the GST shown above already includes the tax inside it. Nothing is added on top."
       : "MRP items are sold at their printed maximum retail price. No GST is charged on them, so nothing is added on top.",
     autoPrint: false,
+    loyalty,
     note: (parcel
       ? "A sample parcel bill from this restaurant's own settings — the exact page the counter prints. The same details as a table bill, with PARCEL where the table would be."
       : "A sample bill from this restaurant's own settings — the exact page the manager panel prints. It carries an add-on, a discount and a named customer so the busiest version of the layout is visible.")
       + (composition ? " This restaurant is set to the composition scheme, so no GST line is shown to the diner and a whole-bill discount has nothing taxable to come off." : "")
-      + (perDishModes ? " Dishes may set their own tax mode here, so a sample MRP item is included — its price is final and nothing is added to it." : ""),
+      + (perDishModes ? " Dishes may set their own tax mode here, so a sample MRP item is included — its price is final and nothing is added to it." : "")
+      + (loyaltyOn ? " Loyalty points are on for this restaurant, so the points lines a guest sees are shown too (at the default 5 points per ₹100)." : ""),
   });
 }
