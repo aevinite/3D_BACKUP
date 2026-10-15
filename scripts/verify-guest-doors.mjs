@@ -1175,7 +1175,14 @@ flush();
       /const recordTotal = taxKnown \? totalUsd : 0;/.test(c) && !/total: totalUsd/.test(c) && /const totalS = recordTotal/.test(c));
     check("item 31 — a live card with no recorded total shows no ₹0 Total row", /\{o\.total > 0 && <div className="live-order-total">/.test(c));
     check("item 31 — while unknown, the rules are asked for again only on the realtime nudge and the 60 s backstop",
-      /if \(!open \|\| taxKnown \|\| !restaurantId\) return;[\s\S]{0,400}addEventListener\("lfh:rt-tick", again\);\s*const iv = setInterval\(again, RT_BACKUP_MS\);/.test(c)); }}
+      /if \(!open \|\| taxKnown \|\| !restaurantId\) return;[\s\S]{0,400}addEventListener\("lfh:rt-tick", again\);\s*const iv = setInterval\(again, RT_BACKUP_MS\);/.test(c));
+    const e = r3("app/error.tsx"), g = r3("app/global-error.tsx");
+    check("item 31 — the guest error screen's Try again asks the SERVER again (Next's retry, not reset)",
+      /const again = retry \|\| reset;/.test(e) && /window\.location\.reload\(\) : again\(\)\)/.test(e));
+    check("item 31 — …and tries by itself up to three times, spread out, only for a server-side failure and only on screen",
+      /const AUTO_WAITS_MS = \[4000, 12000, 30000\];/.test(e) && /if \(!error\?\.digest \|\| isStaleCodeError/.test(e) && /document\.visibilityState !== "visible"/.test(e) && /0\.85 \+ Math\.random\(\) \* 0\.3/.test(e));
+    check("item 31 — the root error screen's button asks the server again too", /\(retry \|\| reset\)\(\)/.test(g)); }
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9
