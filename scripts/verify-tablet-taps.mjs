@@ -1495,6 +1495,18 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── THE "YOUR TABLES" STRIP COUNTS ONLY TABLES THAT EXIST (sweep #10 T12 round 2, item 7) ────────────
+// A rota naming 1–500 on a 30-table floor read "Your tables 1–500 · 500 tables". The strip must count
+// the rota's tables that are on the floor (floorTableList), and must still never hide for covering it all (R2).
+{
+  const fn = src.slice(src.indexOf("function renderMySection"), src.indexOf("// tableLabel(t): the table's display name"));
+  check(
+    "tablet: the 'Your tables' strip names only the rota's tables that are on this floor",
+    /const onFloor = new Set\(floorTableList\(\)\.map\(String\)\);/.test(fn) && /rangeText\(real\)/.test(fn) && /\$\{real\.length\} table/.test(fn) && !/rangeText\(my\)/.test(fn),
+    `${TABLET}: renderMySection must count my ∩ floorTableList(), not the raw rota — or a wide rota promises tables nobody can see.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

@@ -1167,8 +1167,16 @@ function renderMySection() {
   // already says it, in more words and more kindly. Two identical warnings stacked on a
   // 360px phone just eats the screen.
   if (my === null || !my.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+  // THE TABLES THAT ARE REALLY ON THIS FLOOR (owner's yes to sweep #10 T12 item 7, 2026-10-15). A rota
+  // can name more tables than the floor has — diagt1's said 1–500 on a 30-table floor — and the strip
+  // used to repeat it: "Your tables 1–500 · 500 tables". It now names only the ones that exist: the
+  // floor plan plus any occupied table drawn above it (floorTableList), so it can never promise a table
+  // the waiter cannot see. Still never hidden for covering the whole floor (R2).
+  const onFloor = new Set(floorTableList().map(String));
+  const real = my.filter((n) => onFloor.has(String(n)));
+  if (!real.length) { el.style.display = "none"; el.innerHTML = ""; return; }
   el.style.display = "flex";
-  el.innerHTML = `<span class="ms-key">Your tables</span><b>${esc(rangeText(my))}</b><span class="ms-n">${my.length} table${my.length === 1 ? "" : "s"}</span>`;
+  el.innerHTML = `<span class="ms-key">Your tables</span><b>${esc(rangeText(real))}</b><span class="ms-n">${real.length} table${real.length === 1 ? "" : "s"}</span>`;
 }
 // tableLabel(t): the table's display name (mig 131) with the number kept alongside,
 // else "Table t". Display-only — bills/KOTs/ids all keep the number.
