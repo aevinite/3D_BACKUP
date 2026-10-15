@@ -250,6 +250,70 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   }
 }
 
+// ── TWO SAVES OF ONE THING TAKE TURNS (sweep #10 T12 round 2, item 10; migration 422) ──────────────
+//
+// expectClash() READS the row and compares; the handler WRITES later, in another round trip. Two saves of
+// the same row arriving in the same instant both read the old value, both pass, and the later write
+// silently replaces the earlier one — measured: two tablets asking a dish's qty 1 → 2 and 1 → 3 at once
+// were BOTH answered 200 and nobody was told. A dispatcher that calls expectClashInTurn() instead first
+// takes a short TURN on the row its expectation names (lfh_edit_turn_take); a second save of that row
+// waits for the first to finish and then compares against what the first one wrote — so it is refused,
+// as if it had arrived a moment later. The route releases the turn when its request ends
+// (releaseEditTurnAfter around the handler); a request that died holding one is taken over after 8s.
+//
+// FAILS OPEN, like everything in this file: no turn table yet (a stack without migration 422), a database
+// blip, or a wait longer than TURN_WAIT_MS all fall through to the plain comparison — never a refused save.
+const TURN_TTL_MS = 8000;
+const TURN_WAIT_MS = 4000;
+const turns = new WeakMap<NextRequest, { key: string; token: string }>();
+function turnKeyOf(req: NextRequest, rid: string): string | null {
+  try {
+    const raw = req.headers.get("x-lfh-expect");
+    if (!raw) return null;
+    const w = JSON.parse(raw) as { table?: string; id?: string; where?: Record<string, unknown>; fields?: unknown };
+    const table = String(w?.table || "");
+    if (!COMPARABLE_TABLES[table] || !w.fields || typeof w.fields !== "object") return null;
+    const id = String(w.id || "");
+    if (id) return `${rid}:${table}:${id}`;
+    const cols = COMPOSITE_KEYS[table] || [];
+    if (!w.where || typeof w.where !== "object" || !cols.length) return null;
+    const parts = cols.map((c) => String((w.where as Record<string, unknown>)[c] ?? ""));
+    return parts.every(Boolean) ? `${rid}:${table}:${parts.join("|")}` : null;
+  } catch { return null; }
+}
+async function takeEditTurn(req: NextRequest, rid: string): Promise<void> {
+  const key = turnKeyOf(req, rid);
+  if (!key || turns.has(req)) return;
+  const token = crypto.randomUUID();
+  const until = Date.now() + TURN_WAIT_MS;
+  for (let step = 0; ; step++) {
+    const res = await sb.rpc("lfh_edit_turn_take", { p_key: key, p_rid: rid, p_token: token, p_ttl_ms: TURN_TTL_MS });
+    if (res.error) return;                                     // fail open — see above
+    if (res.data === true) { turns.set(req, { key, token }); return; }
+    if (Date.now() >= until) return;                           // waited long enough — compare anyway
+    await new Promise((r) => setTimeout(r, Math.min(120 + step * 60, 400)));
+  }
+}
+/** expectClash, after waiting this request's turn on the row it names. Use it in a dispatcher whose
+ *  route export is wrapped in releaseEditTurnAfter(), so the turn is given back when the request ends. */
+export async function expectClashInTurn(req: NextRequest, rid: string): Promise<ClashInfo | null> {
+  await takeEditTurn(req, rid);
+  return expectClash(req, rid);
+}
+export async function releaseEditTurn(req: NextRequest): Promise<void> {
+  const t = turns.get(req);
+  if (!t) return;
+  turns.delete(req);
+  try { await sb.rpc("lfh_edit_turn_release", { p_key: t.key, p_token: t.token }); } catch { /* the 8s expiry frees it */ }
+}
+/** Wrap a route handler so a turn taken while it ran is always given back, whatever it returned or threw. */
+export function releaseEditTurnAfter<A extends unknown[], R>(fn: (req: NextRequest, ...rest: A) => Promise<R>) {
+  return async (req: NextRequest, ...rest: A): Promise<R> => {
+    try { return await fn(req, ...rest); }
+    finally { await releaseEditTurn(req); }
+  };
+}
+
 // Money columns: the refusal says a value MOVED without repeating the figure, because this gate
 // runs before the per-action permission check (see where it's used).
 const QUIET_COLUMNS = new Set(["discount", "price", "payment_status", "total"]);

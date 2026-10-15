@@ -12,7 +12,7 @@ import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson, expectClash } from "@/lib/clash";
+import { replayClash, clashJson, expectClashInTurn, releaseEditTurnAfter } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
@@ -3216,7 +3216,7 @@ function invalidateFloorAfter(fn: (req: NextRequest, ctx: Ctx) => Promise<NextRe
 
 // ── POST ─────────────────────────────────────────────────────────────────────
 // Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
-export const POST = withIdempotency(invalidateFloorAfter(postImpl), "editor");
+export const POST = withIdempotency(invalidateFloorAfter(releaseEditTurnAfter(postImpl)), "editor");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   // Attribute every logged action to the signed-in staff member (name = their login;
@@ -3439,7 +3439,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // changed it — and tell that person what it says now. One gate for every action here:
     // a feature opts in from its CALL SITE (see the NEW-FEATURE CHECKLIST in CLAUDE.md), so
     // this cannot be forgotten on the server side when a new endpoint is added.
-    const overwrite = await expectClash(req, rid);
+    const overwrite = await expectClashInTurn(req, rid);   // waits its turn on that row first (lib/clash.ts, mig 422)
     if (overwrite) return clashJson(overwrite);
 
     // ── table-sections — set ONE waiter's tables (waiter sections, mig 222) ────
@@ -6356,7 +6356,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 const VOIDED_MSG = "That ticket was cancelled — restore it first if it should go back to the kitchen.";
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
-export const PATCH = withIdempotency(invalidateFloorAfter(patchImpl), "editor");
+export const PATCH = withIdempotency(invalidateFloorAfter(releaseEditTurnAfter(patchImpl)), "editor");
 async function patchImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
@@ -6395,7 +6395,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
     // party's live order. A live write carries no replay marker, so this costs it nothing.
     const clash = await replayClash(req, rid, a, id, path[2], body as Record<string, unknown> | null);
     if (clash) return clashJson(clash);
-    const overwrite = await expectClash(req, rid);
+    const overwrite = await expectClashInTurn(req, rid);   // waits its turn on that row first (lib/clash.ts, mig 422)
     if (overwrite) return clashJson(overwrite);
 
     if (a === "orders" && id) {
