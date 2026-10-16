@@ -128,6 +128,7 @@ const EXPLAINED_WRITES = {
   "scripts/verify-t10-manager-writes.mjs": "hermetic — the manager and tablet routes run in-process against the in-memory stub (scripts/panel-stubs), a fresh world per check; its POSTs never leave the process",
   "scripts/t16r3/fa-queue-sequences.mjs": "hermetic — its `method: \"POST\"` sends go through outbox.js on a page served by the suite's own local server (scripts/t16r3/server.mjs), whose every /api/ request is answered by the test, never a network call",
   "scripts/t16r3/fi-offline.mjs": "hermetic — every queued POST goes to the suite's own local stand-in server (scripts/t16r3/server.mjs), never the app or its database",
+  "scripts/t16r3/fo-mutation-aimed.mjs": "hermetic — its queued POSTs go to the suite's own local stand-in server (scripts/t16r3/server.mjs), never the app or its database",
   "scripts/t16r3/fj-live.mjs": "hermetic — its POSTs and the live-update client are the suite's own stand-ins on its own local server (scripts/t16r3/server.mjs); nothing connects anywhere",
   "scripts/sweep/t16s10/new-l.mjs": "hermetic — its `method: \"POST\"` writes go through outbox.js on a harness page whose every /api/ request is answered by the test (browser.mjs), never a network call",
   "scripts/sweep/t16s10/new-a.mjs": "hermetic — its `method: \"POST\"` calls go to netretry.js loaded in memory with a scripted fake fetch (loadNR), never a network call",
