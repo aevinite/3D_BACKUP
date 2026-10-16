@@ -986,6 +986,9 @@ dateBad.length === 0
   if (bq({ gstin: "24AAAAA0000A1Z5" }) !== "Tax Invoice") wrong.push("a registered restaurant's banquet sheet is no longer a Tax Invoice");
   if (bq({ gstin: "" }) !== "Bill") wrong.push("a banquet sheet with no GSTIN still calls itself a Tax Invoice");
   if (bq({ gstin: "24AAAAA0000A1Z5", price_tax_mode: "composition" }) !== "Bill of Supply") wrong.push("a composition restaurant's banquet sheet is not a Bill of Supply");
+  // …and the admin's preview may not show tax a restaurant with no GSTIN never charges
+  const { readFileSync: rfPv } = await import("node:fs");
+  if (!/const taxPrecise = composition \|\| pct === 0 \? 0 :/.test(rfPv(join(ROOT, "lib/billPreview.ts"), "utf8"))) wrong.push("the bill preview builds tax rows from the named lines even where the rate is 0 (no GSTIN)");
   wrong.length
     ? bad("a restaurant with no GSTIN can still be charged or shown tax", wrong.join(" · "))
     : ok("a restaurant with no GSTIN charges no tax — on the bill, on a banquet, and in the guest's cart; an older bill keeps what it charged");
