@@ -1190,6 +1190,12 @@ console.log("\nT11-E · saying so when a read failed");
     !/p\.v \/ avgTicket/.test(dashPage) && !/about \$\{/.test(dashPage) && /v: d\.ord,/.test(dashPage),
     "app/owner/page.tsx — build the Orders chart from timeseries[].orders; an estimate cannot add up to the headline.",
   );
+  // item 3 — the sheet's heading said "all 2 restaurants" over figures covering one (Reports withheld).
+  check(
+    "item 3 · the docket names the restaurants its figures really cover (restScopeText), never 'all N'",
+    /const who = activeRid\s*\n?\s*\? \(ov\?\.restaurants\.find\(\(r\) => r\.id === activeRid\)\?\.name \?\? "this restaurant"\)\s*\n?\s*: restScopeText;/.test(dashPage),
+    "app/owner/page.tsx — the docket heading must use restScopeText, which counts only the reported set.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);

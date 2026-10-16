@@ -2409,9 +2409,15 @@ export default function OwnerDashboard() {
         if (!d) return null;
         // WHOSE numbers these are, said on the popup itself: "it should also show for all restaurant
         // or of a particular restaurant". The heading answers it before he reads a figure.
+        // ── AND ONLY THE RESTAURANTS THE FIGURES COVER (sweep #10 T20, item 3) ───────────────────
+        // This said `all ${restCount} restaurants` — every restaurant he owns, including one whose
+        // Reports the admin has withheld, whose money the overview sends as ZERO and the analytics
+        // route leaves out. So on an estate of two with one withheld, every sheet was headed "all 2
+        // restaurants" over figures covering one: the fault `restScopeText` was written for on
+        // 2026-08-05 (row P20828), on the one surface that never used it.
         const who = activeRid
           ? (ov?.restaurants.find((r) => r.id === activeRid)?.name ?? "this restaurant")
-          : `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`;
+          : restScopeText;
 
         // ── WHAT EACH TILE DRAWS ────────────────────────────────────────────────────────────
         // Built from `pl(globalRange)`, which is already in memory for this scope and range, and
