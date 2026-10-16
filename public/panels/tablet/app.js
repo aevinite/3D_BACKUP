@@ -4382,7 +4382,10 @@ async function recordTip(t, tip, pin, opts = {}) {
   } catch (e) {
     // false = the error styling on this panel (toast(msg, ok)) — a failure dressed as a success is
     // the same fault in a different coat.
-    toast(`Bill is paid, but the ${inr(amt)} tip was not recorded — ${(e && e.message) || "the system refused it"}. Add it from the manager panel.`, false);
+    // ONE FULL STOP (sweep #10 T12 round 3, item 5). The server's sentences end with their own, so
+    // this read "Tips are switched off here.. Add it from the manager panel." on every refused tip.
+    const why = String((e && e.message) || "the system refused it").trim().replace(/[.\s]+$/, "");
+    toast(`Bill is paid, but the ${inr(amt)} tip was not recorded — ${why}. Add it from the manager panel.`, false);
   }
 }
 

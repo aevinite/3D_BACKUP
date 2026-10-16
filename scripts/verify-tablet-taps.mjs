@@ -1592,6 +1592,16 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── A REFUSED TIP'S SENTENCE HAS ONE FULL STOP (sweep #10 T12 round 3, item 5) ───────────────────────
+{
+  const i = src.indexOf("async function recordTip("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: a refused tip quotes the server's sentence without doubling its full stop",
+    /const why = String\(\(e && e\.message\) \|\| "the system refused it"\)\.trim\(\)\.replace\(\/\[\.\\s\]\+\$\/, ""\);/.test(body),
+    `${TABLET} recordTip: "…switched off here.. Add it" — strip the server's own stop before adding ours.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");
