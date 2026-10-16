@@ -66,14 +66,33 @@ with its buttons off first) · lib/guestName.ts's two catches cannot be reached 
 net · components/SessionGate.tsx `pollRef` is cleared but never set (dead, harmless) · 15 lab "reds" were the lab's own `http://`
 origin (no geolocation, no crypto.randomUUID) — the lab is https now.
 
-**Round 2 — outside this territory:** `/q/<a code nobody owns>` shows GuestNotFound with no restaurant pinned, so the guest widgets
-fall back to French House there too (app/q/[code]/page.tsx — the page that knows the code matched nothing; fix: pin "no
-restaurant" for the tab, and lib/restaurant-context.tsx then reads it — offered in the report) · verify:scoped-reads:
+**Round 2 — outside this territory:** ~~`/q/<a code nobody owns>` lets the guest widgets fall back to French House~~ — FIXED
+2026-10-16 on the owner's word (R2-5 below; app/q/[code]/page.tsx touched for it) · verify:scoped-reads:
 lib/guestTokenRestaurant.ts reads session_members by token with no restaurant filter · verify:rpc-scoped:
 scripts/sweep/t10s10/new-r3.mjs:719 · verify:guards-alive: t27r2 / verify-admin-* name three retired admin routes,
 verify-guest-menu-switch.mjs has no app-up preflight or --base, t11s10/run.mjs ends on a bare process.exit · T5 static P58782
 (public/sw.js), P59073 / P59080 (components/GuestNotFound.tsx), P59116 (components/ChefPopup.tsx dispatches table-scanned 3×,
 the row expects 2) — all red on main, none in these files.
+
+**Round 2 follow-up (2026-10-16) — the owner: "do the qr one".**
+
+| item | where it lives | what was wrong | guard |
+|---|---|---|---|
+| R2-5 | Guest menu → scan a QR code that matches no table (a replaced sticker, a typo, a restaurant whose menu is off) → the "This QR code isn't active" page | watched on the backup site before the fix: that page asked the database for **French House's** settings, its ban list and its returning-customer greeting (`lfh_guest_settings` naming restaurant #1). The dead-code page now stamps its own address as "no restaurant" before hydration (`lib/tenantStorage.ts` → `NO_TENANT_KEY`); `tenantSlug()` answers `""` on exactly that address; the restaurant context asks nothing; a live code clears the mark | verify:guest-doors §19 · P173967–P173968 (live) · P173988–P173998 |
+| R2-6 | Guest menu → a dish page → leave a review with a name, in a private window or on a phone whose storage is full | **the item-10 promise had come undone**: the review said "saved as your name — Mia" for a name the next visit will not have. Cause: sweep #10 T3 round 4's item 47 (a refused write is now kept in the page's memory, so a basket survives) made my read-back always succeed. The answer is now checked against the phone's own storage | verify:guest-doors §13 (two lines) · P173218 (re-aimed) |
+
+Re-aimed for the same item-47 move (intended, not faults): P173053 (a blocked storage keeps tsetFor's value for the page) and
+P173117 (the scanned table is kept for the page). The screen lab's address hook now follows an in-app move, as Next's does, so a
+check could see the context leave "ready" (P173998 — it caught the one break of the new code that had survived).
+Measured after both fixes: every break point of the three shared files touched (tenantStorage 26, restaurant-context 23,
+guestName 11 — 60) tried: 50 caught; 10 make no difference — six in restaurant-context and two in tenantStorage's run-once
+legacy move as in round 2, one inside a comment in guestName, and memGet's `?? null` (an empty saved value reads as nothing
+either way; nothing writes one). The first pass showed line 191 surviving only because the break test did not load the new
+block — fixed in mutate.mjs, then caught by P173998. All non-live blocks 866/866 · block l 8/8 on :4404.
+**Outside this territory, found 2026-10-16:** `verify:offline` stops at 20 passed / 1 failed — Manager panel → the offline
+clash test cannot seat its table: the seed order is refused "This looks identical to an order you just sent." (the
+duplicate-order rule in app/api/editor/[...path]/route.ts). IDENTICAL on main (`--base https://3-d-backup.vercel.app`,
+5dc40893, without these commits) and on this branch — not these files; left for the manager-panel / offline owner.
 
 **Round 2 — improvements, not faults:** the table card's remembered "keep it open" choice is overridden by its open-then-fold
 greeting on every reload (lib: components/SessionStatusWidget.tsx) — harmless, the owner may prefer it either way.

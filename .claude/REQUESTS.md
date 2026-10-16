@@ -1940,8 +1940,13 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **A busy second at the join no longer wipes the dishes a diner brought** — Guest menu → join a table that has its own basket: your own dishes reach the table on the next refresh. Guard: verify:guest-doors §15.
 - [x] **The table bill's "live" dot stops pulsing when a refresh fails** — Guest menu → basket → "Your table". Guard: verify:guest-doors §16.
 - [x] **A refused join is said as what it was** — Guest menu → table sheet: "too many tries — wait a moment" / "speak to a member of staff", not "couldn't reach the restaurant". Guard: verify:guest-doors §17.
-- [ ] **WAITING ON THE OWNER:** `/q/<a code nobody owns>` still lets the guest widgets fall back to French House — the fix belongs to the QR-door page (another territory). See the report's Part 4.
+- [x] ~~**WAITING ON THE OWNER:** `/q/<a code nobody owns>` still lets the guest widgets fall back to French House~~ — the owner said "do the qr one" on 2026-10-16; done, see that day's entry.
 
+
+## 2026-10-16 — owner (sweep #10 T4): "do the qr one"
+
+- [x] **A QR code that matches no table no longer makes the page ask about French House** — Guest menu → scan a replaced or mistyped sticker → "This QR code isn't active": the page now asks the database about no restaurant at all (watched asking for French House's settings, ban list and customer greeting on backup before the fix). A live sticker scanned next in the same tab is that restaurant's menu as before. Guard: verify:guest-doors §19.
+- [x] **Found on the way, fixed: a private window was again told "saved as your name"** — Guest menu → a dish → leave a review with a name, in a private window or with the phone's storage full: the thank-you no longer promises a name the next visit will not have. Another terminal's basket fix (a refused write kept in the page's memory) had quietly undone the 13 Oct fix. Guard: verify:guest-doors §13.
 
 ## 2026-10-16 — owner (sweep #10 T11, round 2): "do all the fixes … all the decision … outside of your area … do a full bug test … replan whole test. Don't use the previous one."
 

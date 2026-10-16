@@ -12,6 +12,7 @@ import GuestNotFound from "@/components/GuestNotFound";
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { getSettings } from "@/lib/menu";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { NO_TENANT_KEY } from "@/lib/tenantStorage";
 
 export const dynamic = "force-dynamic";
 
@@ -114,15 +115,27 @@ export default async function TableQrPage({ params }: { params: Promise<{ code: 
     // The wording below is unchanged; it moved into GuestNotFound's `qr` variant, which stamps the
     // docket CODE / not active / VOID and offers no button, because a dead code carries no slug and
     // there is nothing behind a button to offer.
-    return <GuestNotFound variant="qr" />;
+    //
+    // …AND IT BELONGS TO NO RESTAURANT (owner, 2026-10-16: "do the qr one"). Every guest widget in the
+    // root layout still mounts here, and with no /r/<slug> in the path they fell back to the tab's pin,
+    // and a tab with none to French House — so this page asked the database about French House's
+    // settings, its ban list and its returning-customer greeting. This stamps the address as "no
+    // restaurant" before hydration; lib/tenantStorage.ts → NO_TENANT_KEY explains the rule.
+    return (
+      <>
+        <script dangerouslySetInnerHTML={{ __html: `try{sessionStorage.setItem(${JSON.stringify(NO_TENANT_KEY)},location.pathname)}catch(e){}` }} />
+        <GuestNotFound variant="qr" />
+      </>
+    );
   }
   return (
     <>
       {/* Pin this tab's tenant BEFORE hydration: /q/<code> has no /r/<slug> in the
           path, so tenant-scoped storage (scanned table, cart, session…) would fall
           back to restaurant #1's scope and mix restaurants on one phone. tenantSlug()
-          reads this exact sessionStorage key for non-prefixed pages. */}
-      <script dangerouslySetInnerHTML={{ __html: `try{sessionStorage.setItem("lfh_tab_tenant",${JSON.stringify(hit.slug)})}catch(e){}` }} />
+          reads this exact sessionStorage key for non-prefixed pages. It also clears the
+          dead-code mark: this same code may have been dead a minute ago (menu switched off). */}
+      <script dangerouslySetInnerHTML={{ __html: `try{sessionStorage.setItem("lfh_tab_tenant",${JSON.stringify(hit.slug)});sessionStorage.removeItem(${JSON.stringify(NO_TENANT_KEY)})}catch(e){}` }} />
       {/* Access → Menu → Format → Default light/dark, exactly as /r/<slug>/menu does it.
           The global boot script in app/layout.tsx stamps 'light' because it can't know WHICH
           restaurant is opening; this runs as the parser reaches it, before the menu paints,

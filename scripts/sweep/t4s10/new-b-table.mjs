@@ -53,7 +53,8 @@ check(FT, "…and when the box IS there it focuses it and flashes the error clas
 check(FT, "the scanned table is remembered under THIS restaurant (lfh_table:<slug>)", HOW, async () => { const t = await T("/r/sakura-sushi/menu"); t.setScannedTable("7"); return phone.ls.get("lfh_table:sakura-sushi") === "7" && t.getScannedTable() === "7"; });
 check(FT, "…setting it to nothing clears it rather than storing an empty string", HOW, async () => { const t = await T(); t.setScannedTable("7"); t.setScannedTable(""); return !phone.ls.has("lfh_table:aangan") && t.getScannedTable() === ""; });
 check(FT, "…a table scanned at ANOTHER restaurant never pre-fills here", HOW, async () => { const t = await T("/r/sakura-sushi/menu"); t.setScannedTable("9"); phone.path = "/r/aangan/menu"; return t.getScannedTable() === ""; });
-check(FT, "…and with storage switched off the scan is simply not remembered (no throw, '' back)", HOW, async () => { const t = await T(); phone.lsBlocked = true; try { t.setScannedTable("4"); return t.getScannedTable() === ""; } catch { return false; } });
+// RE-AIMED 2026-10-16: since T3 round 4 item 47 a refused write is kept for the page, so the scan is remembered while it is open.
+check(FT, "…and with storage switched off the scan is kept for this page only (no throw, nothing on the phone)", HOW, async () => { const t = await T(); phone.lsBlocked = true; try { t.setScannedTable("4"); return { ok: t.getScannedTable() === "4" && phone.ls.size === 0, note: `${t.getScannedTable()} · phone keys ${phone.ls.size}` }; } catch (e) { return { ok: false, note: "threw " + e.message }; } });
 check(FT, "the scanned-table key is the one the rest of the app names (lfh_table)", HOW, async () => { const t = await T(); return t.SCANNED_TABLE_KEY === "lfh_table"; });
 
 // ── lib/tableConnection.ts — the add-to-cart gate ─────────────────────────────────────────────────

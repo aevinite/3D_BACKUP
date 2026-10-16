@@ -7,11 +7,11 @@
 //   --file=lib/session.ts   only the checks whose subject is that file · --kinds=STUB,LAB   only those sources
 //   --bail                  stop at the first red (the deliberate-break runs)
 import { runAll } from "./lib.mjs";
-const blocks = (process.env.T4S10_BLOCKS || "a,b,c,d,e,f,g,h,i,j,k,l,m").split(",");
+const blocks = (process.env.T4S10_BLOCKS || "a,b,c,d,e,f,g,h,i,j,k,l,m,n").split(",");
 const files = { a: "./new-a-tenant.mjs", b: "./new-b-table.mjs", c: "./new-c-session.mjs", d: "./new-d-small.mjs",
   e: "./new-e-server-libs.mjs", f: "./new-f-routes.mjs", g: "./new-g-src.mjs", h: "./new-h-live.mjs",
   // round 2 (2026-10-15): i closes measured in-memory gaps · j is the screen lab · k kills surviving breaks
-  i: "./new-i-cover.mjs", j: "./new-j-lab.mjs", k: "./new-k-kill.mjs", l: "./new-l-live.mjs", m: "./new-m-pass4.mjs" };
+  i: "./new-i-cover.mjs", j: "./new-j-lab.mjs", k: "./new-k-kill.mjs", l: "./new-l-live.mjs", m: "./new-m-pass4.mjs", n: "./new-n-qr.mjs" };
 for (const k of blocks) if (files[k]) await import(files[k]).catch((e) => { if (!/Cannot find module/.test(e.message)) throw e; });
 const a = process.argv;
 const onlyArg = a.find((x) => x.startsWith("--only"));

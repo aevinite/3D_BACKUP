@@ -23,7 +23,7 @@ const ONLY = arg("files", "") ? arg("files").split(",") : Object.values(FILES);
 const MAX = Number(arg("max", 60)), WORKERS = Number(arg("workers", 4)), SEED = Number(arg("seed", 1)), OUT = arg("json", "");
 const SKIP = new Set(arg("skip", "") ? JSON.parse(readFileSync(arg("skip"), "utf8")) : []);
 const isScreen = (f) => f.endsWith(".tsx");
-const blocksFor = (f) => (isScreen(f) ? "j,k,m" : "a,b,c,d,e,f,i,k");
+const blocksFor = (f) => (isScreen(f) ? "j,k,m,n" : "a,b,c,d,e,f,i,k,n");
 const kindsFor = (f) => (isScreen(f) ? "LAB" : "STUB");
 
 function codeMask(L) {
