@@ -120,6 +120,9 @@ const isPaused = (s: unknown): boolean => {
 // The two answers a late tap gets once the waiter has already carried the food out (item 1, below).
 const SERVED_MSG = "Every dish on that ticket has already been served — refresh the board.";
 const SERVED_DISH_MSG = "That dish has already been served — refresh the board.";
+// Item 16 — the two answers a late delivery tap gets (the kitchen only moves a delivery forward).
+const PLAT_CANCELLED_MSG = "That delivery order was cancelled — it stays off the kitchen board.";
+const PLAT_MOVED_MSG = "That delivery order has already moved on — refresh the board.";
 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
@@ -765,6 +768,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Also read its CURRENT status for the accept-gate below.
       const owns = must(await sb.from("aggregator_orders").select("id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!owns) return err("That platform order isn't for this restaurant.", 404);
+      // ── THE KITCHEN ONLY EVER MOVES A DELIVERY FORWARD (sweep #10 T11 round 2, item 16) ──────────────
+      // lfh_platform_set_status writes whatever status it is handed — it has no from-state rule (mig 071) —
+      // and this door only checked the TARGET. So a cook's tap that reached the server late (saved offline,
+      // or sent from a screen a few seconds behind) could bring a delivery the manager had CANCELLED back
+      // onto the board as "ready", or pull one already handed to the rider back to "accepted". The manager's
+      // own door may move a delivery anywhere (that is how a cancelled one is restored); the kitchen's three
+      // buttons only ever go forward — ACCEPT → ALL READY → HANDED OVER — so that is all this door does.
+      // The same tap arriving twice is answered "done" without writing again, so the status history and
+      // the push back to the platform do not record one tap twice.
+      const PLAT_RANK: Record<string, number> = { new: 0, accepted: 1, preparing: 2, ready: 3, handed_over: 4 };
+      if (owns.status === "cancelled") return err(PLAT_CANCELLED_MSG, 409);
+      const fromRank = PLAT_RANK[String(owns.status)];
+      if (fromRank === undefined || PLAT_RANK[status] < fromRank) return err(PLAT_MOVED_MSG, 409);
+      if (PLAT_RANK[status] === fromRank) return ok({ ...owns, unchanged: true });
       // The MANAGER owns ACCEPTING (moving a still-'new' order forward). If the kitchen isn't
       // allowed to accept platform orders, it may not advance a 'new' one by ANY status — not
       // just the literal "accepted" (audit 2026-07-07: the old gate only checked
@@ -778,8 +795,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }
       }
-      const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
-      if (error) throw new Error(error.message);
+      // must(), not `throw new Error(error.message)` (item 16): that dropped the SQLSTATE, so a refused value
+      // was answered 500 — which the outbox reads as "busy" and resends for ever — instead of telling the cook.
+      const data = must(await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" }));
       const row = Array.isArray(data) ? data[0] : data;
       void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
       await logAction("kitchen", "platform_status", { ...adminMark, detail: status, device_id: dev, restaurant_id: rid });

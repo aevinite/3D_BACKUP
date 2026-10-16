@@ -217,7 +217,8 @@ row("P63051", "the accept-gate keys on the CURRENT state being 'new', not on the
 row("P63052", "the refusal names who does accept them", () => has(PLT(), '"The kitchen isn\'t allowed to accept platform orders — the manager accepts them."'));
 row("P63053", "the platform push-back is best-effort and cannot fail the write", () => hasRe(PLT(), /void notifyAggregator\(row\?\.source, row\?\.external_id, status\)/));
 row("P63054", "the RPC's answer is normalised whether it comes back as a row or an array", () => hasRe(PLT(), /const row = Array\.isArray\(data\) \? data\[0\] : data;/));
-row("P63055", "an RPC error is thrown, so it reaches the one shared failure answer", () => hasRe(PLT(), /if \(error\) throw new Error\(error\.message\);/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 16): the call goes through must(), which throws WITH the database's code.
+row("P63055", "an RPC error is thrown (with its SQLSTATE kept), so it reaches the one shared failure answer", () => hasRe(PLT(), /const data = must\(await sb\.rpc\("lfh_platform_set_status"/));
 row("P63056", "sold-out reads the dish scoped to this restaurant's menu", () => hasRe(SO(), /from\("menu_items"\)\.select\("tags"\)\.eq\("id", b\)\.eq\("restaurant_id", rid\)\.maybeSingle\(\)/));
 row("P63057", "sold-out refuses a dish that is not on this menu", () => hasRe(SO(), /if \(!cur\) return err\("That dish isn't on this restaurant's menu\.", 404\)/));
 row("P63058", "the toggle is an explicit SET, so a double tap is harmless", () => hasRe(SO(), /const value = !!\(body && body\.value === true\);/));
