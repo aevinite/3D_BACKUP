@@ -1942,3 +1942,12 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **A refused join is said as what it was** — Guest menu → table sheet: "too many tries — wait a moment" / "speak to a member of staff", not "couldn't reach the restaurant". Guard: verify:guest-doors §17.
 - [ ] **WAITING ON THE OWNER:** `/q/<a code nobody owns>` still lets the guest widgets fall back to French House — the fix belongs to the QR-door page (another territory). See the report's Part 4.
 
+
+## 2026-10-16 — owner (sweep #10 T11, round 2): "do all the fixes … all the decision … outside of your area … do a full bug test … replan whole test. Don't use the previous one."
+
+- [x] **All the round-1 decisions taken** (items 7–11) — the kitchen's old accept door gone; a cook's own 🖨 still prints while printing is stopped (my call, the lever is written beside it); the waiter tablet and the manager route accept only their own logins; the 🚫 Sold out drawer reads in the light skin.
+- [x] **Bugs outside the kitchen fixed** (item 15) — two false reds in the guard that checks every guard; 19 files in the shared folder re-written from the repository (line endings only).
+- [x] **A late tap can no longer bring a cancelled delivery back** (item 16) — Kitchen screen → a Zomato/Swiggy ticket's buttons. Guard: verify:kitchen P180859.
+- [x] **A refused ✓ / ALL READY puts the screen back at once** (item 18) — Kitchen screen → a ticket's ✓ and ALL READY. Guard: P180911.
+- [x] **A ticket whose printing failed is retried, never marked printed** (item 19) — Kitchen screen → automatic printing. Guard: P180969.
+- [x] **The whole test re-planned and run** — 998 checks in the block; every line of the kitchen server and 99% of the screen run; the server broken 480 ways to prove the checks notice; the real app driven with one test ticket (cleaned up) and three devices looked at.

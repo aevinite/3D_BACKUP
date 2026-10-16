@@ -81,8 +81,10 @@ row("P02630", "markItemReady() refuses an already-served dish by name", () =>
 row("P02631", "markItemReady() snapshots the previous status before flipping, for the undo bar", () =>
   hasRe(MIR(), /const prev = it\.status;[\s\S]{0,120}it\.status = "ready"; pendingReady\.add\(id\)/));
 row("P02632", "markItemReady() patches only the tapped line, never the whole board", () => {
-  const fn = MIR();
-  return (/btn\.outerHTML = '<span class="done rdy">ready<\/span>'/.test(fn) && !/\brender\(\)/.test(fn)) || "it repaints instead of patching";
+  // EXPECTATION NARROWED (sweep #10 T11 round 2, item 18): the TAP never repaints the board. Only the REFUSAL path
+  // (after the server said no) redraws, so a refused ✓ cannot go on saying "ready" when the follow-up read also fails.
+  const fn = MIR(), tap = fn.slice(0, fn.indexOf("}).catch("));
+  return (/btn\.outerHTML = '<span class="done rdy">ready<\/span>'/.test(tap) && !/\brender\(\)/.test(tap)) || "it repaints instead of patching";
 });
 row("P02633", "markItemReady() slides the card to Ready only when THIS tick finished the ticket", () =>
   hasRe(MIR(), /if \(o && orderPhase\(o\) === "ready"\) moveCardToReady\(o\)/));
@@ -123,12 +125,12 @@ row("P02648", "moveCardToReady() writes \"0\" on an emptied lane, matching the f
   hasRe(MOVE(), /c\.textContent = String\(n\)/));
 const MOR = () => slice("function markOrderReady(", "function reprintOrder(");
 row("P02649", "markOrderReady() snapshots every not-served dish BEFORE flipping", () =>
-  hasRe(MOR(), /const snap = \(state\.items \|\| \[\]\)[\s\S]{0,200}\.map\(\(i\) => \(\{ id: i\.id, prev: i\.status \}\)\);[\s\S]{0,200}setLocalReady\(/));
+  hasRe(MOR(), /const snap = \(state\.items \|\| \[\]\)[\s\S]{0,200}\.map\(\(i\) => \(\{ id: i\.id, prev: i\.status \}\)\);[\s\S]{0,700}setLocalReady\(/));   // room for item 18's legacy copy
 row("P02650", "markOrderReady() adds the order to pendingReadyOrders so a legacy ticket cannot revert", () =>
   hasRe(MOR(), /pendingReadyOrders\.add\(orderId\)/));
 row("P02651", "markOrderReady() moves just the one card, never a whole-board repaint", () => {
-  const fn = MOR();
-  return (/moveCardToReady\(o\)/.test(fn) && !/\brender\(\)/.test(fn)) || "it repaints the whole board";
+  const fn = MOR(), tap = fn.slice(0, fn.indexOf("}).catch("));   // the tap path — the refusal may redraw (item 18)
+  return (/moveCardToReady\(o\)/.test(tap) && !/\brender\(\)/.test(tap)) || "it repaints the whole board";
 });
 row("P02652", "markOrderReady() has a defensive branch for a ticket that is somehow still cooking", () =>
   hasRe(MOR(), /else \{ \/\/|else \{ \s*\n?\s*const card = document\.querySelector/));

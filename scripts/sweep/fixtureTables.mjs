@@ -55,6 +55,7 @@ export const RESERVED = [
   ["28", "verify-void-on-joined-party.mjs — the joined table whose food must survive"],
   ["9", "verify-session-ux.mjs — the partner-approval walk"],
   ["29", "scripts/sweep/t11s10/new-d-live.mjs — sweep #10 T11's one real kitchen ticket (cancelled then soft-deleted by id)"],
+  ["24", "scripts/t11-harness/l-real.mjs — sweep #10 T11 round 2's one real kitchen ticket (cancelled then binned by id)"],
   ["26", "scripts/sweep/t11s10/rerun-manual.mjs — sweep #10 T11's re-run tickets (cancelled then soft-deleted by id)"],
 ];
 

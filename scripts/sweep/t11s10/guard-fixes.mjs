@@ -57,7 +57,7 @@ row("P180007", "item 1 · /unready still leaves a served dish alone (the rule it
 row("P180008", "item 1 · the panel's refused ✓ still drops its optimistic overlay and repaints", () =>
   hasRe(APPC(), /pendingReady\.delete\(id\);\s*if \(it\.status !== "served"\) it\.status = prev;/));
 row("P180009", "item 1 · the panel's refused ALL READY still drops both overlays", () =>
-  hasRe(APPC(), /pendingReadyOrders\.delete\(orderId\);\s*snap\.forEach\(\(s\) => pendingReady\.delete\(s\.id\)\);\s*toast\("Failed: " \+ e\.message\);/));
+  hasRe(APPC(), /pendingReadyOrders\.delete\(orderId\);\s*snap\.forEach\(\(s\) => pendingReady\.delete\(s\.id\)\);[\s\S]{0,500}toast\("Failed: " \+ e\.message\);/));   // item 18 restores + redraws in between
 row("P180010", "item 7 · the kitchen route takes only the kitchen's three dish statuses — 'served' is the waiter's", () =>
   hasRe(branch('if (a === "items" && c === "status")'), /if \(!\["received", "preparing", "ready"\]\.includes\(status\)\) return err\("invalid status"\);/));
 
@@ -242,15 +242,35 @@ row("P180859", "item 16 · a delivery tap is refused when the order was cancelle
   return (own > 0 && canc > own && back > canc && same > back && rpc > same && /PLAT_RANK: Record<string, number> = \{ new: 0, accepted: 1, preparing: 2, ready: 3, handed_over: 4 \}/.test(b)) || "the forward-only rule is missing, reordered, or the call is unchecked";
 });
 // ══ ROUND 2 · the hermetic server suites run with this guard — P180860 ══
-// scripts/t11-harness runs the REAL route against an in-memory database (no server, no network). u-route.mjs and
-// u-route3.mjs take well under a second, so they run here; u-route2.mjs (8s — it walks 505 devices through the block
+// scripts/t11-harness runs the REAL route against an in-memory database (no server, no network). u-route.mjs,
+// u-route3.mjs and u-route4.mjs take well under a second, so they run here; u-route2.mjs (8s — it walks 505 devices through the block
 // memo) and mutate.mjs (minutes) are run by hand: `node scripts/t11-harness/u-route2.mjs`, `node scripts/t11-harness/mutate.mjs`.
-row("P180860", "the hermetic kitchen-route suites (u-route 200 rows, u-route3 22 rows) are green", () => {
+row("P180860", "the hermetic kitchen-route suites (u-route 200 rows, u-route3 22, u-route4 8) are green", () => {
   const bad = [];
-  for (const s of ["u-route.mjs", "u-route3.mjs"]) {
+  for (const s of ["u-route.mjs", "u-route3.mjs", "u-route4.mjs"]) {
     const r = spawnSync(process.execPath, [join(T11H, s)], { encoding: "utf8", timeout: 120000 });
     const tail = ((r.stdout || "").match(/(\d+) rows · (\d+) ✅ · (\d+) ❌/) || []);
     if (r.status !== 0 || !tail[0] || tail[3] !== "0") bad.push(`${s}: ${tail[0] || "exit " + r.status}`);
   }
   return bad.length === 0 || bad.join(" | ");
+});
+
+// ══ ROUND 2 · ITEM 18 · a refused tap puts the screen back at once, without waiting for a board read — P180911 ══
+row("P180911", "item 18 · a refused ✓ and a refused ALL READY restore the dishes (an old-style ticket from its copy), forget the card and redraw BEFORE the read", () => {
+  const a = APPC();
+  const mi = a.slice(a.indexOf("function markItemReady("), a.indexOf("async function undoReady(")); const mic = mi.slice(mi.indexOf("}).catch("));
+  const mo = a.slice(a.indexOf("function markOrderReady("), a.indexOf("async function askWhoPrints(")); const moc = mo.slice(mo.indexOf("}).catch("));
+  const before = (s, x, y) => s.indexOf(x) >= 0 && s.indexOf(x) < s.indexOf(y);
+  return (before(mic, "render();", "refreshQuietly();") && before(mic, "forgetCardHtml(", "render();")
+    && /const legacyBefore = /.test(mo) && /if \(it && it\.status !== "served"\) it\.status = s\.prev;/.test(moc) && /lo\.items = legacyBefore/.test(moc)
+    && before(moc, "forgetCardHtml(orderId);", "render();") && before(moc, "render();", "refreshQuietly();")) || "a refusal path waits for the read again";
+});
+
+// ══ ROUND 2 · ITEM 19 · a queued ticket is reported done only after the print call has actually run — P180969 ══
+row("P180969", "item 19 · the queue reports a job done from printKot's onDone verdict (after the real print call), never from its set-up answer", () => {
+  const a = APPC();
+  const pj = a.slice(a.indexOf("function processPrintJobs("), a.indexOf("// ══", a.indexOf("function processPrintJobs(")));
+  const pk = a.slice(a.indexOf("function printKot("), a.indexOf("function logKotPrintFailure("));
+  return (/const started = printKot\([^;]*onDone: report \}\);/.test(pj) && /if \(!started\) report\(false\);/.test(pj) && !/const okPrint = printKot\(/.test(pj)
+    && /let printed = true;/.test(pk) && /catch \(e\) \{\s*printed = false;/.test(pk) && /told\(printed\);/.test(pk) && pk.indexOf("told(printed);") > pk.indexOf("try { w.print(); }")) || "the job is reported before the print call runs again";
 });
