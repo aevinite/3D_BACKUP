@@ -16,7 +16,7 @@
 //   node scripts/sweep/t7s10/rerun-t5.mjs [--json file] [--all]
 import fs from "node:fs";
 import { join } from "node:path";
-import { ROOT, APP, MY_END_AT, inMine, MINE_CODE, lineAt } from "./lib.mjs";
+import { ROOT, APP, inMine, lineAt } from "./lib.mjs";
 
 const rd = (p) => { try { return fs.readFileSync(join(ROOT, p), "utf8"); } catch { return ""; } };
 const has = (s, re) => re.test(s);

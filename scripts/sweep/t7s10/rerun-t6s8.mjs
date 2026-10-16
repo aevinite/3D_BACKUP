@@ -11,7 +11,7 @@
 //   node scripts/sweep/t7s10/rerun-t6s8.mjs --json f   # results for the write-back
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROOT, APP, CODE, MY_END_AT, inMine, MINE_CODE, DECLS, refs, rd, ev, panel, closeLive, guard, lineAt } from "./lib.mjs";
+import { ROOT, APP, CODE, inMine, MINE_CODE, DECLS, refs, rd, ev, panel, closeLive, guard, lineAt } from "./lib.mjs";
 
 const A = process.argv.slice(2);
 const T6 = readFileSync(join(ROOT, ".claude/sweep/LEDGER/T6.md"), "utf8").split("\n");

@@ -29,7 +29,7 @@ const STUB = (match, how, body) => `(async () => {
 })()`;
 const C = (what, how, expr, cmp) => check(id(), `${F} — ${what}`, `LIVE: ${how}`, async () => {
   let g; try { g = await ev(expr); } catch (e) { return { ok: false, note: "threw: " + e.message }; }
-  let ok; try { ok = !!cmp(g); } catch (e) { ok = false; }
+  let ok; try { ok = !!cmp(g); } catch { ok = false; }
   return { ok, note: JSON.stringify(g).slice(0, 200) };
 });
 const T28 = { t: 28, orders: [{ status: "preparing", items: [{ title: "Croque Monsieur", status: "preparing", price: 320 }, { title: "French Onion Soup", status: "served", price: 240 }] }] };

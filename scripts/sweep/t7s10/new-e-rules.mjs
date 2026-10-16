@@ -2,7 +2,7 @@
 // that sit in this code are still there AND still honoured; the panel rules (taps never vanish, the
 // back button, nothing scrolls the window, no browser dialogs, the 60s backstop, saved-is-not-sent)
 // hold here; and every repo guard that reads the manager panel is run and must be green.
-import { check, guard, MINE, MINE_CODE, APP, rd, lineAt, MY_START_AT, refs, DECLS, inMine } from "./lib.mjs";
+import { check, guard, MINE, MINE_CODE, APP, rd, refs, DECLS } from "./lib.mjs";
 
 const F = "`public/panels/editor/app.js`";
 let n = 176601;

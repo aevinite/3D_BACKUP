@@ -9,7 +9,7 @@
 //
 //   node scripts/sweep/t7s10/rerun-live.mjs [--json file]
 import { writeFileSync } from "node:fs";
-import { rd, panel, ev, closeLive, BASE } from "./lib.mjs";
+import { rd, panel, ev, closeLive } from "./lib.mjs";
 import { WITH } from "./fixture.mjs";
 
 const A = process.argv.slice(2);

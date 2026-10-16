@@ -10,7 +10,7 @@ let n = 176701;
 const id = () => "P" + n++;
 const TAB = rd("public/panels/tablet/app.js"), KIT = rd("public/panels/kitchen/app.js"), ROUTE = rd("app/api/editor/[...path]/route.ts");
 const TROUTE = rd("app/api/tablet/[...path]/route.ts"), OWNACT = rd("app/owner/activity/page.tsx"), AUDITSORT = rd("public/panels/auditsort.js");
-const TAGS = rd("lib/tableTags.ts"), CLASHCMP = rd("lib/clashCompare.ts"), SUMMIG = rd("supabase/migrations/238_floor_summary_shared.sql") || "";
+const TAGS = rd("lib/tableTags.ts"), CLASHCMP = rd("lib/clashCompare.ts");
 const X = (what, how, fn) => check(id(), `${F} — ${what}`, `SRC: ${how}`, fn);
 const lift = (src, start, end = "\n}\n") => { const a = src.indexOf(start); if (a < 0) return ""; const b = src.indexOf(end, a); return src.slice(a, b + end.length); };
 const block = (src, start) => { const a = src.indexOf(start); if (a < 0) return ""; return src.slice(a, src.indexOf("};", a) + 2); };
