@@ -334,17 +334,16 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
     const close = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.(`[data-rng="${id}"]`)) setOpen(false);
     };
-    // ── ESCAPE, TOO (T13 round 2, 2026-09-05) ───────────────────────────────────────────────
-    // This closed on an outside click and on the phone's BACK, and did nothing at all on Escape —
-    // while the tile popup and the estate drawer have both bound it for months. The drawer was
-    // given Escape on 2026-08-06 for exactly this reason, written down at the time: "on a desktop
-    // that meant the one habit that works everywhere else silently did nothing here." This is the
-    // control on the page he touches most, and it was the one still missing it.
-    // Measured from the keyboard: the list stayed open and aria-expanded stayed true.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // ── ESCAPE IS THE BACK-STACK MANAGER'S NOW — OBITUARY (sweep #10 T20, item 9) ──────────────────
+    // This used to bind its own Escape (T13 round 2, 2026-09-05: "the control he touches most was the one
+    // still missing it"). On 2026-10-03 lib/backStack.ts learned Escape for EVERY registered layer — it
+    // closes whichever popup is on top — and the two together closed TWO layers on one key: this page's
+    // listener shut the popup first, so the manager, a beat later, found the layer UNDER it on top and shut
+    // that too. Measured on the tile sheet inside one restaurant: sheet gone at 37 ms, the restaurant view
+    // closed at 109 ms, and he was back on "All restaurants". Escape still closes this list — through
+    // useBackClose above, the one way. Do not add a keydown listener back to any overlay on this page.
     document.addEventListener("click", close);
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", key); };
+    return () => { document.removeEventListener("click", close); };
   }, [open, id]);
   const cur = RANGES.find((r) => r.k === value)!;
   return (
@@ -410,11 +409,9 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
     const close = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.("[data-restdrop]")) setOpen(false);
     };
-    // Escape as well — the same gap, and the same cure, as the period dropdown above.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Escape closes it through useBackClose above — see the obituary in the period dropdown (item 9).
     document.addEventListener("click", close);
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", key); };
+    return () => { document.removeEventListener("click", close); };
   }, [open]);
   const idx = activeRid ? rests.findIndex((r) => r.id === activeRid) : -1;
   const cur = idx >= 0 ? rests[idx] : null;
@@ -1450,27 +1447,15 @@ export default function OwnerDashboard() {
   // Which tile is open, or null. Every figure it shows is already in hand, so opening it costs no
   // request. Registered with the back-stack manager like every other overlay on this page.
   const [tileOpen, setTileOpen] = useState<null | "revenue" | "orders" | "today" | "expenses" | "onhand">(null);
+  // Escape closes it through this one registration (lib/backStack, 2026-10-03). Its own keydown listener
+  // is gone — together they closed the sheet AND the restaurant view under it (item 9, see RangeDrop).
   useBackClose("owner-kpi-tile", !!tileOpen, () => setTileOpen(null));
-  useEffect(() => {
-    if (!tileOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTileOpen(null); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [tileOpen]);
 
   // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
   const [drawerRid, setDrawerRid] = useState<string | null>(null);
+  // Escape closes it too (T5 sweep, 2026-08-06: "the one habit that works everywhere else") — now through
+  // this registration alone; the drawer's own keydown listener went with item 9 (see RangeDrop).
   useBackClose("owner-rest-drawer", !!drawerRid, () => setDrawerRid(null));
-  // Escape closes it too. It already closed on the hardware/browser Back and on the backdrop and
-  // the ✕ — but not on Escape, while the reports Studio's overlay has always bound it. On a
-  // desktop that meant the one habit that works everywhere else silently did nothing here
-  // (found while driving the interactions, T5 sweep 2026-08-06).
-  useEffect(() => {
-    if (!drawerRid) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawerRid(null); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [drawerRid]);
   const drawer = useMemo(() => {
     if (!drawerRid || !ov) return null;
     const r = ov.restaurants.find((x) => x.id === drawerRid);

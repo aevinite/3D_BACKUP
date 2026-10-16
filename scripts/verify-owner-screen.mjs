@@ -801,19 +801,20 @@ check("an unrecognised payload shape is treated as NO payload, not rendered",
   "       tiles gone. Both doors need the check — the live fetch AND the sessionStorage snapshot, which\n" +
   "       was written by whatever version of this page last ran in the tab.");
 
-// every overlay on this page closes on Escape — the habit that works everywhere else
+// every overlay on this page closes on Escape — the habit that works everywhere else. Since sweep #10 T20
+// item 9 the back-stack manager (lib/backStack, which answers Escape for the top layer) is the ONE way:
+// the page's own listeners were removed, because beside the manager they closed two layers per key press.
 check("the period dropdown closes on Escape, like every other overlay here",
-  /const key = \(e: KeyboardEvent\) => \{ if \(e\.key === "Escape"\) setOpen\(false\); \};/.test(homeC)
-    && (homeC.match(/document\.addEventListener\("keydown", key\);/g) || []).length >= 2,
+  /useBackClose\(`owner-rng-\$\{id\}`, open, \(\) => setOpen\(false\)\);/.test(homeC)
+    && /useBackClose\("owner-rest", open, \(\) => setOpen\(false\)\);/.test(homeC)
+    && /if \(e\.key !== "Escape" \|\| e\.isComposing\) return;/.test(read("lib/backStack.ts")),
   "app/owner/page.tsx: the period dropdown and the restaurant picker closed on an outside click and\n" +
-  "       on the phone's BACK, and did nothing at all on Escape — while the tile popup and the estate\n" +
-  "       drawer have both bound it for months. The drawer was given Escape on 2026-08-06 for exactly\n" +
-  "       this reason: 'on a desktop that meant the one habit that works everywhere else silently did\n" +
-  "       nothing here.' The period dropdown is the control on this page he touches most.");
-check("…and both listeners are removed when it closes",
-  (homeC.match(/document\.removeEventListener\("keydown", key\);/g) || []).length >= 2,
-  "app/owner/page.tsx: a keydown listener left attached after the dropdown closes is a document-wide\n" +
-  "       handler that fires for every key on every screen after it.");
+  "       on the phone's BACK, and did nothing at all on Escape. Escape reaches them through their\n" +
+  "       back-stack registration — keep it, and keep lib/backStack's Escape.");
+check("…and no overlay on the page binds a second Escape of its own",
+  !/addEventListener\("keydown"/.test(homeC),
+  "app/owner/page.tsx: a keydown Escape beside useBackClose closes the popup AND the layer under it\n" +
+  "       (sweep #10 T20 item 9: a tile sheet inside one restaurant sent him back to All restaurants).");
 
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",

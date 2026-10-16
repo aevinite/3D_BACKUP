@@ -432,9 +432,12 @@ check("the merged-inventory rung read is capped, not sequential",
 check("the dashboard no longer counts open tables it never shows",
   !/from\("sessions"\)[\s\S]{0,120}status", "open"/.test(analyticsRoute) && !/openTables/.test(analyticsRoute),
   "a ~165ms live count on every request, rendered by nothing (the overview payload has it)");
-// the drawer closes the way every other overlay does
-check("the restaurant drawer closes on Escape too",
-  /if \(e\.key === "Escape"\) setDrawerRid\(null\)/.test(dashPage),
+// the drawer closes the way every other overlay does — Escape included. Since sweep #10 T20 item 9 that is
+// through its back-stack registration ALONE (lib/backStack answers Escape for the top layer); its own
+// keydown listener was removed because the two together closed the layer under it as well.
+check("the restaurant drawer closes on Escape too (through the back-stack manager)",
+  /useBackClose\("owner-rest-drawer", !!drawerRid, \(\) => setDrawerRid\(null\)\)/.test(dashPage) &&
+    /if \(e\.key !== "Escape" \|\| e\.isComposing\) return;/.test(read("lib/backStack.ts")),
   "it closed on Back, the backdrop and the ✕ — but not the one habit that works everywhere else");
 
 console.log("\n── 21. ONE RESTAURANT, ONE COLOUR — INCLUDING THE SHELL (T5, 2026-08-07) ──");
@@ -1230,6 +1233,16 @@ console.log("\nT11-E · saying so when a read failed");
     "item 8 · the docket's 'Open Audit & logs →' link keeps its underline (!important beats globals.css)",
     /text-decoration:underline !important/.test(docket),
     "components/owner/TileDocket.tsx — a: { text-decoration: none !important } in app/globals.css wins otherwise.",
+  );
+  // item 9 — the page bound its OWN Escape on four overlays, and lib/backStack (2026-10-03) answers Escape
+  // for the top layer too. The page's listener closed the popup first, so the manager found the layer
+  // UNDER it on top and closed that as well: Escape on a tile sheet inside one restaurant threw him back
+  // to All restaurants (measured: sheet gone at 37 ms, restaurant view closed at 109 ms).
+  check(
+    "item 9 · no overlay on the dashboard binds its own Escape — the back-stack manager is the one way",
+    !/addEventListener\("keydown"/.test(dashPage) &&
+      ["owner-kpi-tile", "owner-rest-drawer", "owner-rest", "owner-rng-"].every((id) => dashPage.includes(`useBackClose(${id.endsWith("-") ? "`" + id : '"' + id}`)),
+    "app/owner/page.tsx — a second Escape handler beside useBackClose closes TWO layers on one key press.",
   );
 }
 
