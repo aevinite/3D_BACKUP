@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import { runChecks } from "./lib.mjs";
 const argv = process.argv.slice(2);
 const val = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
-const FAMILIES = { A: "fa-queue-sequences", B: "fb-random-inputs", C: "fc-engines", D: "fd-access", E: "fe-layout", F: "ff-routes", G: "fg-faults", H: "fh-cost", I: "fi-offline", J: "fj-live", K: "fk-drawers", L: "fl-small", M: "fm-routes2", N: "fn-third-pass" };
+const FAMILIES = { A: "fa-queue-sequences", B: "fb-random-inputs", C: "fc-engines", D: "fd-access", E: "fe-layout", F: "ff-routes", G: "fg-faults", H: "fh-cost", I: "fi-offline", J: "fj-live", K: "fk-drawers", L: "fl-small", M: "fm-routes2", N: "fn-third-pass", O: "fo-mutation-aimed" };
 const want = val("--family") ? val("--family").split(",") : Object.keys(FAMILIES);
 const { existsSync } = await import("node:fs");
 for (const f of want) { const p = new URL(`./${FAMILIES[f]}.mjs`, import.meta.url); if (existsSync(p)) await import(p.href); }
