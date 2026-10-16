@@ -2,8 +2,8 @@
 // P55037–P55216, headless Chromium on my production build :4401. demo-bistro was a live restaurant then and is in
 // the recycle bin today: its rows are re-asked of what a binned restaurant must do now (refuse, neutrally). The one
 // restaurant that was in service mode then is gone, so the maintenance rows hold the settings answer in the browser.
-import { R, ok, sql, BASE } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, DESK, PHONE, RIDS } from "./browser.mjs";
+import { R, ok, BASE } from "./lib.mjs";
+import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, DESK, RIDS } from "./browser.mjs";
 
 const RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx", MENU = "app/menu/page.tsx", MV = "components/MenuView.tsx", FC = "components/FoodCard.tsx",
   NF = "app/not-found.tsx", GNF = "components/GuestNotFound.tsx", HF = "components/Header.tsx", MAIN = "components/Maintenance.tsx";

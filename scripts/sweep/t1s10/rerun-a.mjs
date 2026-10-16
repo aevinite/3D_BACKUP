@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { R, src, code, count, fnBody, ok, assert, ROOT } from "./lib.mjs";
+import { R, src, code, count, fnBody, ok, ROOT } from "./lib.mjs";
 
 const MVF = "components/MenuView.tsx", FCF = "components/FoodCard.tsx", HF = "components/Header.tsx",
   NPF = "components/NavPicker.tsx", HTF = "components/HeroTitle.tsx", ISF = "components/IntroSplash.tsx",
@@ -308,6 +308,7 @@ S("P00269", HF, "lfh_theme is device-wide on purpose", () => has(H(), /localStor
 S("P00270", MVF, "layout preference tenant-scoped (I11)", () => has(MV(), /localStorage\.setItem\(sk\("lfh_menu_layout"\), layout\)/));
 // ═════ B4 · rejections, deliberate designs, guards ═════
 S("P00271", FCF, "R15 toasts stay English", () => has(FC(), /message: "Maximum 99 per dish"/) && has(FC(), /message: `\$\{item\.title\} added`, subtitle: "tap to view your bill"/));
+// P00272 quotes R15's REJECTED comment (docs/REJECTED-IDEAS.md R15) only to check it still sits on its line.
 S("P00272", FCF, "R15 comment on the line", () => { const s = src(FCF); const i = s.indexOf("REJECTED (owner, 2026-08-12): these two toast strings stay ENGLISH"); return i > 0 && s.indexOf('message: "Maximum 99 per dish"') > i && s.indexOf('message: "Maximum 99 per dish"') - i < 2200; });
 S("P00273", MVF, "R23: this run raises no guest-menu translation work", () => ok(true, "re-aimed at THIS run: nothing in my findings or Part 4 asks to translate the ordering screens or fix Arabic shaping"));
 S("P00274", MVF, "R14: nothing auto-translates a dish name", () => !OWNED_GUEST.some((f) => /translate\(|autoTranslate|googleTranslate/i.test(code(f))));

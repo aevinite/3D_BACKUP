@@ -2,8 +2,8 @@
 // name by name (P55237–P55350), every refusal traced to what the person is left looking at (P55351–P55382), the
 // platform 404's stylesheet rule by rule on BOTH screens (P55383–P55470, my build), and the 230 rows that round
 // ran against the LIVE backup site (P55471–P55700) — re-run against the live backup site again, read-only.
-import { R, src, code, count, fnBody, ok, oldRows, BASE } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, DESK, PHONE } from "./browser.mjs";
+import { R, src, code, count, fnBody, ok, oldRows } from "./lib.mjs";
+import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, DESK } from "./browser.mjs";
 
 const LIVE = process.env.T1_LIVE || "https://3-d-backup.vercel.app";
 const LAY = "app/layout.tsx", HOME = "app/page.tsx", MENU = "app/menu/page.tsx", RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx", NF = "app/not-found.tsx",

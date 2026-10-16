@@ -3,7 +3,7 @@
 // staff pattern (taken from the file, not re-typed).
 import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { R, src, code, count, fnBody, ok, ROOT } from "./lib.mjs";
+import { R, src, code, count, ok, ROOT } from "./lib.mjs";
 
 const HF = "components/Header.tsx", NPF = "components/NavPicker.tsx", HTF = "components/HeroTitle.tsx", ISF = "components/IntroSplash.tsx",
   GCF = "components/GuestChrome.tsx", NF = "app/not-found.tsx", CSF = "components/ComingSoon.tsx";

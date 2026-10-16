@@ -5,7 +5,7 @@
 // this sweep writes to), keyed by their own slug, inserted at the start of the block and deleted by that key in
 // a `finally` and on SIGINT/SIGTERM. Nothing on Aangan is written — the "a live restaurant's address" row
 // names Aangan's ADDRESS as the retired slug, which is exactly the case the resolver must refuse.
-import { R, src, code, ok, sql, BASE, FH } from "./lib.mjs";
+import { R, src, code, ok, sql, FH } from "./lib.mjs";
 import { newPage, done, open, withPage, cards } from "./browser.mjs";
 
 const RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx", MENU = "app/menu/page.tsx", TEN = "lib/tenant.ts";

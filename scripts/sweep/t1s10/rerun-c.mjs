@@ -1,8 +1,8 @@
 // scripts/sweep/t1s10/rerun-c.mjs — RE-RUN of T1.md BLOCK C (P00301–P00375): the guest menu DRIVEN, headless
 // Chromium against my production build on T1_BASE (:4401). Reads only; every write is browser storage.
 import { execFileSync } from "node:child_process";
-import { R, ok, ROOT, BASE } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, PHONE, DESK, QR } from "./browser.mjs";
+import { R, ok, ROOT } from "./lib.mjs";
+import { newPage, done, open, withPage, cards, bodyText, LEAK, DESK, QR } from "./browser.mjs";
 
 const how = "headless Chromium against my PRODUCTION build on :4401 (Samsung A35 360×780 dpr3 with touch unless the row says desktop)";
 const D = (id, file, title, fn) => R(id, file, title, fn, how);

@@ -5,8 +5,8 @@
 // in looked.json beside this file and joined into the row — a row is green only when both agree.
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { R, ok, ROOT } from "./lib.mjs";
-import { newPage, done, open, cards, bodyText, LEAK, PHONE, DESK, IPAD } from "./browser.mjs";
+import { R, ROOT } from "./lib.mjs";
+import { newPage, done, open, cards, LEAK, DESK, IPAD } from "./browser.mjs";
 
 const SHOTS = join(ROOT, ".claude/sweep/shots/S10-T1");
 mkdirSync(SHOTS, { recursive: true });

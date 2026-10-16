@@ -1,10 +1,10 @@
 // scripts/sweep/t1s10/rerun-n789.mjs — RE-RUN of T1.md N7 (P15471–P15540, accessibility + keyboard, measured in
 // Chrome's own accessibility tree over CDP), N8 (P15541–P15580, the look at five devices × both skins) and
 // N9 (P15581–P15600, judgment), on my production build :4401.
-import { R, ok, code, src, sql } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, PHONE, DESK } from "./browser.mjs";
+import { R, ok, code, sql } from "./lib.mjs";
+import { newPage, done, open, withPage, cards, bodyText, DESK } from "./browser.mjs";
 
-const MV = "components/MenuView.tsx", FC = "components/FoodCard.tsx", NP = "components/NavPicker.tsx", HF = "components/Header.tsx", GNF = "components/GuestNotFound.tsx", QP = "app/q/[code]/page.tsx";
+const MV = "components/MenuView.tsx", FC = "components/FoodCard.tsx", NP = "components/NavPicker.tsx", HF = "components/Header.tsx", GNF = "components/GuestNotFound.tsx";
 const how = "Accessibility.getFullAXTree over CDP — the browser's own computed roles and names — on :4401";
 const A = (id, file, title, fn) => R(id, file, title, fn, how);
 const nextId = (id, k) => "P" + (Number(id.slice(1)) + k);

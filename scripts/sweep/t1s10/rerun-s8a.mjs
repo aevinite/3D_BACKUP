@@ -7,8 +7,7 @@ import { join } from "node:path";
 import { R, src, code, count, fnBody, ok, ROOT } from "./lib.mjs";
 
 const LAY = "app/layout.tsx", HOME = "app/page.tsx", MENU = "app/menu/page.tsx", RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx",
-  RNF = "app/r/[restaurant]/menu/not-found.tsx", NF = "app/not-found.tsx", MVF = "components/MenuView.tsx", FCF = "components/FoodCard.tsx", TEN = "lib/tenant.ts",
-  LIB = "lib/menu.ts", MDS = "lib/menuDataServer.ts", MAIN = "components/Maintenance.tsx";
+  RNF = "app/r/[restaurant]/menu/not-found.tsx", NF = "app/not-found.tsx", MVF = "components/MenuView.tsx", FCF = "components/FoodCard.tsx", LIB = "lib/menu.ts", MDS = "lib/menuDataServer.ts", MAIN = "components/Maintenance.tsx";
 const L = () => code(LAY), MV = () => code(MVF), N = () => code(NF), Q = () => code(QP), P = () => code(RP);
 const pageBody = () => { const c = P(); return c.slice(c.indexOf("export default async function RestaurantMenuPage")); };
 const boot = () => (src(LAY).match(/const themeBootScript = `([\s\S]*?)`\.trim\(\);/) || [])[1] || "";

@@ -3,7 +3,7 @@
 // S6 MenuView, S7 the look and S8 cost/offline are DRIVEN on my build :4401. P120291–P120301 were about the manager
 // panel's QR card, the admin's code minting and its migration — not this territory this sweep — and are left for
 // their owners (they are absent from this file on purpose; the stamping step records that).
-import { readdirSync, statSync, existsSync } from "node:fs";
+import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { R, src, code, count, fnBody, ok, ROOT, BASE } from "./lib.mjs";
 import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, DESK, IPAD } from "./browser.mjs";

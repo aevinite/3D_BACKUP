@@ -2,7 +2,7 @@
 // old run found, and odd input, driven headless on :4401. Where the DATA moved since (demo-bistro was binned; the
 // printed code W5QRFWZU was regenerated), the row is re-asked of today's equivalent and says so.
 import { R, ok } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, QR } from "./browser.mjs";
+import { newPage, done, open, cards, bodyText, LEAK, QR } from "./browser.mjs";
 
 const RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx", MENU = "app/menu/page.tsx", MV = "components/MenuView.tsx", GNF = "components/GuestNotFound.tsx";
 const how = "headless Chromium on my production build :4401, a first-time diner at 360×780";

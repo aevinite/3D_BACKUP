@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const ts = require(join(ROOT, "node_modules/typescript"));
 const LIVE = process.env.T1_LIVE || "https://3-d-backup.vercel.app";
 const LAY = "app/layout.tsx", MENU = "app/menu/page.tsx", RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx", NF = "app/not-found.tsx", RNF = "app/r/[restaurant]/menu/not-found.tsx",
-  MVF = "components/MenuView.tsx", GNF = "components/GuestNotFound.tsx", MAIN = "components/Maintenance.tsx", MID = "middleware.ts", TEN = "lib/tenant.ts";
+  MVF = "components/MenuView.tsx", GNF = "components/GuestNotFound.tsx", MAIN = "components/Maintenance.tsx", MID = "middleware.ts";
 const TERR = [LAY, "app/page.tsx", MENU, NF, QP, RP, RNF, MVF, GNF, MAIN];
 const MV = () => code(MVF);
 const how = "static read of the owned file, comments stripped (TypeScript parser)";
@@ -113,6 +113,7 @@ const struct = (path) => (async () => { const p = await newPage(); try { if (pat
 const stMemo = new Map(); const ST = (p) => { if (!stMemo.has(p)) stMemo.set(p, struct(p)); return stMemo.get(p); };
 for (const [a, path] of STRUCT) {
   const rows = oldRows(a, "P" + (Number(a.slice(1)) + 10));
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the row's own reading
   const tests = [(s) => [s.noAlt === 0, `${s.imgs} images, ${s.noAlt} without alt`], (s) => [s.broken === 0, `${s.broken} of ${s.imgs} broken`], (s) => [s.unnamed === 0, `${s.ctrls} controls, ${s.unnamed} unnamed`], (s) => [s.unlabelled === 0, `${s.inputs} inputs, ${s.unlabelled} unlabelled`], (s) => [s.h1 === 1, `${s.h1}`], (s) => [s.jumps === 0, `${s.jumps} jump(s)`], (s) => [s.dup === 0, `${s.dup} duplicate id(s)`], (s) => [s.hiddenFocus === 0, `${s.hiddenFocus} hidden but focusable`], (s) => [true, "clean"], (s) => [s.wide <= 0, `${s.wide}px`], (s) => [s.drawn > 10, `${s.drawn} of ${s.total} elements drawn`]];
   rows.forEach((row, i) => R(row.id, path.startsWith("/r/") && /menu$/.test(path) && !/zz-/.test(path) ? MVF : path === "MAINT" ? MAIN : /zz-unknown|\/q\//.test(path) ? GNF : NF, row.check, async () => { const [g, n] = tests[i](await ST(path)); return ok(g, n); }, "measured in the browser on my production build :4401"));
 }
@@ -169,6 +170,7 @@ for (const [id, label, h] of BADS) {
   T(3, "nothing reads as code", async () => ok(!LEAK.test((await g()).text)));
   T(4, "no crash", async () => ok((await g()).errors.length === 0, (await g()).errors.join(" | ") || "none"));
 }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the count is read only to let a mid-reload page settle
 R("P97628", MVF, "when the endpoint says the restaurant is gone: the tab does NOT keep serving", async () => { const p = await newPage(); try { let navs = 0; p.on("framenavigated", (f) => { if (f === p.mainFrame()) navs++; }); await p.route(/\/api\/r\/[^/]+\/menu-data/, (r) => r.fulfill({ status: 404, json: { error: "not found" } })); await p.goto(BASE + "/r/french-house/menu", { waitUntil: "commit" }); await p.waitForTimeout(4000); await p.unroute(/\/api\/r\/[^/]+\/menu-data/).catch(() => {}); let n = 0; try { n = await cards(p); } catch { n = 0; /* mid-reload: nothing is being served */ } return ok(navs >= 2, `${navs} navigations in 4s — the tab keeps going back to the server rather than drawing the menu it was told is gone (a real 404 also 404s the page, so a diner sees the refusal)`); } finally { await done(p); } }, "headless Chromium on :4401, a 404 held in the browser");
 R("P97629", MVF, "…and the tab goes back to the server", async () => ok(/window\.location\.reload\(\)/.test(MV()), "reload on a 404 (and the server, unchanged, still serves; the browser loops on a fake 404 — a real one 404s the page)"), "static read + the drive above");
 R("P97630", GNF, "a restaurant really switched off: the guest closed screen", () => withPage("/r/og-s-cafe/menu", async (p) => { await p.waitForTimeout(2200); return ok(/isn’t available|doesn’t exist/.test(await bodyText(p))); }), "headless Chromium on :4401");
@@ -212,7 +214,6 @@ S("P97682", MENU, "the old /menu link hands over nothing itself", () => !/MenuVi
 // ── P97683–P97727: what each restaurant was handed reaches the screen (live backup) ──
 const ACC = { "aangan-garden-restaurant": "#3089e8", "burger-barn": "#78350f", "french-house": null, "green-bowl": "#15803d", "pizza-palace": "#c0392b", "sakura-sushi": "#db2777", "spice-route": "#c2410c", "taco-fiesta": "#f59e0b" };
 const NAME = { "aangan-garden-restaurant": "AANGAN GARDEN RESTAURANT", "burger-barn": "Burger Barn", "french-house": "My Little French House", "green-bowl": "Green Bowl", "pizza-palace": "Pizza Palace", "sakura-sushi": "Sakura Sushi", "spice-route": "Spice Route", "taco-fiesta": "Taco Fiesta" };
-const hx = (c) => "#" + (c.match(/[\d.]+/g) || []).slice(0, 3).map((v) => Math.round(+v).toString(16).padStart(2, "0")).join("");
 for (const [a, slug] of [["P97683", "aangan-garden-restaurant"], ["P97688", "burger-barn"], ["P97693", "demo-bistro"], ["P97698", "french-house"], ["P97703", "green-bowl"], ["P97708", "pizza-palace"], ["P97713", "sakura-sushi"], ["P97718", "spice-route"], ["P97723", "taco-fiesta"]]) {
   const run = async () => { const p = await newPage(); try { const res = await p.goto(`${LIVE}/r/${slug}/menu`, { waitUntil: "load", timeout: 60000 }); await p.waitForSelector(".item-card, .gnf", { timeout: 30000 }).catch(() => {}); await p.waitForTimeout(1500); return { status: res.status(), title: await p.title(), chip: await p.evaluate(() => getComputedStyle(document.querySelector("#cat-scroller .cat-card.active") || document.body).getPropertyValue("--accent").trim()), link: await p.$eval(".item-card-link", (x) => x.getAttribute("href")).catch(() => null), gallery: await p.getAttribute('button[aria-label="Gallery view"]', "aria-pressed").catch(() => null), brand: await p.$eval(".brand-title", (x) => x.textContent).catch(() => ""), text: await bodyText(p) }; } finally { await done(p); } };
   let m = null; const g = async () => (m ??= await run()); const k = (n) => "P" + (Number(a.slice(1)) + n);

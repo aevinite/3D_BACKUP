@@ -53,7 +53,7 @@ terminals' rows — keep both sides.
 
 | T | ID block (1,000) | territory | filed? | rows | ok | prob | resv |
 |---|---|---|---|---|---|---|---|
-| T1 | `P170001`–`P171000` | The guest menu and its three doors | ⏳ not run yet | — | — | — | — |
+| T1 | `P170001`–`P171000` | The guest menu and its three doors | `T1-S10.md` | 526 | 525 | 7 | 7 |
 | T2 | `P171001`–`P172000` | The dish page and the 3D viewer | `T2-S10.md` | 505 | 505 | 7 | 7 |
 | T3 | `P172001`–`P173000` (round 2 used the rest of the block — full) | Ordering — the basket, placing an order, calling staff, rating | `T3-S10.md` | 934 | 934 | 22 | 22 |
 | T4 | `P173001`–`P174000` | The table session — a table shows only its own party | `T4-S10.md` | 953 | 953 | 14 | 14 |

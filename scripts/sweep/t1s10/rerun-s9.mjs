@@ -7,7 +7,7 @@
 // read-only control). Its service_mode is set true for the two reads and put back in a `finally` and on
 // SIGINT/SIGTERM, then read back.
 import { R, ok, sql, BASE } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, IPAD, DESK } from "./browser.mjs";
+import { newPage, done, open, withPage, cards, bodyText, QR, IPAD } from "./browser.mjs";
 
 const RP = "app/r/[restaurant]/menu/page.tsx", RNF = "app/r/[restaurant]/menu/not-found.tsx", QP = "app/q/[code]/page.tsx", MENU = "app/menu/page.tsx", MV = "components/MenuView.tsx";
 const how = "fetched / driven on my production build :4401";

@@ -512,6 +512,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       window.removeEventListener("lfh:favorites-updated", onFav);
       window.removeEventListener("storage", onFav);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sk() changes only with restaurantSlug, which is fixed for a mounted menu (the rule began reporting this when deferredQuery moved up, sweep #10 T1 item 1)
   }, []);
 
   // Persist the browse state so it survives a navigate-away + Back. Skip the
@@ -536,6 +537,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // so a later guest starts with everything open again.
       sessionStorage.setItem(sk("lfh_menu_closed_cats"), JSON.stringify({ cats: closedCats, ts: Date.now() }));
     } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sk() changes only with restaurantSlug, which is fixed for a mounted menu (the rule began reporting this when deferredQuery moved up, sweep #10 T1 item 1)
   }, [layout, currentSort, currentDiet, searchQuery, closedCats, chefOnly, favOnly]);
 
   // THE FILTER CHIPS' "there's more this way" CUE.
@@ -796,6 +798,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       clearInterval(tick);
       document.body.classList.remove("menu-frost");
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sk() changes only with restaurantSlug, which is fixed for a mounted menu (the rule began reporting this when deferredQuery moved up, sweep #10 T1 item 1)
   }, []);
 
   // When the spied category changes, slide the (now pinned) category bar
@@ -908,6 +911,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     } catch {}
     // Nothing to restore (a first visit, or storage refused): saving may start immediately.
     restoreSettled.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sk() changes only with restaurantSlug, which is fixed for a mounted menu (the rule began reporting this when deferredQuery moved up, sweep #10 T1 item 1)
   }, [menuData]);
 
   // Remember the active category so navigating away and Back returns you here.
@@ -917,6 +921,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     try {
       sessionStorage.setItem(sk("lfh_menu_cat"), currentCategory);
     } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- sk() changes only with restaurantSlug, which is fixed for a mounted menu (the rule began reporting this when deferredQuery moved up, sweep #10 T1 item 1)
   }, [currentCategory]);
 
   // This effect pre-downloads the small 3D models so the viewer opens fast.

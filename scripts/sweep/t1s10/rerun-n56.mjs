@@ -5,7 +5,7 @@
 // manager's own editor save (one manager sign-in, cached by scripts/sweep/login.mjs) and restore the stored text
 // in a `finally` and on SIGINT/SIGTERM. Everything else reads, or holds the server's answer in the browser.
 import { R, ok, sql, code, src, BASE, FH, importTs } from "./lib.mjs";
-import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, getBrowser, PHONE } from "./browser.mjs";
+import { newPage, done, open, withPage, cards, bodyText, LEAK, QR, getBrowser } from "./browser.mjs";
 import { loginAs } from "../login.mjs";
 
 const MV = "components/MenuView.tsx", FC = "components/FoodCard.tsx", QP = "app/q/[code]/page.tsx", HF = "components/Header.tsx", LIB = "lib/menu.ts", ACC = "lib/accent.ts";

@@ -5,7 +5,7 @@
 // verify:notfound run against it, each failure matched to the sabotage that caused it. Every file is put back in a
 // `finally` and on SIGINT/SIGTERM; the script refuses to start if any target file already differs from HEAD.
 // It leaves NO server running — the caller rebuilds and restarts the real one afterwards.
-import { readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { ROOT } from "./lib.mjs";

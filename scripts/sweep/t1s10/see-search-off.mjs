@@ -2,7 +2,7 @@
 // WRITES one value: settings.features.search on French House (the restaurant that is written to), for ~20 s,
 // put back in a finally and on SIGINT/SIGTERM. Reports what the guest's menu shows; screenshot for an eye-read.
 import { join } from "node:path";
-import { sql, FH, BASE, ROOT } from "./lib.mjs";
+import { sql, FH, ROOT } from "./lib.mjs";
 import { newPage, done, open, cards, closeAll } from "./browser.mjs";
 const before = (await sql(`select features->'search' v from settings where restaurant_id='${FH}'`))[0].v;
 const put = (v) => sql(`update settings set features = jsonb_set(coalesce(features,'{}'::jsonb), '{search}', '${JSON.stringify(v)}'::jsonb) where restaurant_id='${FH}'`);

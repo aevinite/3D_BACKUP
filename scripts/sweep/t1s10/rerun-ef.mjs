@@ -2,7 +2,7 @@
 // three doors and the panels (E), and the judgment rows (F), re-asked of TODAY's code. Rows E469–E475 and
 // F499–F500 were about a past run's own diff; they are re-aimed at THIS run's diff and say so.
 import { execFileSync } from "node:child_process";
-import { R, src, code, count, fnBody, ok, ROOT } from "./lib.mjs";
+import { R, src, code, count, ok, ROOT } from "./lib.mjs";
 
 const MVF = "components/MenuView.tsx", FCF = "components/FoodCard.tsx", HF = "components/Header.tsx", GCF = "components/GuestChrome.tsx",
   RP = "app/r/[restaurant]/menu/page.tsx", QP = "app/q/[code]/page.tsx", MENU = "app/menu/page.tsx", GNF = "components/GuestNotFound.tsx",
