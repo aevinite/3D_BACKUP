@@ -4,7 +4,7 @@
 // → L (every state round 1 never visited). Ids run on from P181501 and must stay inside P182000.
 import { writeFileSync } from "node:fs";
 import { makeRunner, ledgerLine, closeBrowser } from "../t12s10/lib.mjs";
-import { blockG } from "./g-every-bit.mjs";
+import { blockG, laterToasts } from "./g-every-bit.mjs";
 import { blockP } from "./p-pages.mjs";
 import { blockL } from "./l-journeys.mjs";
 
@@ -13,6 +13,8 @@ let next = 181501;
 for (const [k, fn] of [["G", blockG], ["P", blockP], ["L", blockL]]) {
   try { const r = await fn(R, next); next = r.next; } catch (e) { console.log(`block ${k} stopped: ${String(e.message || e).split("\n")[0].slice(0, 220)}`); next = Math.max(next, 181501 + R.rows.length); }
 }
+// Rows for things the panel gained after round 2 was filed come LAST, so round 2's numbers never move.
+try { await laterToasts(R, next); } catch (e) { console.log(`later rows stopped: ${String(e.message || e).split("\n")[0]}`); }
 const { rows, counts } = R.done();
 await closeBrowser();
 if (next - 1 > 182000) console.log(`⚠ ids ran past the block: last id P${next - 1}`);
