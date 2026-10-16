@@ -10570,7 +10570,11 @@ function floorTableList(baseN) {
     // `belong` CTE needs a session id). Without the merge test, a merged child numbered above the
     // table count fell through this filter and vanished off the floor while its party was live,
     // taking the one tile that reaches its Unmerge with it.
-    .filter((k) => { const st = (tiles[String(k)] || {}).state; return (st && st !== "free") || !!mergeParentOf(k); })
+    // "waiting" (an open party nobody has joined) is drawn as FREE by normalizeTileState, so it has
+    // no money to hide either — it is excluded exactly as the waiter tablet's twin excludes it
+    // (sweep #10 T7, item 10: a 30-table floor drew a phantom "34 · Free" and read "0/31", while the
+    // tablet drew 30). A merged PARENT above the count is kept too, as the tablet keeps it.
+    .filter((k) => { const st = (tiles[String(k)] || {}).state; return (st && st !== "free" && st !== "waiting") || !!mergeParentOf(k) || mergeChildrenOf(String(k)).length > 0; })
     .sort((a, b) => a - b);
   return out.concat(extras);
 }

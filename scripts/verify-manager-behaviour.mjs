@@ -738,7 +738,36 @@ async function handBackShowsAll() {
     : bad("the note box is drawn empty over a note that will still be sent", "set .to-note's value from orderNote when the builder is built");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets, clashInWords, handBackShowsAll];
+// ── T · THE MANAGER'S FLOOR AND THE WAITER'S FLOOR DRAW THE SAME TABLES (sweep #10 T7, 2026-10-16) ──
+// Both say they share floorTableList's rule. The manager's had drifted: an off-plan table holding an
+// open party nobody joined ("waiting", drawn as Free) earned a phantom "34 · Free" tile and the header
+// read "0/31" on a 30-table floor, while the tablet drew 30. Both functions are lifted from the shipped
+// files and fed the same summary.
+async function floorsAgree() {
+  console.log("\nT. the manager's floor and the waiter's floor draw the same tables");
+  const mgr = lift("public/panels/editor/app.js", "function floorTableList(baseN) {", "\n}\n", "manager floorTableList");
+  const tab = lift("public/panels/tablet/app.js", "function floorTableList() {", "\n}\n", "tablet floorTableList");
+  const cases = [
+    ["nothing above the plan", {}],
+    ["a cooking table above the plan", { 34: { state: "prep" } }],
+    ["a FREE stray above the plan", { 40: { state: "free" } }],
+    ["an open party nobody joined, above the plan", { 34: { state: "waiting" } }],
+    ["a merged child above the plan (its state reads free)", { 33: { state: "free" } }],
+    ["a merged PARENT above the plan", { 35: { state: "prep" } }],
+  ];
+  const merges = { 33: "7" }, kids = { 35: ["8"] };
+  for (const [label, tiles] of cases) {
+    const state = { summary: { tiles } };
+    const parent = (k) => merges[String(k)] || null, children = (k) => kids[String(k)] || [];
+    const m = new Function("state", "mergeParentOf", "mergeChildrenOf", `${mgr}\nreturn floorTableList(30);`)(state, parent, children);
+    const t = new Function("state", "mergeParentOf", "mergeChildrenOf", "tableCount", `${tab}\nreturn floorTableList();`)(state, parent, children, () => 30);
+    JSON.stringify(m) === JSON.stringify(t)
+      ? ok(`${label}: both floors draw ${m.length} tables`)
+      : bad(`${label}: the manager draws ${m.length}, the waiter ${t.length}`, `manager ends ${m.slice(-2).join(",")} · tablet ends ${t.slice(-2).join(",")}`);
+  }
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets, clashInWords, handBackShowsAll, floorsAgree];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }
