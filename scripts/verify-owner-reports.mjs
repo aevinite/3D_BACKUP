@@ -1183,6 +1183,13 @@ console.log("\nT11-E · saying so when a read failed");
     "app/owner/page.tsx — the stock-count effect must check ov.modules.inventory before it asks; " +
       "otherwise every Inventory-less dashboard open costs a refused request and a console error.",
   );
+  // item 2 — "Orders a day" was revenue ÷ the paid average, so its bars summed to the PAID count
+  // (45) under a headline of every order (98). The real per-day count is in the same payload.
+  check(
+    "item 2 · the Orders sheet's day bars are real order counts, not revenue ÷ average",
+    !/p\.v \/ avgTicket/.test(dashPage) && !/about \$\{/.test(dashPage) && /v: d\.ord,/.test(dashPage),
+    "app/owner/page.tsx — build the Orders chart from timeseries[].orders; an estimate cannot add up to the headline.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);

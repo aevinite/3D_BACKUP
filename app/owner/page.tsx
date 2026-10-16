@@ -2425,18 +2425,26 @@ export default function OwnerDashboard() {
         // intersected (`scope` differs), so the two fields this block needs are picked out.
         const pay = pl(globalRange) as
           | { timeseries: TsRow[]; paymentMethods: Pay[] } | undefined;
-        const dailyPts = (() => {
-          if (!pay) return [] as { x: string; v: number }[];
-          const by = new Map<string, number>();
+        // ── ONE ROW PER DAY, CARRYING BOTH FIGURES THE PAYLOAD ALREADY HAS (sweep #10 T20, item 2) ──
+        // The Orders sheet used to draw "Orders a day" as revenue ÷ the PAID average — "about 6 orders"
+        // — although every timeseries row carries its own real `orders` count. The estimate could not
+        // see an order nobody had paid for yet, so on French House's This month the bars added up to
+        // 45 under a headline of 98 orders, on the same sheet. The real count is used now, and the days
+        // are sorted, because a Map's insertion order is time order only by luck (see sparkOf).
+        const daily = (() => {
+          if (!pay) return [] as { key: string; rev: number; ord: number }[];
+          const by = new Map<string, { rev: number; ord: number }>();
           for (const t of pay.timeseries) {
             const k = istKey(new Date(t.bucket), globalRange);
-            by.set(k, (by.get(k) || 0) + t.revenue);
+            const c = by.get(k) || { rev: 0, ord: 0 };
+            c.rev += t.revenue; c.ord += t.orders || 0;
+            by.set(k, c);
           }
-          // `keyLabel` exists for exactly this: istKey() builds "2026-09-05", and an axis that
-          // reads "2026-09-05" is a key leaking onto the screen. It gives "5 Sept" / "3 PM".
-          return [...by.entries()].map(([x, v]) => ({ x: keyLabel(x), v, hint: `${keyLabel(x)} · ${inr(v)}` }));
+          return [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([key, v]) => ({ key, ...v }));
         })();
-        const avgTicket = kMain?.avg || 0;
+        // `keyLabel` exists for exactly this: istKey() builds "2026-09-05", and an axis that
+        // reads "2026-09-05" is a key leaking onto the screen. It gives "5 Sept" / "3 PM".
+        const dailyPts = daily.map((d) => ({ x: keyLabel(d.key), v: d.rev, hint: `${keyLabel(d.key)} · ${inr(d.rev)}` }));
         const tileCap = tileOpen === "revenue" ? `collected across ${who}`
           : tileOpen === "orders" ? `bills opened · ${RANGE_LABEL[globalRange]}`
           : tileOpen === "today" ? `${todayOrd.toLocaleString("en-IN")} orders · ${(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0)).toLocaleString("en-IN")} tables open`
@@ -2459,8 +2467,8 @@ export default function OwnerDashboard() {
             .map((m) => ({ k: m.method, v: m.revenue, t: inr(m.revenue) }));
           tileSideTitle = "How the money arrived";
         } else if (tileOpen === "orders") {
-          tileChart = { kind: "bars", pts: dailyPts.map((p) => ({ x: p.x, v: avgTicket ? Math.round(p.v / avgTicket) : 0,
-            hint: `${p.x} · about ${avgTicket ? Math.round(p.v / avgTicket) : 0} orders` })) };
+          tileChart = { kind: "bars", pts: daily.map((d) => ({ x: keyLabel(d.key), v: d.ord,
+            hint: `${keyLabel(d.key)} · ${d.ord.toLocaleString("en-IN")} order${d.ord === 1 ? "" : "s"}` })) };
           tileChartTitle = `Orders a day · ${RANGE_LABEL[globalRange]}`;
           tileSide = (pay?.paymentMethods || []).filter((m) => m.orders > 0)   // see the note above
             .map((m) => ({ k: m.method, v: m.orders, t: m.orders.toLocaleString("en-IN") }));
