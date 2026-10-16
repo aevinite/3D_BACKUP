@@ -10,12 +10,14 @@
  *   · the long edge is capped (1280 px — twice the biggest box any screen shows it in, so it still
  *     looks sharp on a retina display);
  *   · it is re-encoded as WebP, which is 25–35% smaller than JPEG at the same quality and is
- *     accepted by every browser this app supports (and by the upload route: PNG/JPG/WEBP);
+ *     accepted by every browser this app supports (and by the upload route: PNG/JPG/WEBP) — and
+ *     where the browser cannot WRITE WebP (Safari, so every iPhone), as JPEG, or as PNG when the
+ *     photo was a PNG; the file is always named and labelled as what it really is (item 26);
  *   · EXIF orientation is honoured (`imageOrientation: "from-image"`), so a portrait photo taken
  *     on a phone does not arrive on its side — the one thing a naive canvas resize gets wrong.
  *
  * FOUR RULES IT NEVER BREAKS, because an upload that fails is worse than a big file:
- *   1. it NEVER throws — any failure (an odd format, a browser without WebP encoding, a huge image
+ *   1. it NEVER throws — any failure (an odd format, a browser that can write none of the three, a huge image
  *      the canvas refuses) returns the ORIGINAL file and the upload proceeds exactly as before;
  *   2. it never makes a file BIGGER — if the re-encode comes out heavier (already-optimised small
  *      images do), the original is kept;
@@ -33,13 +35,14 @@
   var QUALITY = 0.82;           // WebP quality — visually indistinguishable at this size
   var SKIP_UNDER = 180 * 1024;  // a photo this small is already fine to send as it is
   var TYPES = { "image/jpeg": 1, "image/png": 1, "image/webp": 1 };
+  var EXT = { "image/webp": "webp", "image/jpeg": "jpg", "image/png": "png" };   // what we may hand back
 
   function readable(bytes) {
     return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + " MB" : Math.round(bytes / 1024) + " KB";
   }
 
   // Draw the bitmap at the capped size and hand back a Blob, or null if this browser cannot.
-  function encode(bitmap, w, h) {
+  function encode(bitmap, w, h, type) {
     return new Promise(function (resolve) {
       try {
         var canvas = document.createElement("canvas");
@@ -52,7 +55,7 @@
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(bitmap, 0, 0, w, h);
-        if (canvas.toBlob) canvas.toBlob(function (b) { resolve(b || null); }, "image/webp", QUALITY);
+        if (canvas.toBlob) canvas.toBlob(function (b) { resolve(b || null); }, type, QUALITY);
         else resolve(null);
       } catch (e) { resolve(null); }
     });
@@ -68,7 +71,11 @@
     return new Promise(function (resolve) {
       var url = URL.createObjectURL(file);
       var img = new Image();
-      img.onload = function () { resolve(img); };
+      // LET THE ADDRESS GO ONCE THE PICTURE IS IN (sweep #10 T16 round 3, item 31). It used to be
+      // revoked only on an error, so on a browser with no createImageBitmap (iPads before iOS 15)
+      // every photo shrunk kept its whole original — megabytes each — pinned in memory for as long as
+      // the panel stayed open. A decoded <img> draws the same after its address is revoked.
+      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
       img.onerror = function () { URL.revokeObjectURL(url); resolve(null); };
       img.src = url;
     });
@@ -93,12 +100,24 @@
       if (scale === 1 && file.size <= SKIP_UNDER) { if (bitmap.close) bitmap.close(); return out; }
       var w = Math.max(1, Math.round(iw * scale));
       var h = Math.max(1, Math.round(ih * scale));
-      var blob = await encode(bitmap, w, h);
+      var blob = await encode(bitmap, w, h, "image/webp");
+      // SAFARI CANNOT WRITE WebP, AND DOES NOT SAY SO (sweep #10 T16 round 3, item 26, 2026-10-16).
+      // Asked for "image/webp", WebKit — every browser on an iPhone — quietly hands back a PNG
+      // (measured: WebKit 26.6 → blob.type "image/png"). This used to wrap that PNG in a file
+      // NAMED .webp and LABELLED image/webp, and the server files a photo by its label — so an
+      // iPhone's dish photo was stored as a 1280 px PNG (megabytes, not the ~150 KB WebP meant)
+      // under a false name, and every guest downloaded it. So the label now follows what the
+      // browser really made: a PNG we were given stays PNG (it may have see-through parts a JPEG
+      // would paint black); any other photo is made again as a JPEG, which every browser writes.
+      if (blob && blob.type !== "image/webp") {
+        if (file.type === "image/png") { if (blob.type !== "image/png") blob = null; }
+        else { blob = await encode(bitmap, w, h, "image/jpeg"); if (blob && blob.type !== "image/jpeg") blob = null; }
+      }
       if (bitmap.close) bitmap.close();
       // Rule 2: never upload something bigger than what we were given.
       if (!blob || blob.size >= file.size) return out;
-      var name = String(file.name || "photo").replace(/\.[^.]+$/, "") + ".webp";
-      var shrunk = new File([blob], name, { type: "image/webp", lastModified: Date.now() });
+      var name = String(file.name || "photo").replace(/\.[^.]+$/, "") + "." + EXT[blob.type];
+      var shrunk = new File([blob], name, { type: blob.type, lastModified: Date.now() });
       return { file: shrunk, changed: true, from: file.size, to: shrunk.size, note: readable(file.size) + " → " + readable(shrunk.size) };
     } catch (e) {
       return out;   // Rule 1: the upload goes ahead with the original.

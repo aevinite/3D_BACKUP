@@ -64,7 +64,9 @@ export function run({ c, raw, check, fnBody, before, count }) {
     const decls = [...barState.matchAll(/var (\w+) *=/g)].map((m) => m[1]);
     const dupes = decls.filter((n, i) => decls.indexOf(n) !== i);
     if (dupes.length) return `re-declared inside barState(), which is the shadowing bug: ${[...new Set(dupes)].join(", ")}`;
-    return /var retryDue = dueIn > 1500/.test(barState);
+    // The retry-due test became "is a try booked (and not overdue), or running?" in sweep #10 T16 round 3,
+    // item 34 — still its own name, still never the count.
+    return /var scheduled = \(!!nextAt && dueIn > -1500\) \|\| !!box\.syncing;/.test(barState);
   });
   check("P01669", "changesWord(n) is used for every plural TITLE in barState", () => {
     // Expectation refined by T4 (P17090): the OFFLINE branch spells its plural inline in the SUB
@@ -84,7 +86,8 @@ export function run({ c, raw, check, fnBody, before, count }) {
     /next try in about "\s*\+ Math\.max\(1, Math\.round\(dueIn \/ 1000\)\)/.test(barState.replace(/\s+/g, " ")) ||
     /next try in about "/.test(barState));
   check("P01673", "'Sending...' is only shown when a round really is in flight or due", () =>
-    /var stuck = since && \(Date\.now\(\) - since\) > STUCK_MS && \(Date\.now\(\) - nudgedAt\) > 8000 && !retryDue;/.test(barState));
+    // Item 34 (T16 round 3): a booked try or a round in progress is a wait, so `stuck` needs !scheduled.
+    /var stuck = since && \(Date\.now\(\) - since\) > STUCK_MS && \(Date\.now\(\) - nudgedAt\) > 8000 && !scheduled;/.test(barState));
   check("P01674", "a tap on 'Send now' earns a genuine 'Sending...' for a few seconds", () =>
     before(sendNow, /nudgedAt = Date\.now\(\)/, /render\(\)/));
   check("P01675", "'Send now' always leaves a trace on screen even if the flush throws", () =>

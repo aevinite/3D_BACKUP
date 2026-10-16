@@ -75,7 +75,7 @@
       </div>
     </div>
   </div>
-  <script src="/panels/maint.js?v=541c2eea"></script>
+  <script src="/panels/maint.js?v=9d372e95"></script>
   <script src="/panels/realtime.js?v=c10a5d48"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/netretry.js?v=146879f3"></script>
@@ -91,14 +91,14 @@
        opposite of the actual order in this file and would have sent the next person reordering
        these tags the wrong way. T4 sweep, 2026-08-11.) -->
   <script src="/panels/swreg.js?v=0d429b78"></script>
-  <script src="/panels/offline.js?v=9e03ae1a"></script>
+  <script src="/panels/offline.js?v=9d3f6389"></script>
   <!-- What the GUEST MENU is waiting for (owner, 2026-08-13): the 🔔 in the top bar + its sheet.
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
        It loads BEFORE backstack.js and that is fine: it reaches LFH_BACK only when its sheet opens,
        long after every tag here has run. (This line used to say "After backstack.js", which was
        never the order — sweep #10 T12 round 2.) -->
-  <script src="/panels/guestbell.js?v=df6b7ef1"></script>
+  <script src="/panels/guestbell.js?v=1cc2af6c"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=0ed28480"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
@@ -108,14 +108,14 @@
   <!-- shrinkimg.js: caps an uploaded photo at 1280px and re-encodes it as WebP BEFORE it is
        sent (owner, 2026-09-17: "compress all images"). Used by the dish photo in Edit menu and
        by a photo attached to an issue; it hands back the original file if anything goes wrong. -->
-  <script src="/panels/shrinkimg.js?v=b7109a6e"></script>
+  <script src="/panels/shrinkimg.js?v=186c79fd"></script>
   <script src="/panels/issue-raise.js?v=62215772"></script>
   <!-- My profile & pay (mig 220) — shared with the manager panel -->
   <script src="/panels/myprofile.js?v=09b983a9"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Ready/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=0610dc4b" data-fit=".ordtotal,.ctotal"></script>
+  <script src="/panels/fitnums.js?v=b0385677" data-fit=".ordtotal,.ctotal"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). This panel does
        not print, but it reads the shared money rules from here — discPct(), the one definition of
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the

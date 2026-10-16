@@ -1951,3 +1951,10 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **A refused ✓ / ALL READY puts the screen back at once** (item 18) — Kitchen screen → a ticket's ✓ and ALL READY. Guard: P180911.
 - [x] **A ticket whose printing failed is retried, never marked printed** (item 19) — Kitchen screen → automatic printing. Guard: P180969.
 - [x] **The whole test re-planned and run** — 998 checks in the block; every line of the kitchen server and 99% of the screen run; the server broken 480 ways to prove the checks notice; the real app driven with one test ticket (cleaned up) and three devices looked at.
+
+## 2026-10-16 — owner (on T16 round 2's decision 25 + "do a full bug test … replan whole test … do it again … completely error free")
+
+- [x] **Dashboard charts checked with real numbers** — French House's manager reach set to "last 7 days" for the run and put back exactly; all 7 charts drew (₹14,209). No fake sale made: a paid bill draws an invoice number that can never be deleted.
+- [x] **The whole test re-planned from scratch and run three times over** — `npm run verify:panel-plumbing-r3` (16 families, 588 checks — 572 local + 16 on the real panels with `--base` — over thousands of random cases). Found and fixed items 26, 27, 30, 31, 32, 33, 34. Mutation: 143 of 180 breaks caught, the 37 left shown harmless or not this terminal's code. `.claude/sweep/T16-S10-findings.md` → Round 3.
+- [ ] **Decision 28** — eight texts under the reading standard (mostly the gold house colour). Waiting on the owner.
+- [ ] **Decision 29** — the manager panel's 20 s print check on screens that are not the printer. Waiting on the owner.

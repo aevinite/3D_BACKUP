@@ -62,3 +62,66 @@ All on `sweep10/t16-round2`, one commit per item, each with a guard that goes re
 - **A value nobody reads** (5): `ensureClient()`'s three return values (realtime 281/285/289 — every caller ignores them), the pop's re-render signature, which changes either way (connbadge 281), a `console.error` text (owner/settings 256).
 - **Reached only by input a browser never produces** (7): a bitmap of height 0 (shrinkimg 90), computed font size not in px (fitnums 58), nowrap already set (fitnums 28), the minimum-size loop that the next line ends anyway (fitnums 74), the tooltip rule on an element with children (fitnums 104), a keyless row's `at` fallback when it has an id (guestbell 87), the older start style handing each topic the same no-op (realtime 183).
 - **Unreachable by construction** (5): offline 66 (the bar returns for "offline" before asking), auditsort 378 / 498 (an always-true last group; the `window` fallback where `globalThis` exists), errlog 278 (the final `|| ""` when every earlier name is empty), client-error 230 (`where || null` when the screen name always answers), issue-raise 386 (the history entry is already cleared when Back reaches it).
+
+---
+
+# Round 3 (owner, 2026-10-16: "replan whole test. Don't use the previous one … do it again … I want it completely error free")
+
+All on `sweep10/t16-round3`. A new suite written from scratch — `scripts/t16r3/`, `npm run verify:panel-plumbing-r3` — that
+serves the REAL panel files from its own local server (no app, no database, no login) and drives them in a real browser;
+families G and H also drive the real manager / kitchen / tablet panels (`--base`), with every write answered in the browser.
+
+| # | what a person lost | file | how it was found | guard |
+|---|---|---|---|---|
+| 25 | (asked) the Dashboard charts drawn with real numbers | manager panel → Dashboard | French House's reach set to "last 7 days" for the run and restored exactly; 7 charts drew ₹14,209 — no fake sale made (a paid bill draws an invoice number that can never be deleted) | — |
+| 26 | On an **iPhone** a shrunk photo was a PNG named and labelled WebP — stored as megabytes under a false name, downloaded by every guest | `shrinkimg.js` | family C/B in WebKit: `toBlob("image/webp")` answers `image/png` | R3-B-044 (judges each file by its own bytes) |
+| 27 | The offline sheet's and the guest bell's ✕ had no name a screen reader can say | `offline.js`, `guestbell.js` | family D | R3-D |
+| 30 | The everyday ⚙ drawer showed Phone as optional and then refused it empty | `maint.js` | family K | R3-K-001 |
+| 31 | On an older iPad (no `createImageBitmap`) every shrunk photo stayed pinned in memory all shift | `shrinkimg.js` | coverage pass 1 → reading the fallback | R3-L-017 |
+| 32 | Every crash from Samsung Internet was filed as Chrome; Edge on a phone as Chrome / Safari | `app/api/log/client-error/route.ts` | coverage pass 1 → 13 real browser strings | R3-M-004 |
+| 33 | A figure more than twice its tile's width was crushed to the 11 px floor instead of shrunk just enough ("1,234 covers": 11 px where ~13 px fits) | `fitnums.js` | the mutation run — a break no check noticed, then measured | R3-P-003 |
+| 34 | The saved-on-this-device bar flipped to "hasn't sent yet — the connection looks fine" in the last 1.5 s before EVERY retry, then back | `offline.js` | the first full 200-seed final run sampled inside that window | R3-O-006 |
+
+Decisions left with the owner: **28** — eight texts under the WCAG reading standard, mostly the gold house colour (R13), frozen
+by a ratchet in family E; **29** — the manager panel asks the print queue every 20 s, hidden or not, even on a screen that is not the
+printer (`editor/app.js` `managerPrintPass`, the printing terminal's file).
+
+## How "everything" was covered this time
+
+- **Sixteen families** — A random queue sequences (200 seeds) · B random inputs (thousands of cases) · C Chromium + WebKit ·
+  D names / tap sizes / Back · E a layout + contrast grid (168) · F the three routes vs 1,500 random requests · G real panels under a
+  busy / silent / erratic server · H what an idle panel costs · I–N three further passes aimed by coverage · O–P two passes aimed by the mutation run.
+- **Coverage**, round-3 checks only: pass 1 left `realtime.js` / `swreg.js` / the owner switch at 0 % and ~1,100 lines unrun; families
+  I–M brought every file to 90–100 %; family N took the voice note, the frame sign-out and the rest.
+- **Mutation**, round-3 suite only (`--bail`, the families that RUN each file): **180 breaks, 143 caught** — 111 by families A–N,
+  30 more once O–P were aimed at the survivors, 2 more by the last two P checks. A full 200-seed run of family A also showed the
+  queue is **at-least-once by design** (a reload can resend a change whose answer never came back; every route it writes to runs
+  an action id once, `lib/idempotency.ts`) — so A now judges "one change, one action id, a repeat marked a replay" (a fresh id per
+  replay turns 20 of 60 seeds red).
+- **Sabotage**: every family was broken on purpose at least once and went red (a give-up that deletes, a 1,400 px bar, a manager
+  allowed without the hand-over, a truthy `on`, a claim that beats the address, every error called "no internet", a late undo card,
+  a voice note sent as a photo …).
+- **Firefox** could not be run on this Mac (its Playwright build fails "Could not find profile folder", also after a forced
+  reinstall) — 14 visible skips, never a silent pass.
+
+## Noted, outside this territory
+
+- Manager panel → the 20 s print-queue check runs on every manager screen, hidden or not, whether or not it is the printer — decision 29, `editor/app.js`.
+
+## The 37 breaks no check catches — and why none can matter
+
+- **Not this terminal's code (5):** `app/api/owner/settings/route.ts` 148 / 215 / 385 / 405 / 407 belong to the route's other
+  features (modules, printing, the owner's Activity id) — only its maintenance half is T16's.
+- **Type lines, no code (2):** `lib/maintenance.ts` 40 / 41 (`true` / `false` inside a TypeScript union).
+- **A capability test or fallback inside a `try`, or a `typeof` that is always true in a browser (8):** offline 69, netretry 68 /
+  136 (the first `||`: an abort is always also "aborted"), realtime 71 / 289 / 313, myprofile 290, auditsort 179.
+- **A starting value overwritten before it is read, or a listener flag (8):** undobar 174 / 177, guestbell 68, theme 60 (the
+  capture flag), swreg 99 (`once`), swipehint 110, backstack 62 (a second microtask that finds nothing to do), maint 346.
+- **A guard every caller already applies (3):** maint 707 (init never runs while the button exists), issue-raise 369 (the layer
+  is registered once per open), swipehint 131 (a loop bound whose body re-measures anyway).
+- **A wording or count no real input reaches (4):** guestbell 291 (`el()` drops an undefined text), guestbell 306 (the catch
+  path), myprofile 137 (only a nameless profile reads differently — and then "?" either way), myprofile 237 (the clash field name).
+- **Timing only (4):** netretry 126 (which attempt waits — the count is unchanged), realtime 386 (a default the caller always
+  passes), outbox 579 (a backoff reset while offline costs nothing — flush returns at once), offline 259 (the other `&&`).
+- **Late-load and visibility (3):** swipehint 144, swreg 28 (`update()` on a visible tab — a nicety), fitnums 57 (`|| 1` only
+  for a zero-width box, which never overflows).

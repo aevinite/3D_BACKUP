@@ -119,8 +119,12 @@ export function run({ c, raw, check, skipRow, fnBody, before, count }) {
       /if \(cs\.display === "inline"\) \{ el\.style\.display = "inline-block"; el\.style\.maxWidth = "100%"; \}/.test(fit));
     check("P04235", "only a pure-text number is forced to one line", () =>
       /if \(el\.childElementCount === 0 && cs\.whiteSpace !== "nowrap"\) el\.style\.whiteSpace = "nowrap";/.test(fit));
-    check("P04236", "the shrink removes the OVERFLOW DELTA, not the content ratio", () =>
-      /Math\.floor\(cur \* \(\(w - over\) \/ w\) \* 10\) \/ 10/.test(fit));
+    // Refined by sweep #10 T16 round 3, item 33: the DELTA rule is kept for a tile with decorations (the
+    // 3.8px-crush case it was written for); a pure-text figure shrinks by its own width ratio, because
+    // there the delta goes negative past 2x and crushed the figure to the floor.
+    check("P04236", "a decorated tile shrinks by the OVERFLOW DELTA; a pure-text figure by its own width ratio", () =>
+      /var factor = el\.childElementCount === 0 \? el\.clientWidth \/ el\.scrollWidth : \(w - over\) \/ w;/.test(fit) &&
+      /Math\.floor\(cur \* factor \* 10\) \/ 10/.test(fit));
     check("P04237", "the loop is capped at 5 passes", () => /for \(var pass = 0; pass < 5; pass\+\+\)/.test(fit));
     check("P04238", "a perfectly-fitting number never jitters (the +1px forgiveness)", () =>
       /if \(over <= 1\) break;/.test(fit));

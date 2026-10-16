@@ -501,7 +501,11 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     const detMsg = el("div", { class: "lfh-msg" });
     const saveDet = el("button", { class: "lfh-bt lfh-cta", onClick: async () => {
       const name = nameIn.value.trim(), phone = phoneIn.value.trim();
-      if (!name || !phone) { setMsg(detMsg, "Both your username and phone are required.", false); return; }
+      // THE PHONE IS REQUIRED WHERE THE FORM SAYS SO, AND ONLY THERE (sweep #10 T16 round 3, item 30).
+      // The label carries its * only in first-login setup — on purpose, and the server, and My profile
+      // & pay, both let a person clear their phone afterwards. This check demanded it always, so the
+      // everyday drawer showed an optional box and then refused it empty. Guard: R3-K (fk-drawers.mjs).
+      if (!name || (setup && !phone)) { setMsg(detMsg, setup ? "Both your username and phone are required." : "Your username is required.", false); return; }
       const payload = { name, phone };
       if (setupPinIn) {
         const pin = setupPinIn.value.trim();
