@@ -1958,3 +1958,7 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **The whole test re-planned from scratch and run three times over** — `npm run verify:panel-plumbing-r3` (16 families, 588 checks — 572 local + 16 on the real panels with `--base` — over thousands of random cases). Found and fixed items 26, 27, 30, 31, 32, 33, 34. Mutation: 143 of 180 breaks caught, the 37 left shown harmless or not this terminal's code. `.claude/sweep/T16-S10-findings.md` → Round 3.
 - [ ] **Decision 28** — eight texts under the reading standard (mostly the gold house colour). Waiting on the owner.
 - [ ] **Decision 29** — the manager panel's 20 s print check on screens that are not the printer. Waiting on the owner.
+## 2026-10-16 — owner (on T16's item 25 + "do it again, maybe replan whole thing … completely error free … every single bit")
+
+- [x] **Item 25 — the manager Dashboard's charts checked with real numbers** (French House widened to 30 days through the admin's own Access save, then put back): every rung's counts and revenue equal the bills in the database; all seven charts draw what the server sent. 175/175 on backup. `scripts/sweep/t12r3/dash-charts.mjs`.
+- [x] **The waiter tablet re-tested by measurement** — coverage 60% → 99.2%, a fixture world (475 checks + 42 aimed at mutation survivors), mutation testing converged at 90% caught with every survivor explained; ten faults fixed (`.claude/sweep/T12-S10-findings.md` → Round 3). Guard: verify:tablet-taps.
