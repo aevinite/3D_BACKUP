@@ -9955,11 +9955,17 @@ function orderItemRows(o) {
 const STLABEL_SP = { received: "new", preparing: "preparing", ready: "ready", served: "served", cancelled: "cancelled" };
 const SPINE_TINTS = ["#c2410c", "#b45309", "#15803d", "#a16207", "#7c3aed", "#be185d", "#0e7490", "#1d4ed8", "#9f1239", "#0f766e"];
 const NO_COURSE = { slug: "", name: "Not on the menu now", abbr: "—", tint: "var(--muted)", seq: 9990 };
-let _menuSeq = null, _menuSeqKey = "";
+// REBUILT WHENEVER THE MENU IS RE-READ (sweep #10 T7, item 5). The cache used to be keyed on the
+// two COUNTS plus the first dish's id and the first category's slug, so a change that kept those —
+// categories reordered, a course recoloured or renamed, a dish moved to another course — left every
+// table's bill in the OLD course order and tint until the page was reloaded (measured: desserts
+// moved from 9th to 2nd still read course 9). The menu only ever arrives as NEW arrays (loadAll
+// replaces state.data wholesale, on a save here and on the realtime "menu" event from any other
+// device), so the arrays' own identity is the exact signal: a new menu, a new sequence.
+let _menuSeq = null, _menuSeqItems = null, _menuSeqCats = null;
 function menuSeq() {
   const items = state.data.items || [], cats = state.data.categories || [];
-  const key = `${items.length}:${cats.length}:${(items[0] || {}).id || ""}:${(cats[0] || {}).slug || ""}`;
-  if (_menuSeq && _menuSeqKey === key) return _menuSeq;  // rebuilt only when the menu itself changes
+  if (_menuSeq && _menuSeqItems === state.data.items && _menuSeqCats === state.data.categories) return _menuSeq;
   const catBySlug = new Map();
   [...cats].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).forEach((c, i) => {
     const name = nameOf(c.name, c.slug) || c.slug || "—";
@@ -9975,7 +9981,7 @@ function menuSeq() {
     const k = String(it.title || "").trim().toLowerCase();
     if (k && !byTitle.has(k)) byTitle.set(k, { cat: it.category, itemSeq: Number(it.sort_order) || 0 });
   });
-  _menuSeqKey = key;
+  _menuSeqItems = state.data.items; _menuSeqCats = state.data.categories;
   return (_menuSeq = { catBySlug, byTitle });
 }
 // The course a dish row belongs to, with everything the line needs to say it in three letters.

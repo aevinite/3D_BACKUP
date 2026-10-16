@@ -615,7 +615,39 @@ async function fetchesEnd() {
     : bad("the dish-photo timeout would print the browser's own words");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd];
+// ── O · THE BILL'S COURSE ORDER FOLLOWS THE MENU AS IT IS NOW (sweep #10 T7, 2026-10-16) ─────────
+// The table popup sorts a bill's dishes into the menu's own course order (menuSeq / courseOfRow).
+// Its cache was keyed on counts and the first ids, so reordering categories, recolouring one, or
+// moving a dish to another course left every bill in the OLD order until a reload. Lifted from the
+// shipped file and run: after the menu arrives again with the same counts and first ids but a new
+// order, the course must move.
+async function courseOrderFollowsMenu() {
+  console.log("\nO. the bill's course order follows the menu as it is now");
+  const code = lift("public/panels/editor/app.js", "const NO_COURSE = ", "\nconst spineKey", "menuSeq") || "";
+  const body = code.replace(/\nconst spineKey$/, "");
+  const run = new Function("state", "nameOf", "SPINE_TINTS", `${body}\nreturn { menuSeq, courseOfRow };`);
+  const state = { data: {} };
+  const set = (cats, items) => { state.data = { categories: cats, items }; };
+  const { courseOfRow } = run(state, (n, slug) => (typeof n === "string" ? n : slug), ["#111", "#222", "#333", "#444"]);
+  const cats = [{ slug: "starters", name: "Starters", sort_order: 1 }, { slug: "mains", name: "Mains", sort_order: 2 }, { slug: "desserts", name: "Desserts", sort_order: 3 }];
+  const items = [{ id: "a", title: "Soup", category: "starters" }, { id: "b", title: "Steak", category: "mains" }, { id: "c", title: "Tart", category: "desserts" }];
+  set(cats, items);
+  const before = courseOfRow({ title: "Tart" }).seq;
+  // The same menu re-read after "Desserts" was dragged to second place: new arrays, same counts,
+  // same first dish, same first category — the shape the old cache key could not see.
+  set(cats.map((c) => ({ ...c, sort_order: c.slug === "desserts" ? 1.5 : c.sort_order })), items.map((i) => ({ ...i })));
+  const afterReorder = courseOfRow({ title: "Tart" }).seq;
+  set(state.data.categories.map((c) => ({ ...c })), state.data.items.map((i) => (i.id === "c" ? { ...i, category: "mains" } : { ...i })));
+  const afterMove = courseOfRow({ title: "Tart" }).slug;
+  before === 3 && afterReorder === 2
+    ? ok("a category reorder reaches the bill's course order at once (Desserts 3rd → 2nd)")
+    : bad("the bill keeps the OLD course order after a reorder", `before ${before}, after ${afterReorder} — expected 3 then 2`);
+  afterMove === "mains"
+    ? ok("…and a dish moved to another course is filed under its new course")
+    : bad("a dish moved to another course stays under its old one on the bill", `got ${afterMove}`);
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }
