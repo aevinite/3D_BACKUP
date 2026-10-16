@@ -1218,6 +1218,13 @@ console.log("\nT11-E · saying so when a read failed");
       /\[\.\.\.new Set\(\[0, pts\.length - 1\]\)\]/.test(docket),
     "components/owner/TileDocket.tsx — Area and Bars must not label the same index twice.",
   );
+  // item 7 — a failed read answered "the name is free", so a blip let a second owner take a live name.
+  check(
+    "item 7 · ownerHome's name checks treat a failed read as 'could not check', never as 'free'",
+    /if \(dup\.error\) throw /.test(ownerHome) && /if \(q\.error\) throw /.test(ownerHome) &&
+      /catch \{\s*\n?\s*return `We couldn’t check whether/.test(ownerHome),
+    "lib/ownerHome.ts — loginNameTaken / liveHoldersOfName must not read an error as an empty answer.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
