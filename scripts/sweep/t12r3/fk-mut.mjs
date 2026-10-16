@@ -17,7 +17,7 @@ const scene = async (build, settings = {}, device = {}, who) => {
 };
 const posts = (w, re) => w.sent("POST", re);
 
-export async function blockFK(R, id) { await blockFK1(R, id); await blockFK2(R, id); }
+export async function blockFK(R, id) { await blockFK1(R, id); await blockFK2(R, id); await blockFK3(R, id); }
 async function blockFK1(R, id) {
   const { check } = R;
   {
@@ -279,6 +279,53 @@ async function blockFK2(R, id) {
     await page.evaluate(async () => { await load(); refreshWhoami(true); }); await settle(page, 900);
     const after = await page.evaluate(() => document.getElementById("billDiscountBtn")?.className || "");
     await check(id(), F, "an Access change reaches the admin's OPEN table: the discount button turns tinted without a reload", H, () => ok(!/xray-off/.test(before) && /xray-off/.test(after), `${before} → ${after}`));
+    await ctx.close();
+  }
+}
+
+// ── MUTATION PASS 3 (seed 3: 100 fresh mutants, 88 killed) ────────────────────────────────────────────
+async function blockFK3(R, id) {
+  const { check } = R;
+  {
+    // ordersOf (L660): whose orders are on this party's bill
+    const { ctx, page } = await scene((w) => {
+      const a = seat(w, 5, { orders: [{ kot_no: 501 }] });
+      const now = Date.now();
+      const extra = (k, sess, ageMin) => ({ id: `0rdx${k}-0000-4000-8000-000000000000`, created_at: new Date(now - ageMin * 60e3).toISOString(), session_id: sess, table_number: "5", status: "preparing", payment_status: "pending", total: 105, discount: 0, kot_no: 600 + k, items: [{ id: "x", qty: 1, title: "Ghost dish " + k, price: "100", status: "preparing" }], archived: false });
+      w.slices["5"].orders.push(extra(1, "5e55ffff-0000-4000-8000-000000000000", 5));   // ANOTHER party's ticket, newer
+      w.slices["5"].orders.push(extra(2, null, 60 * 24 * 9));                          // party-less, 9 days old
+      w.slices["5"].orders.push(extra(3, null, 2));                                    // party-less, rung during this sitting
+      return a;
+    });
+    await openTable(page, 5);
+    const kots = await page.evaluate(() => ordersOf("5").map((o) => o.kot_no).sort().join(","));
+    await check(id(), F, "a table's bill holds THIS party's tickets — never another party's, never a party-less one from before it sat down", H, () => ok(kots === "501,603", kots));
+    await ctx.close();
+  }
+  {
+    // canTakeAParty (L1241): a table a guest has asked to be seated at is not free to move a party onto
+    const { ctx, page } = await scene((w) => { w.summary.my_tables = ["1", "2"]; seat(w, 1, { orders: [{}] }); w.summary.tiles["2"] = { state: "free", label: "Free", hasReq: true, counts: {} }; });
+    await openTable(page, 1); await tap(page, "#kotMenuBtn"); await tap(page, '[data-kotop="shift"]'); await page.waitForSelector(".shiftgrid");
+    const t = await page.evaluate(() => ({ free: [...document.querySelectorAll("[data-shiftto]")].length, txt: document.querySelector(".shiftgrid").textContent }));
+    await check(id(), F, "a table a guest has asked for is never offered as free to move a party onto", H, () => ok(t.free === 0 && /No free table to move this party to/.test(t.txt), JSON.stringify(t.free)));
+    await ctx.close();
+  }
+  {
+    // L1274: an admin hovering a tinted control is told what it means
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served" }] }), { tablet_discount: "off" }, {}, { higherView: true });
+    await openTable(page, 5);
+    await page.hover("#billDiscountBtn"); await settle(page, 150);
+    const t = await page.evaluate(() => document.getElementById("billDiscountBtn").title);
+    await check(id(), F, "the admin hovering a tinted control is told it is off for this restaurant's waiters", H, () => ok(/^Not available — this isn't enabled for this restaurant's waiters\./.test(t), t));
+    await ctx.close();
+  }
+  {
+    // L4448: cancelling the pay-later person sheet ANSWERS (nobody) — no flow is left waiting forever
+    const { ctx, page } = await scene();
+    const r = await page.evaluate(async () => { const p = openKhataPersonSheet(100, "5"); await new Promise((x) => setTimeout(x, 200)); document.querySelector(".kp-cancel").click(); return await Promise.race([p.then((v) => ({ answered: true, v })), new Promise((x) => setTimeout(() => x({ answered: false }), 2000))]); });
+    await check(id(), F, "cancelling the pay-later person sheet answers 'nobody' at once (the split screen and the pay flow never wait forever)", H, () => ok(r.answered && r.v === null, JSON.stringify(r)));
+    const r2 = await page.evaluate(async () => { const p = openKhataPersonSheet(100, "5"); await new Promise((x) => setTimeout(x, 200)); document.querySelector(".kp-close").click(); return await Promise.race([p.then((v) => ({ answered: true, v })), new Promise((x) => setTimeout(() => x({ answered: false }), 2000))]); });
+    await check(id(), F, "…and so does its ✕", H, () => ok(r2.answered && r2.v === null, JSON.stringify(r2)));
     await ctx.close();
   }
 }
