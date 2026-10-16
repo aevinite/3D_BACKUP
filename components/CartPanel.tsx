@@ -22,6 +22,7 @@ import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the panel
 import SessionTableBill from "@/components/SessionTableBill";
 import { keepDigits } from "@/lib/digits";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import {
   STEPS,
   STATUS_COPY,
@@ -147,6 +148,9 @@ export default function CartPanel() {
   // line (which opens the customize popup ON TOP), back closes the popup first,
   // then this bill, then reaches the menu — exactly the owner's expected flow.
   useBackClose("cart", open, () => setOpen(false));
+  // a keyboard / screen-reader diner is taken INTO the bill and brought back to the basket button (item 46)
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(panelRef, open);
 
   // loadCart(): read the saved cart from localStorage and clean it up.
   const loadCart = () => {
@@ -972,7 +976,7 @@ export default function CartPanel() {
       {/* Dark backdrop behind the panel; tapping it broadcasts "close everything". */}
       <div className="overlay active" onClick={() => window.dispatchEvent(new Event("lfh:close-all"))}></div>
       {/* The slide-out panel itself. */}
-      <div id="cart-panel" className="cart-panel panel open">
+      <div id="cart-panel" className="cart-panel panel open" ref={panelRef} role="dialog" aria-modal="true" aria-label="Your bill">
         {/* Top bar with Back and close (X) buttons — both just close the panel. */}
         <div className="cart-topbar">
           <button

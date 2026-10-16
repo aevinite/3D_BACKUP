@@ -16,6 +16,7 @@ import { useFeatures } from "@/lib/features";
 // Phone back button: while this popup is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 import { keepDigits } from "@/lib/digits";
+import { useDialogFocus } from "@/lib/dialogFocus";
 
 // ChefPopup — the little "Need something?" pop-up where a guest picks a request
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
@@ -37,6 +38,9 @@ export default function ChefPopup() {
 
   // Phone back button closes the popup instead of leaving the site.
   useBackClose("chef-popup", open, () => setOpen(false));
+  // a keyboard / screen-reader diner is taken INTO the popup and brought back to the bell (item 46)
+  const boxRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(boxRef, open);
 
   // …and Escape closes it on a laptop. Separate effect with its own [open] dependency so the
   // listener exists only while the popup is up: a key listener on a screen with nothing open is
@@ -266,7 +270,7 @@ export default function ChefPopup() {
       {/* The dimmed background — tapping it closes everything. */}
       <div className="overlay active" onClick={() => window.dispatchEvent(new Event("lfh:close-all"))}></div>
       {/* The pop-up card itself. */}
-      <div id="chef-popup" className="popup active">
+      <div id="chef-popup" className="popup active" ref={boxRef} role="dialog" aria-modal="true" aria-label="Call a waiter">
         {/* A concierge bell icon at the top. */}
         <i className="fas fa-bell-concierge" style={{ fontSize: "48px", color: "var(--accent)" }}></i>
         <h2 style={{ fontFamily: "Playfair Display", color: "var(--text)", margin: "18px 0 8px", fontSize: "24px", fontWeight: 700 }}>

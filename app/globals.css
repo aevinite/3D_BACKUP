@@ -5914,3 +5914,8 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
     select { font-size: 16px; }
   }
 }
+
+/* The three ordering popups take the keyboard focus on their own BOX when they open (lib/dialogFocus.ts, sweep
+   #10 T3 round 4 item 46) — so a screen reader starts inside them and the next Tab lands on their first control.
+   The box itself shows no ring: it is a starting point, not a control; every control inside keeps its own. */
+#chef-popup:focus, #cart-panel:focus, .order-confirm:focus { outline: none; }
