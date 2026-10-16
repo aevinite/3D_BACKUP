@@ -25,7 +25,7 @@ const visit = (path) => once("visit " + path, async () => {
     return route.continue();
   });
   const page = await ctx.newPage(); const errors = []; page.on("pageerror", (e) => errors.push(String(e.message || e)));
-  const res = await page.goto(BASE + path, { waitUntil: "networkidle" }); await page.waitForTimeout(2500);
+  const res = await page.goto(BASE + path, { waitUntil: "load" }); await page.waitForTimeout(4000);
   const text = await page.evaluate(() => document.body.innerText.slice(0, 160).replace(/\s+/g, " "));
   await ctx.close(); return { status: res.status(), calls, errors, text };
 });
@@ -80,9 +80,9 @@ check(FILES.ts, "…and the next live sticker in the same tab clears that mark a
   });
   try {
     const page = await ctx.newPage();
-    await page.goto(BASE + DEADQ, { waitUntil: "networkidle" }); await page.waitForTimeout(1500);
+    await page.goto(BASE + DEADQ, { waitUntil: "load" }); await page.waitForTimeout(3000);
     const markDead = await page.evaluate(() => sessionStorage.getItem("lfh_tab_no_tenant")); const deadAsked = calls.length;
-    await page.goto(BASE + "/q/" + code, { waitUntil: "networkidle" }); await page.waitForTimeout(2500);
+    await page.goto(BASE + "/q/" + code, { waitUntil: "load" }); await page.waitForTimeout(4000);
     const markLive = await page.evaluate(() => sessionStorage.getItem("lfh_tab_no_tenant"));
     const fh = calls.slice(deadAsked).filter((c) => c.rid === FH_ID).length;
     return { ok: markDead === DEADQ && deadAsked === 0 && markLive === null && fh > 0, note: `mark ${markDead} → ${markLive} · dead page asked ${deadAsked} · live page named FH ${fh}×` };
