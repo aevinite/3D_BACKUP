@@ -1225,6 +1225,12 @@ console.log("\nT11-E · saying so when a read failed");
       /catch \{\s*\n?\s*return `We couldn’t check whether/.test(ownerHome),
     "lib/ownerHome.ts — loginNameTaken / liveHoldersOfName must not read an error as an empty answer.",
   );
+  // item 8 — globals.css strips every link's underline with !important, so the sheet's own underline lost.
+  check(
+    "item 8 · the docket's 'Open Audit & logs →' link keeps its underline (!important beats globals.css)",
+    /text-decoration:underline !important/.test(docket),
+    "components/owner/TileDocket.tsx — a: { text-decoration: none !important } in app/globals.css wins otherwise.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);

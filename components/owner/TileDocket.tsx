@@ -437,7 +437,11 @@ export default function TileDocket({
         .tdk .empty{font-size:11.5px;color:${MUT};padding:18px 0}
 
         .tdk .chart text{font:500 9.5px ui-sans-serif,system-ui,sans-serif;fill:${MUT}}
-        .tdk :global(.nlink){color:${INK} !important;font-weight:700;text-decoration:underline;text-underline-offset:2px}
+        /* text-decoration needs !important too (sweep #10 T20, item 8): app/globals.css sets
+           "a { text-decoration: none !important }" for the guest cards, which beat this rule — so the
+           one link inside the sentence rendered as bold ink with no underline. Measured: computed
+           text-decoration-line "none" while this rule asked for underline. */
+        .tdk :global(.nlink){color:${INK} !important;font-weight:700;text-decoration:underline !important;text-decoration-line:underline !important;text-underline-offset:2px}
       `}</style>
     </div>
   );
