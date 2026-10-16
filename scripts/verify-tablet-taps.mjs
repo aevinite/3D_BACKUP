@@ -1549,6 +1549,18 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── A FREE TABLE IS "ALREADY FREE", NOT "COULDN'T CHECK" (sweep #10 T12 round 3, item 1) ─────────────
+// closeTableAndFree also demanded sliceLoaded(t) — a session or an order in the slice — which a free
+// table never has, so a read that landed told the waiter "Couldn't check T5 just now — try again".
+{
+  const i = src.indexOf("async function closeTableAndFree("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: closing a table that a successful read found free says 'already free'",
+    /toast\(readOk\s*\n\s*\? `\$\{tableLabel\(t\)\} is already free\.`/.test(body) && !/readOk && sliceLoaded\(t\)/.test(body),
+    `${TABLET} closeTableAndFree: the read's own success decides 'already free'; sliceLoaded() is never true for a free table.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

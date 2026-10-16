@@ -2563,7 +2563,12 @@ async function closeTableAndFree(t) {
   const readOk = await ensurePartySlices(t);
   const s = sessionOf(t);
   if (!s) {
-    toast(readOk && sliceLoaded(t)
+    // A READ THAT LANDED AND FOUND NOTHING IS THE ANSWER "FREE" (sweep #10 T12 round 3, item 1). This
+    // also asked sliceLoaded(t) — but sliceLoaded means "the slice holds a session or an order", and
+    // a free table's slice holds neither, so a successful read of a free table ALWAYS fell through to
+    // "Couldn't check T5 just now — try again", which stays true however often you try. Reached from
+    // a finished tile's ⏻ after another device closed the table. readOk alone is the honest test.
+    toast(readOk
       ? `${tableLabel(t)} is already free.`
       : `Couldn't check ${tableLabel(t)} just now — try again in a moment.`, false);
     await load().catch(() => {}); renderFloor();
