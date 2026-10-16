@@ -61,6 +61,7 @@ const CLEANS = /restoreOnExit|retire\w*\(|cleanup|clean[A-Z_]|\.delete\(|method:
 const EXPLAINED_MISSING = {
   ".github/scripts/verify-doc-counts.mjs": { paths: ["lib/printPair.ts", "components/AdminSwitcher.tsx", "app/api/print-station/[file]/route.ts", "lib/printStation.ts", "docs/FLOOR-TIMEOUT-WATCH.md"], why: "its list of RETIRED files, kept so no rulebook points at them again" },
   "scripts/sweep/t2/s9r2-checks.mjs": { paths: ["app/view/[folder]/not-found.tsx"], why: "asserts that file deliberately does NOT exist" },
+  "scripts/sweep/retiredAdminDoors.mjs": { paths: ["app/api/admin/restaurants/google-review/route.ts", "app/api/admin/restaurants/platform-channels/route.ts", "app/api/admin/restaurants/staff-features/route.ts"], why: "the one list of the three admin doors retired on 2026-10-12, read by the guards that assert they stay gone" },
   "scripts/sweep/t5/round2-sabotage.mjs": { paths: ["@/components/MiniCartTypo"], why: "a sabotage tool — the broken name is the planted break" },
   "scripts/verify-access-model.mjs": { paths: ["../node_modules/.cache/accessTree.mjs", "../node_modules/.cache/staffCaps.mjs"], why: "imports files its own npm entry bundles into node_modules/.cache just before it runs" },
   "scripts/verify-kitchen-screen.mjs": { paths: ["./sweep/t9/"], why: "a folder prefix — the file name is built at run time (./sweep/t9/<module>.mjs)" },

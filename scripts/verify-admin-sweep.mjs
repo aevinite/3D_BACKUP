@@ -68,6 +68,7 @@ import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 // one plain sentence and exit 2, never throw a stack trace at somebody who simply forgot to start
 // the dev server. A guard that cannot run looks exactly like a guard nobody ran.
 import { requireUp } from "./sweep/appUp.mjs";
+import { GOOGLE_REVIEW_DOOR, PLATFORM_CHANNELS_DOOR, STAFF_FEATURES_DOOR } from "./sweep/retiredAdminDoors.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
@@ -160,9 +161,9 @@ const ADMIN_PAGES = walk("app/aevinite").filter((f) => f.endsWith("/page.tsx"))
 // admin route, and the ids are positional — so the three switch doors retired on 2026-10-12 stay in the
 // list and answer UNANSWERED ("retired") instead of vanishing and shifting every later id.
 const RETIRED_ROUTES = [
-  "app/api/admin/restaurants/google-review/route.ts",
-  "app/api/admin/restaurants/platform-channels/route.ts",
-  "app/api/admin/restaurants/staff-features/route.ts",
+  GOOGLE_REVIEW_DOOR,
+  PLATFORM_CHANNELS_DOOR,
+  STAFF_FEATURES_DOOR,
 ];
 const LIVE_ROUTES = walk("app/api/admin").filter((f) => f.endsWith("/route.ts")).sort();
 const ADMIN_ROUTES = [...new Set([...LIVE_ROUTES, ...RETIRED_ROUTES])].sort();

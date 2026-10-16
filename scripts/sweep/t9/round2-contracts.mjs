@@ -15,7 +15,7 @@ const ENDPOINTS = [
   ["items/:id/status",         'if (a === "items" && c === "status")',         'if (a === "platform" && c === "status")'],
   ["platform/:id/status",      'if (a === "platform" && c === "status")',      'if (a === "dishes" && c === "sold-out")'],
   ["dishes/:id/sold-out",      'if (a === "dishes" && c === "sold-out")',      'if (a === "print-jobs" && b === "claim")'],
-  ["print-jobs/claim",         'if (a === "print-jobs" && b === "claim")',     'if (a === "print-station" && b === "take")'],
+  ["print-jobs/claim",         'if (a === "print-jobs" && b === "claim")',     'if (a === "print-jobs" && c === "done")'],
   ["print-station/take",       'if (a === "print-station" && b === "take")',   'if (a === "print-station" && b === "release")'],
   ["print-station/release",    'if (a === "print-station" && b === "release")','if (a === "print-jobs" && c === "done")'],
   ["print-jobs/:id/done",      'if (a === "print-jobs" && c === "done")',      'if (a === "printer-events" && path.length === 1)'],
@@ -44,6 +44,15 @@ row(next(), "every write endpoint sits behind the gate, the scope, the block lis
 // D2 · each endpoint, one row: it exists, it answers, and it cannot fall through silently
 for (const [name, from, to] of ENDPOINTS) {
   // EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route. The ids stay where they were: for accept, the three rows now assert it is GONE.
+  // EXPECTATION CHANGED (sweep #10 T11 round 2, item 17): the kitchen's print-station/take and /release were retired
+  // with the buttons that called them (gone from the screen since 2026-08-29); the screen becomes the printer at its
+  // first claim. Same three ids each: the door is gone, a request for it is the ordinary 404, the obituary is there.
+  if (name === "print-station/take" || name === "print-station/release") {
+    row(next(), `POST ${name} is GONE from the kitchen route (item 17)`, () => !ROUTEC().includes(from) || "the retired branch is back");
+    row(next(), "…so a request for it gets the ordinary 404, never a silent success", () => /return err\("unknown POST endpoint", 404\)/.test(ROUTEC()) || "no 404 fallthrough");
+    row(next(), "…and its obituary names the one road left (the claim takes the station)", () => /OBITUARY — print-station\/take and print-station\/release are gone/.test(ROUTE()) && /mayClaim → takeStation/.test(ROUTE()) || "no obituary");
+    continue;
+  }
   if (name === "orders/:id/accept") {
     row(next(), "POST orders/:id/accept is GONE from the kitchen route (item 7)", () => !ROUTEC().includes(from) || "the kitchen accept branch is back");
     row(next(), "…so a request for it gets the ordinary 404, never a silent success", () => /return err\("unknown POST endpoint", 404\)/.test(ROUTEC()) || "no 404 fallthrough");
@@ -124,7 +133,7 @@ row(next(), "the 404s all name what was not found, in words", () => {
 // D5 · the panel only ever sends shapes the route accepts
 row(next(), "the panel sends no endpoint the route does not implement", () => {
   const sent = [...APPC().matchAll(/api\("POST", `?\/([\w-]+)/g)].map((m) => m[1]);
-  const known = new Set(["orders", "items", "platform", "dishes", "print-jobs", "print-station", "printer-events", "issue"]);
+  const known = new Set(["orders", "items", "platform", "dishes", "print-jobs", "printer-events", "issue"]);   // print-station retired (item 17)
   const bad = [...new Set(sent)].filter((s) => !known.has(s));
   return bad.length === 0 || `the panel posts to: ${bad.join(", ")}`;
 });

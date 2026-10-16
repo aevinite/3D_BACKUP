@@ -71,7 +71,8 @@ row(next(), "the print queue is ONE implementation, imported by both the kitchen
 });
 row(next(), "who may print is decided by ONE resolver, used by every path that asks", () => {
   const r = ROUTEC();
-  return ((r.match(/screenMayPrint\(/g) || []).length >= 3) || "a path decides for itself";
+  // EXPECTATION CHANGED (item 17): two paths ask now — the board read and the claim — since the take door was retired.
+  return ((r.match(/screenMayPrint\(/g) || []).length >= 2 && !/kitchenMayAuto/.test(r)) || "a path decides for itself";
 });
 row(next(), "the kitchen and the manager agree on what 'claimed' means, because the claim is one function", () =>
   hasRe(ROUTE(), /claimKotJobs/));

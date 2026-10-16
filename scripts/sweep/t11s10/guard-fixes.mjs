@@ -8,6 +8,10 @@
 // The same three fixes are ALSO driven in memory (the real route, bundled, called against the stub
 // database) by scripts/sweep/t11s10/run.mjs — that is the proof they behave; this is the tripwire.
 import { row, APPC, ROUTEC, hasRe, lacksRe, src, code } from "../t9/lib.mjs";
+import { spawnSync } from "node:child_process";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+const T11H = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "t11-harness");
 const require_ = (rel) => code(src(rel));
 
 /** One POST branch of the kitchen route, from its test to the next top-level `if (a === "` test. */
@@ -131,7 +135,7 @@ row("P180027", "item 4 · one helper answers 'is the queue stopped?' from module
 row("P180028", "item 4 · the board's ONE settings read carries `modules`, so the stop costs no new query", () =>
   hasRe(BOARD(), /from\("settings"\)\.select\("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names, modules"\)/));
 row("P180029", "item 4 · a stopped queue means this screen is not the printer (no auto rows, no net)", () =>
-  hasRe(BOARD(), /const paused = isPaused\(must\(settings\)\);\s*const screenPrints = kitchenMayAuto && mayI\.ok && !paused;/));
+  hasRe(BOARD(), /const paused = isPaused\(must\(settings\)\);\s*const screenPrints = mayI\.ok && !paused;/));   // kitchenMayAuto retired, item 17
 row("P180030", "item 4 · …and hands over NO job at all, the manager's reprints included", () =>
   hasRe(BOARD(), /const printJobs = paused \? \[\] : await pendingKotJobs\(/));
 row("P180031", "item 4 · the board tells the sheet WHY — printRefused 'paused' outranks every routing reason", () =>
@@ -141,8 +145,9 @@ row("P180032", "item 4 · the CLAIM refuses while stopped, before winning anythi
   const stop = b.indexOf('if (isPaused(st)) return ok({ won: [], refused: "paused"'), win = b.indexOf("claimKotJobs(rid, ids)");
   return (stop > 0 && win > stop) || "the claim's stop check is missing or comes after the claim";
 });
-row("P180033", "item 4 · 'print here instead' refuses while stopped, with the reason in words", () =>
-  hasRe(branch('if (a === "print-station" && b === "take")'), /if \(isPaused\(st2\)\) return err\("Printing is stopped for this restaurant — tickets wait until it starts again\.", 409\);/));
+// EXPECTATION CHANGED (item 17): 'print here instead' is retired; the claim — the one road left — refuses while stopped.
+row("P180033", "item 4 · the one road to becoming the printer (the claim) refuses while stopped, and the old take door is gone", () =>
+  hasRe(branch('if (a === "print-jobs" && b === "claim")'), /if \(isPaused\(st\)\) return ok\(\{ won: \[\], refused: "paused"/) && !/a === "print-station" && b === "take"/.test(ROUTEC()));
 row("P180034", "item 4 · the 🖨 sheet has the words for a stopped queue", () =>
   hasRe(APPC(), /refused === "paused" \? "nobody right now — printing is stopped for this restaurant, and tickets wait until it starts again"/));
 row("P180035", "item 4 · ⚙️ Settings no longer goes silent on a stopped queue — it says so, in the same words", () =>
@@ -216,3 +221,36 @@ row("P180575", "item 11 · the light skin's SOLD OUT word uses the deep red, not
   hasRe(CSSC_(), /html\[data-theme="light"\] \.btn\.danger \{ color: #b91c1c; \}/));
 row("P180576", "item 11 · a dish's toggle never shrinks beside a long name; the name wraps instead", () =>
   hasRe(CSSC_(), /\.dish-row \.btn \{ flex-shrink: 0; white-space: nowrap; \}/) && hasRe(CSSC_(), /\.dish-row \.dtitle \{ min-width: 0;/));
+
+// ══ ROUND 2 · ITEM 13 · a failed step on the kitchen route is a failure, never { ok: true } — P180834–P180836 ══
+row("P180834", "item 13 · ALL READY's dish update is checked (must), so a failure is never reported as success", () =>
+  hasRe(ROUTEC(), /must\(await sb\.from\("order_items"\)\.update\(\{ status: "ready" \}\)\.eq\("order_id", b\)\.eq\("restaurant_id", rid\)\.neq\("status", "served"\)\);/));
+row("P180835", "item 13 · the ✓'s two pre-reads and its order rollup are checked (a blip answers busy, never skips a protection)", () => {
+  const b = branch('if (a === "items" && c === "status")');
+  return (/const own = must\(await sb\.from\("order_items"\)/.test(b) && /const ord = must\(await sb\.from\("orders"\)/.test(b) && /must\(await sb\.from\("orders"\)\.update\(\{ status: overall \}\)/.test(b)) || "an unchecked step is back";
+});
+row("P180836", "item 13 · the delivery accept-gate's permission read is checked, so a blip is never a false 'not allowed'", () =>
+  hasRe(branch('if (a === "platform" && c === "status")'), /data: must\(await sb\.from\("settings"\)\.select\("kitchen_can_accept_platform"\)/));
+
+// ══ ROUND 2 · ITEM 16 · the kitchen only moves a delivery forward — P180859 ══
+row("P180859", "item 16 · a delivery tap is refused when the order was cancelled or has moved past it; a repeat is 'done' with no write; the platform call keeps its reason", () => {
+  const b = branch('if (a === "platform" && c === "status")');
+  const own = b.indexOf("if (!owns) return err("), canc = b.indexOf('if (owns.status === "cancelled") return err(PLAT_CANCELLED_MSG, 409);'),
+    back = b.search(/if \(fromRank === undefined \|\| PLAT_RANK\[status\] < fromRank\) return err\(PLAT_MOVED_MSG, 409\);/),
+    same = b.indexOf("if (PLAT_RANK[status] === fromRank) return ok({ ...owns, unchanged: true });"),
+    rpc = b.search(/const data = must\(await sb\.rpc\("lfh_platform_set_status"/);
+  return (own > 0 && canc > own && back > canc && same > back && rpc > same && /PLAT_RANK: Record<string, number> = \{ new: 0, accepted: 1, preparing: 2, ready: 3, handed_over: 4 \}/.test(b)) || "the forward-only rule is missing, reordered, or the call is unchecked";
+});
+// ══ ROUND 2 · the hermetic server suites run with this guard — P180860 ══
+// scripts/t11-harness runs the REAL route against an in-memory database (no server, no network). u-route.mjs and
+// u-route3.mjs take well under a second, so they run here; u-route2.mjs (8s — it walks 505 devices through the block
+// memo) and mutate.mjs (minutes) are run by hand: `node scripts/t11-harness/u-route2.mjs`, `node scripts/t11-harness/mutate.mjs`.
+row("P180860", "the hermetic kitchen-route suites (u-route 200 rows, u-route3 22 rows) are green", () => {
+  const bad = [];
+  for (const s of ["u-route.mjs", "u-route3.mjs"]) {
+    const r = spawnSync(process.execPath, [join(T11H, s)], { encoding: "utf8", timeout: 120000 });
+    const tail = ((r.stdout || "").match(/(\d+) rows · (\d+) ✅ · (\d+) ❌/) || []);
+    if (r.status !== 0 || !tail[0] || tail[3] !== "0") bad.push(`${s}: ${tail[0] || "exit " + r.status}`);
+  }
+  return bad.length === 0 || bad.join(" | ");
+});

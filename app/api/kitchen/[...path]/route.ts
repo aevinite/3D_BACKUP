@@ -25,7 +25,7 @@ import { panelFailure } from "@/lib/panelFailure";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // The print queue itself (mig 269 + 335) — shared with the manager route so two panels can never
 // drift into two different ideas of what "claimed" means.
-import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, takeStation, releaseStation, mayClaim, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, mayClaim, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
 // WHEN A COMPUTER OWNS THE PAPER, A SCREEN MUST NOT ALSO PRINT IT (mig 341). A helper prints on the
 // printer the address book names; a screen prints on whatever that machine's default printer is. Both
 // printing means the same ticket in two places — and the screen's copy is the one that comes out in
@@ -120,6 +120,9 @@ const isPaused = (s: unknown): boolean => {
 // The two answers a late tap gets once the waiter has already carried the food out (item 1, below).
 const SERVED_MSG = "Every dish on that ticket has already been served — refresh the board.";
 const SERVED_DISH_MSG = "That dish has already been served — refresh the board.";
+// Item 16 — the two answers a late delivery tap gets (the kitchen only moves a delivery forward).
+const PLAT_CANCELLED_MSG = "That delivery order was cancelled — it stays off the kitchen board.";
+const PLAT_MOVED_MSG = "That delivery order has already moved on — refresh the board.";
 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
@@ -311,7 +314,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // left open on the same restaurant printing every ticket the counter was set to print.
       // A MANUAL REPRINT IS DIFFERENT and always reaches the kitchen: the manager pressing "Reprint
       // in kitchen" is naming this printer on purpose, whatever the automatic routing says.
-      let kitchenMayAuto = true;
       // …AND WHETHER A COMPUTER HAS THE JOB AT ALL. With a helper named for kitchen slips, this
       // screen goes back to being an ordinary display: it stops being offered tickets, stops
       // healing, and says on its own printer sheet where the paper is coming out instead.
@@ -330,8 +332,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // appearing in a room nobody is standing in is worse than paper that has not appeared,
       // because nobody learns the printer is broken. (This sentence was left spliced in half by
       // that edit — it still said "`backupPanel` counts too" and then contradicted itself.)
-      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
-      else if (target.kind === "off" || target.kind === "computer") kitchenMayAuto = false;
+      // (`kitchenMayAuto` stood here and answered the same question a second time — a screen route naming another
+      // panel, "off" or "computer" — which screenMayPrint below already answers, so flipping it changed nothing
+      // a screen could see: proved by the round-2 mutation run. Retired with item 17; one question, one answer.)
       const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
       // ── A STOPPED QUEUE STOPS THIS SCREEN TOO (sweep #10 T11, item 4) ───────────────────────────
       // The admin's ⏸ on Printing (modules.printing.paused) is THE master stop: "tickets wait". The
@@ -342,7 +345,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // went on saying "Automatic printing ON · this screen". Stopped now means: no queue handed over,
       // no self-healing net, and the sheet is told why (`printRefused: "paused"`, words it already has).
       const paused = isPaused(must(settings));
-      const screenPrints = kitchenMayAuto && mayI.ok && !paused;
+      const screenPrints = mayI.ok && !paused;
       const printJobs = paused ? [] : await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
       // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
       // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
@@ -625,7 +628,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
-      await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
+      // must(): A WRITE THAT FAILED IS NOT A SUCCESS (sweep #10 T11 round 2, item 13). Unchecked, a failed dish
+      // update still answered { ok: true } — the ticket slid into Ready on the cook's screen, the order JSON said
+      // ready, and every dish row (what the floor and the waiter read) still said cooking. Now the cook is told,
+      // and a busy database answers busy, so the outbox keeps the tap and sends it again (it is idempotent).
+      must(await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served"));
       await logAction("kitchen", "order_ready", { ...adminMark, order_id: b, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
@@ -712,7 +719,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
       // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
       // status from its dishes below, so on a cancelled ticket it would quietly revive it.
-      { const own = (await sb.from("order_items").select("order_id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null; status?: string | null } | null;
+      // must() on both pre-reads (item 13): unchecked, a read that FAILED looked like "no such row", and the
+      // served / cancelled protections below were silently skipped for exactly the request that hit the blip.
+      { const own = must(await sb.from("order_items").select("order_id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { order_id?: string | null; status?: string | null } | null;
         // A DISH THE WAITER HAS SERVED STAYS SERVED (sweep #10 T11, item 1). The kitchen's ✓ and its
         // take-back both land here, and neither may un-serve: a ✓ tapped a second after the waiter
         // carried the plate out, or replayed from the offline queue later, used to write 'ready' over
@@ -721,7 +730,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // same rule. Un-serving is the waiter tablet's own explicit "↩ Send back to kitchen".
         if (own && own.status === "served") return err(SERVED_DISH_MSG, 409);
         if (own && own.order_id) {
-          const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+          const ord = must(await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()) as { status?: string } | null;
           if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);
         } }
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id"));
@@ -739,7 +748,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
         const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
-        await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
+        must(await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid));   // item 13: the rollup failing is a failure
       }
       // Moving ONE dish along is the kitchen's most frequent action and it was the only one here with
       // no record — so "who marked this ready, and when?" had no answer, and a cook's own Activity
@@ -759,19 +768,36 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Also read its CURRENT status for the accept-gate below.
       const owns = must(await sb.from("aggregator_orders").select("id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!owns) return err("That platform order isn't for this restaurant.", 404);
+      // ── THE KITCHEN ONLY EVER MOVES A DELIVERY FORWARD (sweep #10 T11 round 2, item 16) ──────────────
+      // lfh_platform_set_status writes whatever status it is handed — it has no from-state rule (mig 071) —
+      // and this door only checked the TARGET. So a cook's tap that reached the server late (saved offline,
+      // or sent from a screen a few seconds behind) could bring a delivery the manager had CANCELLED back
+      // onto the board as "ready", or pull one already handed to the rider back to "accepted". The manager's
+      // own door may move a delivery anywhere (that is how a cancelled one is restored); the kitchen's three
+      // buttons only ever go forward — ACCEPT → ALL READY → HANDED OVER — so that is all this door does.
+      // The same tap arriving twice is answered "done" without writing again, so the status history and
+      // the push back to the platform do not record one tap twice.
+      const PLAT_RANK: Record<string, number> = { new: 0, accepted: 1, preparing: 2, ready: 3, handed_over: 4 };
+      if (owns.status === "cancelled") return err(PLAT_CANCELLED_MSG, 409);
+      const fromRank = PLAT_RANK[String(owns.status)];
+      if (fromRank === undefined || PLAT_RANK[status] < fromRank) return err(PLAT_MOVED_MSG, 409);
+      if (PLAT_RANK[status] === fromRank) return ok({ ...owns, unchanged: true });
       // The MANAGER owns ACCEPTING (moving a still-'new' order forward). If the kitchen isn't
       // allowed to accept platform orders, it may not advance a 'new' one by ANY status — not
       // just the literal "accepted" (audit 2026-07-07: the old gate only checked
       // status==='accepted', and the RPC has no from-state guard). Once past 'new', cooking it
       // through is the kitchen's job. The UI already hides the button; this is belt-and-braces.
       if (owns.status === "new") {
-        const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle();
+        // must() (item 13): a FAILED read here used to look like "the kitchen may not accept" — a 403, which the
+        // outbox treats as final, so a database blip dropped the cook's tap with a false reason. Busy is busy.
+        const s = { data: must(await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle()) as { kitchen_can_accept_platform?: boolean } | null };
         if (!(s.data && s.data.kitchen_can_accept_platform)) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }
       }
-      const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
-      if (error) throw new Error(error.message);
+      // must(), not `throw new Error(error.message)` (item 16): that dropped the SQLSTATE, so a refused value
+      // was answered 500 — which the outbox reads as "busy" and resends for ever — instead of telling the cook.
+      const data = must(await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" }));
       const row = Array.isArray(data) ? data[0] : data;
       void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
       await logAction("kitchen", "platform_status", { ...adminMark, detail: status, device_id: dev, restaurant_id: rid });
@@ -847,35 +873,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ won: await claimKotJobs(rid, ids), station: gate.station });
     }
 
-    // ── print-station/take · /release — "print HERE instead", and "stop printing here" ──────────
-    // The one tap that moves a restaurant's printing to the screen the person is standing at. It is a
-    // write, so it rides the outbox like every other panel write; replaying it late is harmless (the
-    // worst case is the station moving to a screen that then goes quiet, and quiet stations are
-    // taken over automatically after a few minutes).
-    if (a === "print-station" && b === "take") {
-      if (!dev) return err("This browser has no device id yet — reload the panel and try again.", 409);
-      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle()) as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: unknown } | null;
-      if (!(st2?.auto_print_kot === true && st2?.auto_print_kot_allowed === true)) return err("Automatic printing is switched off for this restaurant.", 409);
-      if (isPaused(st2)) return err("Printing is stopped for this restaurant — tickets wait until it starts again.", 409); // item 4
-      // The ROUTE decides whether this room may hold printing at all (mig 369), asked through the one
-      // resolver every other path uses — with the person and device from the REQUEST, so a narrowed
-      // route ("only Rishi's counter PC") refuses a kitchen screen here too.
-      const tgTake = await targetFor(rid, "kot");
-      const mayTake = screenMayPrint(tgTake, { panel: "kitchen", personId: g.user?.id || null, deviceId: dev });
-      if (!mayTake.ok) return err(
-        tgTake.kind === "computer" ? "A computer prints this restaurant's kitchen slips — no screen needs to."
-        : tgTake.kind === "off" ? "Kitchen slips are switched off for this restaurant."
-        : "Kitchen slips are set to print on another screen.", 409);
-      const view = await takeStation(rid, { deviceId: dev, label: "Kitchen screen", panel: "kitchen", by: g.user?.name || g.user?.username || null });
-      await logAction("kitchen", "print_station_take", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen is now the printer" });
-      return ok({ ok: true, station: view });
-    }
-    if (a === "print-station" && b === "release") {
-      if (dev) await releaseStation(rid, dev);
-      await logAction("kitchen", "print_station_release", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen stopped printing" });
-      return ok({ ok: true, station: await stationView(rid, dev) });
-    }
+    // OBITUARY — print-station/take and print-station/release are gone (sweep #10 T11 round 2, item 17).
+    // They were "print HERE instead" and "stop printing here", the two buttons of the old model where a
+    // restaurant worked out who printed by tapping around its own screens. Those buttons left this screen
+    // on 2026-08-29, when the admin's Printing board became the one place that names who prints ("there is
+    // two printing things, one is working and one is just showing"); nothing has called these doors since.
+    // The kitchen screen still becomes the printer — by itself, at its first claim (mayClaim → takeStation,
+    // above), which is the one road now. A new way replaces the old one: the old doors go with their buttons.
+    // (The MANAGER's own print-station/take stays: the manager screen still claims through it — editor route.)
 
     // ── print-jobs/:id/done — the printed/failed report closes the loop ──────────────
     // ok:true also RESOLVES every open printer problem: a sheet of paper coming out is the

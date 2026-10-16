@@ -20,7 +20,9 @@ import { call, world, g, FH, PP } from "./sweep/t16s10/routes.mjs";
 let pass = 0, fail = 0;
 const ok = (c, m, extra) => { if (c) { pass++; console.log(`  ✅ ${m}`); } else { fail++; console.log(`  ❌ ${m}${extra ? ` — ${extra}` : ""}`); } };
 const argv = process.argv.slice(2);
-const BASE = (() => { const i = argv.findIndex((a) => a === "--base" || a.startsWith("--base=")); if (i < 0) return null; return argv[i].includes("=") ? argv[i].split("=")[1] : argv[i + 1]; })();
+// Section 4 is OPTIONAL — it runs only when --base is given, so this deliberately does not fall back to :4000
+// the way baseFrom() would (sections 1-3 need no server at all).
+const BASE = (() => { const i = argv.indexOf("--base"); if (i >= 0) return argv[i + 1]; const eq = argv.find((a) => a.startsWith("--base=")); return eq ? eq.slice("--base=".length) : null; })();
 const GRANT_OWNER = { maintenance: { on: true } };
 const GRANT_BOTH = { maintenance: { on: true, manager_opts: { who: "owner_manager" } } };
 const OWNER = { all: false, ids: [FH, PP], ownerId: "o1", ownerName: "Owner" };
@@ -100,6 +102,8 @@ ok(r.status === 400, "the module-switch PATCH on the same route is unchanged (an
 
 if (BASE) {
   console.log(`\n4) The owner's Settings page on ${BASE} — the card, the ask-first, and an honest refusal`);
+  const { requireUp } = await import("./sweep/appUp.mjs");
+  await requireUp(BASE, "section 4 opens the owner's Settings page");
   const { chromium } = await import("playwright");
   const { loginAs } = await import("./sweep/login.mjs");
   const browser = await chromium.launch();
