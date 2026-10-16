@@ -69,3 +69,14 @@ C("O", "offline.js", "loaded AFTER the page finished loading (a panel that adds 
   await h.close();
   return ok(/No internet/.test(bar), bar);
 });
+C("O", "offline.js", "item 34: a change that has waited a while, with tries still booked, keeps ONE message — it never flips to 'hasn't sent yet — the connection looks fine' in the moment before each try, or while a try is running", async () => {
+  const P = page("o-flicker", { pre: "window.LFH_TEST_PACING={first:60,base:2500,max:2500,wake:0,stuck:800};" + ONLINE, body: '<div class="topbar"></div>', scripts: ["backstack.js", "outbox.js", "offline.js"] });
+  setApi(() => ({ status: 503, body: {} }));
+  const h = await open(P); const p = h.page; await clear(p); await p.reload(); await p.waitForFunction(() => !!window.LFH_OFF);
+  await p.evaluate(() => window.LFH_OUTBOX.send({ base: "/api/editor", method: "POST", path: "/tables/6/discount", body: {}, table: "6" }));
+  await sleep(1200);
+  const seen = await p.evaluate(async () => { const out = new Set(); for (let i = 0; i < 80; i++) { const b = document.getElementById("lfhOffBar"); if (b) out.add(b.innerText.replace(/\s+/g, " ").replace(/\d+s/, "Ns")); await new Promise((r) => setTimeout(r, 100)); } return [...out]; });
+  const tries = log.filter((x) => x.path.includes("/tables/6/discount")).length;
+  await h.close();
+  return ok(tries >= 3 && !seen.some((t) => /hasn't sent yet/.test(t)) && seen.some((t) => /is waiting/.test(t)), `${tries} tries watched; messages seen: ${seen.join(" | ")}`);
+});

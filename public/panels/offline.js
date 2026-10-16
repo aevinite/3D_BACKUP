@@ -254,13 +254,19 @@
       // and not overdue, this is a WAIT, not a fault — say when it will go instead.
       var nextAt = (window.LFH_OUTBOX && window.LFH_OUTBOX.nextTryAt) ? window.LFH_OUTBOX.nextTryAt() : 0;
       var dueIn = nextAt ? nextAt - Date.now() : 0;
-      var retryDue = dueIn > 1500;                      // a real gap, not the last moment before it fires
-      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000 && !retryDue;
-      if (!stuck && retryDue && since && (Date.now() - since) > STUCK_MS) {
+      // NO FLICKER IN THE LAST MOMENT BEFORE A TRY (sweep #10 T16 round 3, item 34). "Due" used to mean
+      // "more than 1.5 s away", so in the last 1.5 s before EVERY scheduled try — and while the try itself
+      // was in flight — a healthy wait fell into `stuck` and the bar flipped to "hasn't sent yet — the
+      // connection looks fine now", then back. A try that is booked and not overdue, or a round already
+      // running, is still a wait; only a queue with nothing booked (or overdue) is stuck.
+      var scheduled = (!!nextAt && dueIn > -1500) || !!box.syncing;
+      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000 && !scheduled;
+      if (!stuck && scheduled && since && (Date.now() - since) > STUCK_MS) {
         return { tone: "tone-sync",
                  title: waiting + changesWord(waiting) + (waiting === 1 ? " is waiting" : " are waiting"),
-                 sub: "Saved on this device since " + fmtTime(since) + " — next try in about "
-                      + Math.max(1, Math.round(dueIn / 1000)) + "s. Tap Send now if you'd rather not wait.",
+                 sub: "Saved on this device since " + fmtTime(since) + " — "
+                      + (dueIn > 1500 ? "next try in about " + Math.round(dueIn / 1000) + "s" : "trying again now")
+                      + ". Tap Send now if you'd rather not wait.",
                  action: "Send now", onAction: sendNow, alt: "See" };
       }
       if (stuck) {

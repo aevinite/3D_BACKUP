@@ -78,7 +78,7 @@ C("I", "offline.js", "online, a change waiting longer than it should with the ne
   await until(() => p.evaluate(() => window.LFH_OUTBOX.getSnapshot().queued.length === 0), 6000);
   const gone = await bar(p);
   await h.close();
-  return ok(b && /is waiting/.test(b.text) && /next try in about \d+s/.test(b.text) && /Send now/.test(b.buttons.join()) && log.length > before && !gone, JSON.stringify({ b, sentAfterTap: log.length - before, gone }));
+  return ok(b && /is waiting/.test(b.text) && /next try in about \d+s|trying again now/.test(b.text) && /Send now/.test(b.buttons.join()) && log.length > before && !gone, JSON.stringify({ b, sentAfterTap: log.length - before, gone }));
 });
 C("I", "outbox.js + offline.js", "a device that will not let the app store anything: the bar says plainly the changes are NOT saved on this device and to keep the panel open", async () => {
   setApi(() => ({ status: 503, body: {} }));
