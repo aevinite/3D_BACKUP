@@ -311,7 +311,9 @@ export function bqPaper(settings: Record<string, unknown>): {
   pad: boolean; size: "a4" | "a5"; top: number; bot: number; side: number;
   foot: boolean; sign: boolean; fill: boolean;
 };
-export function bqTaxModel(settings: Record<string, unknown>): TaxModel & { own: boolean };
+/** The banquet's rate — its own lines when it named any, else the dine-in rate; 0 for composition or no
+ *  GSTIN (mig 425). It has no `composition` field (TaxModel does), so it is typed on its own. */
+export function bqTaxModel(settings: Record<string, unknown>): { rate: number; pct: number; components: { label: string; rate: number }[]; own: boolean };
 export function bqOn(settings: Record<string, unknown>, k: string): boolean;
 export function bqWords(amount: number): string;
 /** The rows a bill SHOWS, in whole rupees, made to reconcile to the TOTAL (a "Round off" row

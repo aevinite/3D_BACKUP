@@ -10,19 +10,14 @@
  * three layers and only the last one touches the network:
  *   1. an on-device map of every number this panel has already seen — instant, free;
  *   2. a per-prefix result cache, so backspacing/retyping never repeats a request;
- *   3. one small debounced request (>= 4 digits) ASKING for 6 rows of phone + name + visits,
- *      prefix-anchored on the (restaurant_id, phone) index.
+ *   3. one small debounced request (from MIN_LOOKUP = 6 digits) for a capped list of phone + name +
+ *      visits, prefix-anchored on the (restaurant_id, phone) index.
  *
- * ⚠ THAT ROW CAP IS NOT ENFORCED TODAY, and this comment used to claim it was (T8 sweep #7,
- * 2026-08-22). "lfh_customer_phone_search" (migration 227) ends "... LIMIT GREATEST(1, LEAST(
- * COALESCE(p_limit, 6), 20))" AFTER a "json_agg", and in SQL a LIMIT applies once the aggregate
- * has already collapsed to one row — so it caps the one row and the array inside it is unbounded.
- * Measured on the dev database: p_limit=1 came back with 3 rows. On a mature restaurant a
- * four-digit prefix would download every matching customer, on the till's hot path, while a
- * waiter types — and this sheet then renders only the first four of them (see showMatches).
- * The fix is in the migration, not here, so it is written up as a handoff in
- * .claude/sweep/T8-findings.md. Until it lands, read this layer as "one request per new prefix",
- * not "one small request".
+ * The cap is real since migration 371 ("customer search row cap actually caps"): until then the LIMIT
+ * sat after a json_agg and capped nothing (T8 sweep #7, 2026-08-22, measured: p_limit=1 returned 3
+ * rows). The server's own cap travels to this sheet as `whole` (see narrowLocally below), so this file
+ * keeps no number of its own for it. (Corrected 2026-10-16, item 11 — this note still described the
+ * fault as open, and the digit floor as 4.)
  * Requests are fired while typing and the stale ones are dropped by sequence number, so
  * the answer for the digits currently on screen is the only one that can land.
  *
@@ -247,7 +242,7 @@
          message, no focus, no toast. That is the panel's own "a tap must never vanish in silence"
          rule, broken by the very attribute meant to be helpful.
          So the button now only LOOKS not-ready and stays tappable. The look is the three
-         declarations '.bcust-foot .btn.primary:disabled' applies in the panel stylesheet, mirrored
+         declarations a ':disabled' rule used to apply (removed from billcustomer.css 2026-10-16), painted
          inline, plus killing the ready-state glow that ':not(:disabled)' would otherwise paint on a
          button that is not ready. 'aria-disabled' keeps the state honest for a screen reader
          without swallowing the event. */

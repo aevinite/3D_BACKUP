@@ -133,7 +133,6 @@ export function billPreviewHtml(settingsIn: Settings, mode: BillMode, restaurant
   const pct = effectiveTaxPct(settings);
   const comps = configured.length ? configured : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
   const rateSum = comps.reduce((t, c) => t + num(c.rate), 0);
-  const taxWhole = composition ? 0 : Math.round((taxable * rateSum) / 100);
   // A COMPOSITION-SCHEME RESTAURANT MAY NOT SHOW A DINER ANY GST AT ALL
   // (docs/COMPLIANCE-GUARDRAILS.md §3) — so no tax rows, not even a zero one.
   // (The single `taxRows` that used to be built here is now split into the ADDED rows and the
