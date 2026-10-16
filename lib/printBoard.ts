@@ -15,9 +15,9 @@
 // admin route, and requireRole for the panel route — which since 2026-09-14 shows this board
 // READ-ONLY (owner: "that setup will be done by me only"), so it needs no permission of its own.
 import {
-  agentsView, readRoutes, agentForDevice, ROUTABLE_KINDS, paperStatus, papersForRestaurant,
+  agentsView, readRoutes, agentForDevice, paperStatus, papersForRestaurant,
   waitingByPrinter,
-  type AgentView, type PrintRoutes, type PaperSize, type RoutableKind, type PaperStatus, type PrinterQueue,
+  type AgentView, type PrintRoutes, type RoutableKind, type PaperStatus, type PrinterQueue,
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { waitingToPrint, STUCK_AFTER_MS } from "@/lib/printQueue";

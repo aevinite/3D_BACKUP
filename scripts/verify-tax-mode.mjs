@@ -375,7 +375,10 @@ console.log("\n── 12. NO NARROW SETTINGS SELECT — the silent way to get th
       const re = /\.from\(\s*["'`]settings["'`]\s*\)[\s\S]{0,200}?\.select\(\s*(["'`])([^"'`]*tax_rate[^"'`]*)\1\s*\)/g;
       let m;
       while ((m = re.exec(src))) {
-        if (!/price_tax_mode/.test(m[2])) {
+        // …and `gstin` since mig 426 (sweep #10 T14, 2026-10-16): a restaurant with no GSTIN charges no
+        // tax, so a select that forgets it reads 5% for a restaurant that must charge nothing — the same
+        // silent trap as price_tax_mode. (The editor route's taxSettings() had exactly that shape.)
+        if (!/price_tax_mode/.test(m[2]) || !/gstin/.test(m[2])) {
           offenders.push(`${p.replace(root + "/", "")} → select("${m[2].slice(0, 60)}…")`);
         }
       }
@@ -386,11 +389,11 @@ console.log("\n── 12. NO NARROW SETTINGS SELECT — the silent way to get th
   walk(join(root, "components"));
   if (offenders.length) {
     offenders.forEach((o) => fails.push(`narrow settings select: ${o}`));
-    console.log(`  ✗ ${offenders.length} settings select(s) fetch the rate without price_tax_mode`);
+    console.log(`  ✗ ${offenders.length} settings select(s) fetch the rate without price_tax_mode and gstin`);
     offenders.forEach((o) => console.log("      " + o));
   } else {
     pass++;
-    console.log("  ✓ every settings select that reads the rate also reads price_tax_mode");
+    console.log("  ✓ every settings select that reads the rate also reads price_tax_mode and gstin");
   }
 }
 

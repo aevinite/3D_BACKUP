@@ -2236,9 +2236,64 @@ for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-spee
   check(/Points on this bill: 7/.test(h({ orders: [ord], settings: {}, loyalty: { earn: 7, balance: 1, toNext: 0 } })) && !/Points on this bill/.test(h({ orders: [ord], settings: {} })),
     "the guest's points handed to billData reach the paper (the manager panel and the waiter tablet pass them there)",
     "billData drops `loyalty` — the points block never prints from the manager panel or the waiter tablet");
+  // ── LOYALTY OFF LEAVES NO TRACE (owner, 2026-10-16: "if the feature toggle is off, there shouldn't be
+  //    anything … if you don't even provide a feature, they should not know that that feature exists") ──
+  {
+    // billdoc's moduleOn must be the server's ladder, combination for combination.
+    const tt = read("lib/tableTags.ts");
+    const serverRule = /effective: allowed && \(!ownerControl \|\| enabled\)/.test(tt) && /const allowed = e\.allowed === true;/.test(tt) && /const ownerControl = e\.owner_control === true;/.test(tt) && /const enabled = e\.enabled !== false;/.test(tt);
+    let same = serverRule;
+    for (const al of [undefined, true, false]) for (const oc of [undefined, true, false]) for (const en of [undefined, true, false]) {
+      const e = {}; if (al !== undefined) e.allowed = al; if (oc !== undefined) e.owner_control = oc; if (en !== undefined) e.enabled = en;
+      const want = e.allowed === true && (!(e.owner_control === true) || e.enabled !== false);
+      if (BD.moduleOn({ modules: { loyalty: e } }, "loyalty") !== want) same = false;
+    }
+    if (BD.moduleOn({}, "loyalty") !== false || BD.moduleOn(null, "loyalty") !== false) same = false;
+    check(same, "billdoc moduleOn() is the server's loyalty ladder on all 27 combinations, and an untouched restaurant is OFF",
+      "billdoc moduleOn() disagrees with lib/tableTags.ts moduleBagLadder — a screen could hint at a feature the server has off");
+    const sheet = read("public/panels/billcustomer.js");
+    check(/\$\{o\.loyalty === true \? " — so repeat customers can be rewarded later" : ""\}/.test(sheet) && !/rewarded later\. It is never/.test(sheet),
+      "the customer sheet names rewards only when the panel says Loyalty is on",
+      "the customer sheet mentions rewards with Loyalty off — a hint at a feature the restaurant was not given");
+    const ed = read("public/panels/editor/app.js"), tb = read("public/panels/tablet/app.js");
+    check([ed, tb].every((t) => /loyalty: !!\(window\.LFH_BILLDOC && LFH_BILLDOC\.moduleOn && LFH_BILLDOC\.moduleOn\(s, "loyalty"\)\) \}\)/.test(t)),
+      "both panels tell the customer sheet whether Loyalty is on, from the restaurant's own switch",
+      "a panel opens the customer sheet without saying whether Loyalty is on");
+    check(![ed, tb].some((t) => /placeholder="e\.g\. loyalty/.test(t)),
+      "no discount box suggests 'loyalty' as a reason",
+      "a discount box still offers 'e.g. loyalty' — a hint at a feature the restaurant may not have");
+    const pv = read("lib/billPreview.ts");
+    check(/const loyaltyOn = BILLDOC\.moduleOn\(settings, "loyalty"\);/.test(pv) && /const loyalty = loyaltyOn \? \{/.test(pv) && /: null;/.test(pv),
+      "the admin's bill preview shows the points lines only where Loyalty is on",
+      "the bill preview shows (or hides) points regardless of the restaurant's Loyalty switch");
+    check(/const rules = await loyaltyRules\(rid\)/.test(docs) && /const loyalty = rules\.on/.test(docs),
+      "the test-print bill shows the points lines only where the server says Loyalty is on, at the restaurant's own rate",
+      "the test-print bill decides the points lines without asking the server's Loyalty ladder");
+  }
+
   check(/const logo = /.test(docs) && /parcel: !!opts\?\.parcel, logo,/.test(docs),
     "lib/printDocs.ts billHtmlForSession hands billData the restaurant's logo, as every panel does",
     "the print computer's bill has no logo while every panel's copy does");
+}
+
+// ── HOW LONG SOMETHING HAS WAITED, SAID THE SAME WAY ON BOTH PRINTING SCREENS (item 9, 2026-10-16) ──
+// The admin console reads lib/printBoardWords.ts; the manager panel keeps a hand-written twin
+// (fmtWaited). Both run over every boundary here, and must agree and never say "1 minutes", "1 hours",
+// "60 minutes" or "24 hours".
+{
+  const W = await import("../lib/printBoardWords.ts");
+  const src = read("public/panels/editor/app.js");
+  const body = (src.match(/const fmtWaited = \(ms\) => \{[\s\S]*?\n\};/) || [""])[0];
+  let fmtWaited = null;
+  try { fmtWaited = new Function(body + "\nreturn fmtWaited;")(); } catch { /* reported below */ }
+  const MS = [0, 30e3, 59_999, 60e3, 89_999, 90e3, 119_999, 600e3, 3_569_999, 3_570_000, 3_600_000, 5_399_999, 5_400_000,
+    7_200_000, 84_599_999, 84_600_000, 86_400_000, 129_599_999, 129_600_000, 172_800_000, 76 * 3_600_000];
+  const said = MS.map((ms) => [W.waitedWords(ms), fmtWaited ? fmtWaited(ms) : "?"]);
+  const differ = said.filter(([a, b]) => a !== b);
+  const clumsy = said.flat().filter((t) => /^1 (minutes|hours)$|^60 minutes$|^24 hours$/.test(t));
+  check(!!fmtWaited && differ.length === 0 && clumsy.length === 0 && W.waitedWords(60e3) === "1 minute" && W.waitedWords(84_600_000) === "a whole day",
+    "the waiting time reads the same on the admin console and the manager panel, and never '1 minutes' / '24 hours'",
+    `waiting-time wording: ${!fmtWaited ? "fmtWaited not found in the manager panel" : differ.length ? "the two screens differ: " + JSON.stringify(differ.slice(0, 3)) : "clumsy: " + clumsy.join(", ")}`);
 }
 
 if (fails.length) {

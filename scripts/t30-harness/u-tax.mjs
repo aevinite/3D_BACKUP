@@ -34,7 +34,8 @@ t("resolveTaxMode: overrides ON, dish 'mrp' with treatment 'inclusive' → incl"
 t("resolveTaxMode: overrides ON, dish 'mrp' with any other treatment → exempt", T.resolveTaxMode("mrp", ON({ mrp_tax_treatment: "none" })) === "exempt" && T.resolveTaxMode("mrp", ON()) === "exempt");
 t("resolveTaxMode: overrides ON, dish 'default' / unknown / missing → the restaurant's", T.resolveTaxMode("default", ON({ price_tax_mode: "incl" })) === "incl" && T.resolveTaxMode("weird", ON()) === "excl" && T.resolveTaxMode(undefined, ON()) === "excl");
 t("isMrpDish: only 'mrp' with overrides on", T.isMrpDish("mrp", ON()) && !T.isMrpDish("mrp", {}) && !T.isMrpDish(null, ON()) && !T.isMrpDish("none", ON()));
-t("TAX_SETTINGS_COLUMNS names the three columns effectiveTaxRate reads", T.TAX_SETTINGS_COLUMNS === "tax_rate, tax_components, price_tax_mode");
+// RE-STATED 2026-10-16 (sweep #10 T14, mig 426): a fourth column — a restaurant with no GSTIN charges no tax.
+t("TAX_SETTINGS_COLUMNS names the four columns effectiveTaxRate reads (gstin since mig 426)", T.TAX_SETTINGS_COLUMNS === "tax_rate, tax_components, price_tax_mode, gstin");
 // splitBill
 const S5 = { tax_rate: 0.05 }, S0 = { price_tax_mode: "composition" };
 { const b = T.splitBill([{ price: "100", qty: 2 }], S5); t("splitBill: 2 × ₹100 at 5% → base 200, tax 10, total 210", b.taxableBase === 200 && b.tax === 10 && b.total === 210 && b.subtotal === 200); }
@@ -67,3 +68,11 @@ t("splitBill: the rate it reports is effectiveTaxRate's", T.splitBill([], { tax_
     const s = [S5, { tax_rate: 0.18 }, S0][Math.floor(rnd() * 3)]; const b = T.splitBill(lines, s, Math.round(rnd() * 50000) / 100);
     if (Math.abs(r2(b.subtotal - b.discount + b.tax) - b.total) > 0.011 || b.discount > b.discountBase + 1e-9 || b.subtotal !== r2(b.taxableBase + b.nontaxAmount)) { ok = false; bad = JSON.stringify(b); } }
   t("splitBill on 5,000 random bills: subtotal − discount + tax = total, discount ≤ ceiling, subtotal = base + untaxed", ok, bad); }
+// ── appended 2026-10-16 (sweep #10 T14, mig 426 — owner: "for 12th do c option") — a restaurant with no
+// GSTIN may not collect GST, so its rate is 0, the same answer a composition-scheme restaurant gets ──
+t("gstRegistered: a row with a GSTIN is registered", T.gstRegistered({ gstin: "24AAAAA0000A1Z5" }) === true);
+t("gstRegistered: a blank, spaces-only or null GSTIN is not", [{ gstin: "" }, { gstin: "   " }, { gstin: null }].every((r) => T.gstRegistered(r) === false));
+t("gstRegistered: the guest menu's yes/no wins over a missing GSTIN (lfh_guest_settings hides the GSTIN itself)", T.gstRegistered({ gst_registered: false }) === false && T.gstRegistered({ gst_registered: true }) === true);
+t("gstRegistered: an object that was never asked (no gstin key at all) keeps the old answer — registered", T.gstRegistered({ tax_rate: 0.05 }) === true && T.gstRegistered(null) === true);
+t("effectiveTaxRate: no GSTIN → 0, whatever rate or components are set", T.effectiveTaxRate({ gstin: "", tax_rate: 0.18 }) === 0 && T.effectiveTaxRate({ gstin: "", tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] }) === 0);
+t("effectiveTaxRate: a GSTIN on file changes nothing from before", T.effectiveTaxRate({ gstin: "X", tax_rate: 0.18 }) === 0.18 && T.effectiveTaxRate({ gstin: "X" }) === 0.05);

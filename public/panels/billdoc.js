@@ -265,6 +265,23 @@
     };
   }
 
+  /* moduleOn(settings, key) — IS A SWITCHED MODULE ON FOR THIS RESTAURANT? (owner, 2026-10-16)
+     *"if you don't even provide a feature, they should not know that that feature exists."* A module
+     that lives in the `settings.modules` bag (mig 326 — Loyalty points is the first) is ON only when
+     Aevidine has ALLOWED it and, if the owner controls it, the owner has it enabled. The identical rule
+     is lib/tableTags.ts → moduleBagLadder().effective on the server; this file takes no imports, so
+     the rule is repeated here for the panels and the previews, and verify:print-helper runs both over
+     every combination. An absent entry is OFF — a restaurant nobody touched never sees a hint.
+     The SERVER stays the authority for anything that moves points; this is for what a screen SAYS. */
+  function moduleOn(settings, key) {
+    var m = (settings || {}).modules;
+    var e = (m && typeof m === "object" && m[key] && typeof m[key] === "object") ? m[key] : {};
+    var allowed = e.allowed === true;
+    var ownerControl = e.owner_control === true;
+    var enabled = e.enabled !== false;
+    return allowed && (!ownerControl || enabled);
+  }
+
   /* billRows(d) — the whole-rupee money rows a bill SHOWS, worked out once so the paper and every
      screen quote the same figures and every one of them ADDS UP.
 
@@ -462,7 +479,11 @@
     // concept this document exists to have none of. The tax LINE was suppressed and the row that
     // describes it was left behind.
     var composition = !!d.composition;
-    var restate = !inclusive && !inclOnly && !composition;
+    // …nor does a sheet with no GSTIN that ADDED no tax: since mig 426 such a restaurant charges none, so
+    // "Taxable value" would name a concept the bill does not have (the composition reasoning above). An
+    // older bill from before 425, charged at its stamped rate, still carries tax rows and keeps the line.
+    var restate = !inclusive && !inclOnly && !composition
+      && (!!String(d.gstin == null ? "" : d.gstin).trim() || (d.taxRows || []).length > 0);
     // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
     // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
     var R = billRows(d);
@@ -753,6 +774,9 @@
 + (d.note
 ? "  .bar .note{margin-right:auto;align-self:center;text-align:left;max-width:52%;\n"
 + "             font:11.5px/1.35 system-ui,sans-serif;color:#3a3a42}\n"
+// ON A PHONE THE EXPLANATION GETS ITS OWN ROW (item 10, 2026-10-16). At 360px the 52% column squeezed it
+// into eleven lines between the zoom chip and the buttons. Screen-only; nothing here reaches paper.
++ "  @media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}\n"
 : "")
 + "  @media print{.bar{display:none !important}}\n"
 + "</style>\n"
@@ -1167,7 +1191,9 @@
 + "        .bar{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);margin-top:-8px;\n"
 + "             flex-wrap:nowrap;align-items:center;padding:10px 12px}\n"
 + "        .bar .note{flex:1 1 auto;max-width:52%;margin-right:auto;align-self:center}\n"
-+ "      }\n";
++ "      }\n"
+// …and on a phone the explanation takes its own row (item 10, 2026-10-16).
++ "      @media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}\n";
   }
   function kotBarHtml(note) {
     if (!note) return "";
@@ -1336,6 +1362,46 @@
   // priceTaxMode / taxModel: the ONE tax model. Mirrors lib/tax.ts and SQL lfh_effective_tax_rate;
   // a composition-scheme restaurant's rate genuinely IS zero (mig 272), not "5% we then hide".
   function priceTaxMode(s) { return String((s || {}).price_tax_mode || "excl"); }
+  /* gstRegistered(settings) — MAY THIS RESTAURANT COLLECT GST AT ALL? (owner, 2026-10-16, mig 426 —
+     "for 12th do c option".) No GSTIN → not registered → its rate is 0, the same answer a
+     composition-scheme restaurant gets. Known from the row's own `gstin`, or from `gst_registered`
+     (the yes/no the guest menu gets instead of the GSTIN). An object carrying neither key was never
+     asked and keeps the old answer. Twins: lib/tax.ts gstRegistered · SQL lfh_effective_tax_rate. */
+  function gstRegistered(settings) {
+    var s = settings;
+    if (!s || typeof s !== "object") return true;
+    if (typeof s.gst_registered === "boolean") return s.gst_registered;
+    if (Object.prototype.hasOwnProperty.call(s, "gstin")) return String(s.gstin == null ? "" : s.gstin).trim() !== "";
+    return true;
+  }
+  /* namedLinesFor(pct, settings) — THE RESTAURANT'S OWN NAMED TAX LINES FOR ONE RATE, or null (owner,
+     2026-10-16, item 14: "right now I can put any text … I can name also different taxes … if the bill
+     has it and the banquet bill doesn't, then do the same for banquet").
+     A restaurant names its lines twice — Settings › Billing (dine-in) and the Banquet screen — and each
+     set adds up to a rate. Whatever rate a slice of a bill was charged at, the paper names it with the
+     set whose rates add up to THAT rate: dine-in first, then banquet. No set matches → null, and the
+     caller keeps its own fallback (the CGST/SGST halves). One rule for the single-rate bill, each slice
+     of a mixed bill, and the banquet sheet — which is what used to differ: an 18% slice was printed
+     CGST 9 + SGST 9 on its own, but CGST 7.5 + SGST 7.5 + CESS 3 beside a 6% order, because the mixed
+     branch STRETCHED the 6% set's shape onto 18% and so named a CESS rate nobody had set. */
+  function namedLinesFor(pct, settings) {
+    var s = settings || {};
+    var clean = function (list) {
+      return (Array.isArray(list) ? list : [])
+        .map(function (c) { return { label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }; })
+        .filter(function (c) { return c.label && c.rate > 0; });
+    };
+    var want = Number(pct) || 0;
+    if (want <= 0) return null;
+    var sets = [clean(s.tax_components), clean(s.banquet_tax_components)];
+    for (var i = 0; i < sets.length; i++) {
+      var set = sets[i];
+      if (!set.length) continue;
+      var sum = set.reduce(function (a, c) { return a + c.rate; }, 0);
+      if (Math.abs(sum - want) < 0.005) return set;
+    }
+    return null;
+  }
   function taxModel(settings) {
     var s = settings || {};
     var comps = Array.isArray(s.tax_components) ? s.tax_components
@@ -1343,6 +1409,7 @@
       .filter(function (c) { return c.label && c.rate > 0; }) : [];
     var composition = priceTaxMode(s) === "composition";
     if (composition) return { rate: 0, pct: 0, components: [], composition: composition };
+    if (!gstRegistered(s)) return { rate: 0, pct: 0, components: [], composition: false };   // mig 426
     if (comps.length) {
       var pct = comps.reduce(function (a, c) { return a + c.rate; }, 0);
       return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, composition: composition };
@@ -1601,7 +1668,12 @@
       taxComponents: compsMatch ? tm.components : [],
       taxableBase: taxableBase, nontax: nontax, mrpAmount: mrpAmount,
       discountBase: discountBase, discountFixed: discountFixed, hasMrp: hasMrp,
-      composition: tm.composition,
+      // A BILL IS A BILL OF SUPPLY ONLY IF IT CHARGED NO TAX (item 13, owner 2026-10-16: "do all that").
+      // This was today's setting alone, so a bill charged 5% (stamped, mig 284) and reprinted after the
+      // restaurant moved to the composition scheme came out headed "Bill of Supply" with its real GST
+      // hidden in a "Round off" (₹177 on a ₹5,129 bill, measured in sweep #10 T14). What the bill
+      // CHARGED decides what the paper says, the same way the stamped rate already decides the money.
+      composition: tm.composition && !(tax > 0),
       // NEW (2026-08-05), all zero/false on an ordinary bill so nothing renders differently:
       grossTaxed: grossTaxed,        // what the taxed ITEM ROWS add up to
       taxInside: taxInside,          // the part of `tax` already inside those prices
@@ -1699,9 +1771,8 @@
 
     var sess = a.session || {};
     var pct = Math.round(m.rate * 10000) / 100;
-    var taxComps = (m.taxComponents && m.taxComponents.length)
-      ? m.taxComponents
-      : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
+    // The restaurant's own named lines for this bill's rate (dine-in, else banquet — item 14), else halves.
+    var taxComps = namedLinesFor(pct, s) || [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
     var inside = String(s.mrp_tax_treatment) === "inclusive" ? mrpTaxInside(live, m.rate) : 0;
     // A REPRINT KEEPS THE BILL'S OWN DATE (2026-08-05). This was always `new Date()` and no caller
     // ever passed `a.now`, so reprinting last June's invoice stamped today on it — beside an invoice
@@ -1760,14 +1831,12 @@
     // CGST 2.5 + SGST 2.5 + CESS 1 printed "CGST 9% / SGST 9%" on the 18% slice and lost its cess
     // altogether. So the shape is read from the settings, and only a restaurant that has
     // configured none falls back to halves — the same answer the single-rate branch gives.
-    var shapeComps = (taxModel(s).components || []);
+    // RE-DECIDED (owner delegated it, 2026-10-16 — item 14): each slice is named exactly as a bill on
+    // that rate alone would be — namedLinesFor(), else the halves. The old answer STRETCHED the dine-in
+    // set's shape onto every slice (T7 F1, 2026-08-11, to keep a third CESS line), which printed a CESS
+    // rate the restaurant never set for that slice, and named the same 18% food two different ways.
     var scaleComps = function (bucketPct) {
-      var shape = shapeComps.length ? shapeComps : [{ label: "CGST", rate: 1 }, { label: "SGST", rate: 1 }];
-      var sum = shape.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
-      if (!sum) return [{ label: bi.taxLabel, rate: bucketPct }];   // one word — see mrpNote below
-      return shape.map(function (c) {
-        return { label: c.label, rate: Math.round(((Number(c.rate) || 0) / sum) * bucketPct * 100) / 100 };
-      });
+      return namedLinesFor(bucketPct, s) || [{ label: "CGST", rate: bucketPct / 2 }, { label: "SGST", rate: bucketPct / 2 }];
     };
     var addRows = (m.composition || addWhole <= 0)
       ? []
@@ -1896,6 +1965,9 @@
   // restaurant's dine-in model when it has set none.
   function bqTaxModel(settings) {
   const s = settings || {};
+  // A business that may not collect GST charges none on a banquet either (mig 426 — the banquet's own
+  // lines used to win even for a composition-scheme restaurant; lfh_banquet_tax_rate now agrees).
+  if (priceTaxMode(s) === "composition" || !gstRegistered(s)) return { rate: 0, pct: 0, components: [], own: false };
   const raw = Array.isArray(s.banquet_tax_components) ? s.banquet_tax_components : [];
   const comps = raw.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }))
     .filter((c) => c.label && c.rate > 0);
@@ -2062,7 +2134,10 @@ function banquetDocHtml(a) {
   const cPct = (tmB.components || []).reduce((a, c) => a + (Number(c.rate) || 0), 0);
   const cMatch = (tmB.components || []).length > 0 && Math.abs(cPct / 100 - billRate) < 0.0005;
   const halvesMatch = Math.abs(tmB.pct / 100 - billRate) < 0.0005;
-  const comps = cMatch ? tmB.components
+  // item 14 (2026-10-16): the same rule as the bill — the restaurant's own named lines for this sheet's
+  // rate, dine-in or banquet; only then the halves, or one line at the sheet's exact rate.
+  const named = namedLinesFor(Math.round(billRate * 10000) / 100, s);
+  const comps = named ? named : cMatch ? tmB.components
     : (halvesMatch
       ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
       : [{ label: bi.taxLabel, rate: Math.round(billRate * 10000) / 100 }]);   // one word — see billData's mrpNote
@@ -2233,7 +2308,16 @@ function banquetDocHtml(a) {
     money.push(`<div class="ms" style="font-weight:700"><span>${bal > 0 ? "Balance due" : "Balance"}</span><i>${bq2(Math.max(0, bal))}</i></div>`);
   }
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Tax Invoice ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
+  // WHAT THIS SHEET IS CALLED — the bill's own rule, now on the banquet sheet too (item 12, 2026-10-16).
+  // The owner's 2026-07-31 layout ("a banquet bill ALWAYS prints as a tax invoice") is the REGISTERED
+  // restaurant's sheet and is unchanged for it. A restaurant with no GSTIN charges no tax since mig 426,
+  // and a sheet headed "Tax Invoice" with no registration and no tax is not one (CGST Rule 46 — the
+  // reason the thermal bill says "Bill" there since 2026-08-22); a composition-scheme restaurant may only
+  // issue a Bill of Supply, with the declaration (T7 F9 for the bill). Same three names as billDocHtml.
+  const bqComposition = priceTaxMode(s) === "composition";
+  const bqRegistered = !!String(bi.gstin || "").trim();
+  const bqDocName = bqComposition ? "Bill of Supply" : (bqRegistered ? "Tax Invoice" : "Bill");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${bqDocName} ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
 <style>
   /* A5/A4 sheet print recipe: an EXPLICIT @page size is correct here (unlike the 80mm
      thermal bill, where forcing a size makes CUPS rotate the job) because the tray
@@ -2291,6 +2375,8 @@ function banquetDocHtml(a) {
   .bar button.x{background:#111;color:#fff;border-color:#111}
   .bar .note{margin-right:auto;align-self:center;text-align:left;max-width:52%;
              font:11.5px/1.35 system-ui,sans-serif;color:#3a3a42}
+  /* on a phone the explanation takes its own row (item 10, 2026-10-16) — screen only */
+  @media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}
   @media print{.bar{display:none !important}}
   @media print{tr,.ms,.footg,.bx{break-inside:avoid}thead{display:table-row-group}}
 </style></head><body>
@@ -2300,7 +2386,7 @@ function banquetDocHtml(a) {
   <div class="body">
     ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
       <div class="ad">${esc(bi.address)}${bi.phone ? "<br/>Ph " + esc(bi.phone) : ""}${bi.gstin ? "<br/>GSTIN " + esc(bi.gstin) : ""}</div></div>`}
-    <div class="doct"><b>Tax Invoice</b></div>
+    <div class="doct"><b>${bqDocName}</b></div>
     <table class="bx">
       <tr>
         <td style="width:53%"><div class="lbl">Supplier</div><div class="who">${esc(bi.name)}</div>
@@ -2332,6 +2418,7 @@ function banquetDocHtml(a) {
     </div>
     ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
     ${bqOn(s, "by") && b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
+    ${bqComposition ? `<div style="font-size:7.4pt;margin-top:1.6mm;text-align:center">Composition taxable person — not eligible to collect tax on supplies.</div>` : ""}
     ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
   </div>
 </div>
@@ -2352,6 +2439,9 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     kotLineHtml: kotLineHtml,
     kotWhen: kotWhen,
     billIdentity: billIdentity,
+    moduleOn: moduleOn,
+    namedLinesFor: namedLinesFor,
+    gstRegistered: gstRegistered,
     splitTax: splitTax,
     discPct: discPct,
     phone10: phone10,

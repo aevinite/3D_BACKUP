@@ -79,9 +79,16 @@ d(5, F, "…and no bill ever carries 'undefined', 'NaN', '[object Object]' or '$
   const bad = BILLS.filter((b) => /undefined|NaN|\[object Object\]|\$\{/.test(b.html));
   return bad.length === 0 || `#${bad[0].i}: ${(bad[0].html.match(/.{30}(undefined|NaN|\[object Object\]|\$\{).{10}/) || [])[0]}`;
 });
-d(6, F, "…a composition bill never shows a tax row, a 'Taxable value' row or the words Tax Invoice", "every composition bill", () => {
-  const bad = BILLS.filter((b) => b.s.price_tax_mode === "composition" && (/CGST|SGST|Taxable value|Tax Invoice/.test(b.html) || !/Bill of Supply/.test(b.html)));
-  return bad.length === 0 || `#${bad[0].i}`;
+// RE-DECIDED 2026-10-16 (round 2, item 13): what a bill CHARGED names its paper. A composition
+// restaurant's bill that charged no tax is a Bill of Supply with no tax rows; one whose orders were
+// stamped with GST before the scheme changed shows that GST — it is never hidden as a "Round off".
+d(6, F, "…a composition bill that charged no tax never shows a tax row, a 'Taxable value' row or the words Tax Invoice — and one that DID charge GST before the switch shows it (item 13)", "every composition bill, split by what it charged", () => {
+  const comp = BILLS.filter((b) => b.s.price_tax_mode === "composition");
+  const bad = comp.filter((b) => b.m.tax > 0
+    ? (!/CGST|SGST/.test(b.html) || /Bill of Supply/.test(b.html) || rowsOf(b.html).rows.some((r) => r.k === "Round off" && Math.abs(r.v) > 2))
+    : (/CGST|SGST|Taxable value|Tax Invoice/.test(b.html) || !/Bill of Supply/.test(b.html)));
+  const charged = comp.filter((b) => b.m.tax > 0).length;
+  return (bad.length === 0 && charged > 0 && comp.length > charged) ? { ok: true, note: `${comp.length - charged} Bills of Supply, ${charged} taxed-then-switched bills showing their GST` } : `#${bad[0]?.i} (${charged} charged of ${comp.length})`;
 });
 d(7, F, "…a bill with a discount says its percentage of the row shown above it", "label vs discPct(subtotal shown, discount shown)", () => {
   const bad = [];
@@ -105,11 +112,16 @@ d(10, F, "…a mixed-rate bill (18% banquet beside 5% food) names each rate's CG
   const bad = mixed.filter((b) => (b.m.rateRows.some((r) => r.rate === 0.18 && Math.round(r.tax) > 0) && !/CGST 9%/.test(b.html)) || Math.abs(foot(rowsOf(b.html)) - rowsOf(b.html).total) > 0.001);
   return (mixed.length > 20 && bad.length === 0) ? { ok: true, note: `${mixed.length} mixed bills` } : `${mixed.length} mixed, ${bad.length} wrong`;
 });
-d(11, F, "…a restaurant with a CESS component keeps it on every MIXED bill (the dropped-third-component fault, 2026-08-11)", "3-component mixed bills", () => {
+// RE-DECIDED 2026-10-16 (round 2, item 14 — the owner: "you choose it"): each rate is named by the
+// restaurant's OWN set whose rates add up to it. The 6% slice of a CGST 2.5 + SGST 2.5 + CESS 1
+// restaurant keeps its CESS 1% on every mixed bill (the 2026-08-11 fault stays fixed); its 18% slice
+// reads CGST 9 + SGST 9 exactly as an 18% bill alone does — no invented "CESS 3%" nobody set.
+d(11, F, "…a restaurant with a CESS component keeps it on every MIXED bill's own-rate slice — and its 18% slice is named as 18% alone is (item 14)", "3-component mixed bills", () => {
   const cess = BILLS.filter((b) => b.s.tax_components && b.s.tax_components.length === 3 && b.m.mixedRates && !b.m.composition);
-  const bad = cess.filter((b) => !/CESS/.test(b.html));
-  const single = BILLS.filter((b) => b.s.tax_components && b.s.tax_components.length === 3 && !b.m.mixedRates && b.m.rate > 0.06 && !/CESS/.test(b.html)).length;
-  return (cess.length > 0 && bad.length === 0) ? { ok: true, note: `${cess.length} mixed bills keep CESS; but ${single} single-rate 18% bills print CGST 9 + SGST 9 with no CESS, while the same 18% food beside a 6% order prints CGST 7.5 + SGST 7.5 + CESS 3 — which is right is a tax decision, Part 4` } : `${bad.length} of ${cess.length} lost the cess`;
+  const own = cess.filter((b) => b.m.rateRows.some((r) => Math.abs(r.rate - 0.06) < 1e-9 && Math.round(r.tax) > 0));
+  const bad = own.filter((b) => !/CESS 1%/.test(b.html) || /CESS 3%|CGST 7\.5%/.test(b.html));
+  const single = BILLS.filter((b) => b.s.tax_components && b.s.tax_components.length === 3 && !b.m.mixedRates && b.m.rate > 0.06 && (/CESS/.test(b.html) || !/CGST 9%/.test(b.html))).length;
+  return (own.length > 0 && bad.length === 0 && single === 0) ? { ok: true, note: `${own.length} mixed bills keep CESS 1% on the 6% slice, none invents CESS 3%; single-rate 18% bills agree` } : `${bad.length} of ${own.length} mixed wrong, ${single} single-rate wrong`;
 });
 
 // ── the cancelled sheet ──

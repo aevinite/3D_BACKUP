@@ -114,7 +114,9 @@ export async function sql(q) {
     });
     const t = await r.text();
     if (r.ok) return JSON.parse(t);
-    if (attempt < 3 && (r.status === 429 || r.status >= 500)) { await new Promise((ok) => setTimeout(ok, 1500 * (attempt + 1))); continue; }
+    // The management API allows a fixed number of queries a minute; a 429 is its own budget, not a
+    // fault in the code under test — wait it out (up to ~2 minutes) instead of filing a red row.
+    if (attempt < 7 && (r.status === 429 || r.status >= 500)) { await new Promise((ok) => setTimeout(ok, Math.min(30000, 2000 * 2 ** attempt))); continue; }
     throw new Error(`SQL ${r.status}: ${t.slice(0, 200)}`);
   }
 }

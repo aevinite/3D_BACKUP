@@ -95,6 +95,18 @@ for (const [js, css] of SHARED) {
     if (!/background:\s*transparent/.test(xRule) || !/border:\s*none/.test(xRule))
       bad(`${css}: the sheet's ✕ is not styled here`, "it relies on .tbl-modal-close, which only the manager panel defines — the waiter tablet shows a white browser button");
     else ok(`${css}: the sheet's ✕ is styled by this file, so it looks the same in both panels`);
+    // 6. …and Esc closes it, like every other panel dialog (item 8, 2026-10-16).
+    const js = read("public/panels/billcustomer.js");
+    if (!/wrap\.addEventListener\("keydown", \(e\) => \{ if \(e\.key === "Escape"\) \{[^}]*finish\(null\)/.test(js))
+      bad("billcustomer.js: Esc does not close the sheet", "every other dialog in the panels closes on Esc");
+    else ok("billcustomer.js: Esc closes the sheet, and stops there");
+    // 7. No dead rule and no stale note (item 11, 2026-10-16): the button never carries `disabled`, and
+    //    the header's digit floor is the MIN_LOOKUP the code really uses.
+    const floor = (js.match(/const MIN_LOOKUP = (\d+);/) || [])[1];
+    const said = (js.match(/from MIN_LOOKUP = (\d+) digits/) || [])[1];
+    if (/\.btn\.primary:disabled\s*\{/.test(flat)) bad(`${css}: a ':disabled' rule is back`, "the button never carries disabled — the rule can never apply");
+    else if (!floor || floor !== said) bad("billcustomer.js: its header names a different digit floor from MIN_LOOKUP", `code ${floor}, note ${said}`);
+    else ok(`${css} carries no rule that can never apply, and the sheet's notes match its code (lookup from ${floor} digits)`);
   }
 }
 console.log(fails ? `\n❌ verify:shared-panel-styles — ${fails} problem(s)` : "\n✅ verify:shared-panel-styles — every panel that loads a shared script loads its look too");

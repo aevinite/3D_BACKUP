@@ -326,8 +326,12 @@ const fmtWaited = (ms) => {
   const n = Number(ms || 0);
   if (!n || n < 0) return "";
   if (n < 60000) return "under a minute";
-  if (n < 3600000) return Math.round(n / 60000) + " minutes";
-  if (n < 86400000) return Math.round(n / 3600000) + " hours";
+  // the twin of lib/printBoardWords.ts waitedWords — singular for one, and a rounded-up unit moves up a
+  // step (item 9, 2026-10-16): never "1 minutes", "60 minutes" or "24 hours".
+  const m = Math.round(n / 60000);
+  if (m < 60) return m === 1 ? "1 minute" : m + " minutes";
+  const h = Math.round(n / 3600000);
+  if (h < 24) return h === 1 ? "1 hour" : h + " hours";
   const d = Math.round(n / 86400000);
   return d === 1 ? "a whole day" : d + " days";
 };
@@ -15802,7 +15806,7 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
       <div class="disc-cap-msg" id="discCapMsg" role="status" hidden></div>
       <div class="disc-hint muted small">Change any one of the three — the other two follow.${nontax > 0 ? ` The % is off the discountable part only — ${lockedNote} of this bill ${lockedMrp > 0 ? "is MRP items, whose price is final" : "carries no GST"}.` : ""}</div>
       <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(required — it is kept with your name, and shows on the bill)</span></label>
-      <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
+      <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. regular guest, comp, manager approval">
     </div>
     <div class="dish-edit-foot">
       ${current > 0 ? `<button type="button" class="btn danger disc-remove">Remove discount</button>` : ""}
@@ -17495,7 +17499,9 @@ async function askBillCustomer(sid, sess) {
   const row = (state.data.orders || []).find((o) => o.session_id === sid && (o.bill_cust_name || o.bill_cust_phone));
   const prefill = (sess && sess.cust_phone) ? { phone: sess.cust_phone, name: sess.cust_name }
     : row ? { phone: row.bill_cust_phone, name: row.bill_cust_name } : null;
-  return LFH_BILLCUST.ask({ api, required, print: s.bill_customer_print !== false, prefill });
+  return LFH_BILLCUST.ask({ api, required, print: s.bill_customer_print !== false, prefill,
+    // rewards are named on the sheet only where Loyalty is switched on (owner, 2026-10-16 — no trace when off)
+    loyalty: !!(window.LFH_BILLDOC && LFH_BILLDOC.moduleOn && LFH_BILLDOC.moduleOn(s, "loyalty")) });
 }
 async function generateInvoice(sid) {
   if (_invBusy.has(sid)) return false;

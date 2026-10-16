@@ -82,10 +82,13 @@ const pick = (R, xs) => xs[Math.floor(R() * xs.length)];
 const P = (x) => Math.round(Number(x) * 100);
 
 // ── the restaurants and their tax set-ups ─────────────────────────────────────────────────────────
-const RESTS = await sql(`select r.id, r.slug, s.restaurant_id is not null as has_settings, s.tax_rate, s.tax_components, s.price_tax_mode, s.item_tax_modes_allowed, s.mrp_tax_treatment, lfh_effective_tax_rate(r.id)::text as db_rate
+const RESTS = await sql(`select r.id, r.slug, s.restaurant_id is not null as has_settings, s.tax_rate, s.tax_components, s.price_tax_mode, s.gstin, s.item_tax_modes_allowed, s.mrp_tax_treatment, lfh_effective_tax_rate(r.id)::text as db_rate
   from restaurants r left join settings s on s.restaurant_id = r.id order by r.slug, r.id`);
-const settingsOf = (r) => (r.has_settings ? { tax_rate: r.tax_rate == null ? null : Number(r.tax_rate), tax_components: r.tax_components, price_tax_mode: r.price_tax_mode, item_tax_modes_allowed: r.item_tax_modes_allowed, mrp_tax_treatment: r.mrp_tax_treatment } : null);
-const shapeKey = (r) => JSON.stringify(settingsOf(r));
+// gstin rides along since mig 426 (sweep #10 T14): a restaurant with no GSTIN charges no tax.
+const settingsOf = (r) => (r.has_settings ? { tax_rate: r.tax_rate == null ? null : Number(r.tax_rate), tax_components: r.tax_components, price_tax_mode: r.price_tax_mode, gstin: r.gstin, item_tax_modes_allowed: r.item_tax_modes_allowed, mrp_tax_treatment: r.mrp_tax_treatment } : null);
+// The set-up KEY leaves gstin out, so a row's permanent id (parity-ids.json) does not move because a
+// restaurant's tax column joined the read (mig 426); the rate checks above still compare WITH it.
+const shapeKey = (r) => JSON.stringify({ ...settingsOf(r), gstin: undefined });
 const SHAPES = [...new Map(RESTS.map((r) => [shapeKey(r), r])).values()];
 
 // ═══ A · the rate and each dish's behaviour, for every restaurant ══════════════════════════════════
@@ -293,7 +296,7 @@ for (const [f, label] of [["sub", "subtotal"], ["base", "taxable base"], ["nt", 
 // ═══ I · every bill ever settled in parts, against what its paper says now ═════════════════════════
 const BILLDOC = (await imp("public/panels/billdoc.js")).default;
 const GROUPS = await sql(`select g.settle_group, g.session_id, g.restaurant_id, g.legs, g.amount, coalesce((select json_agg(o) from (select id, status, deleted_at, subtotal, taxable_base, nontax_amount, mrp_amount, discount, tax_rate, items, payment_method, payment_status from orders where session_id = g.session_id and restaurant_id = g.restaurant_id) o), '[]') orders,
-  (select row_to_json(s) from (select tax_rate, tax_components, price_tax_mode, item_tax_modes_allowed, mrp_tax_treatment from settings where restaurant_id = g.restaurant_id) s) st
+  (select row_to_json(s) from (select tax_rate, tax_components, price_tax_mode, gstin, item_tax_modes_allowed, mrp_tax_treatment from settings where restaurant_id = g.restaurant_id) s) st
   from (select settle_group, session_id, restaurant_id, count(*) legs, sum(amount) amount, bool_and(reversed_at is not null) reversed, max(reversed_reason) why from session_payments where settle_group is not null group by 1, 2, 3) g`);
 const ACTS = await sql(`select distinct order_id from staff_actions where order_id in (select o.id from orders o where o.session_id in (select session_id from session_payments where settle_group is not null)) and action ilike '%cancel%'`);
 const EDITOR_REFUSES = /if \(patch\.status === "cancelled" && cur\.payment_status === "paid"\)\s*\n\s*return err\("Can't cancel a paid order/.test(read("app/api/editor/[...path]/route.ts"));

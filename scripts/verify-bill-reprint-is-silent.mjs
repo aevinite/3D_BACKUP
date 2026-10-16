@@ -23,7 +23,8 @@
 //      "this was for kot not bill so remove the thing" — this REVERSES part 4 as it stood on 2026-08-19).
 //
 // Reopening a bill is a DIFFERENT act and stays fully recorded — the reopen reason is still
-// required, `invoice_voided` is still audited, and the new invoice number is still logged. Part 3
+// required, `invoice_voided` is still audited, and the generate that puts the invoice back is still logged
+// (since mig 407 a reopened bill keeps its number — there is no "new" one). Part 3
 // checks that too, so "stop auditing reprints" can never quietly become "stop auditing reopens".
 //
 // Static: no database, no login, no browser, no dev server.

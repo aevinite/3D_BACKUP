@@ -381,7 +381,12 @@ dateBad.length === 0
     ["a restaurant with a GSTIN", { ...SET, gstin: "24ABCDE1234F1Z5" }, null, "Tax Invoice"],
     ["a restaurant with NO GSTIN", { ...SET }, null, "Bill"],
     ["a GSTIN of only spaces", { ...SET, gstin: "   " }, null, "Bill"],
-    ["a composition restaurant", { ...SET, price_tax_mode: "composition" }, null, "Bill of Supply"],
+    // RE-STATED 2026-10-16 (item 13): the paper is named by what the bill CHARGED. A composition bill
+    // charged nothing → Bill of Supply; a bill charged 5% before the move to composition keeps its tax and
+    // is named as a taxed bill (no GSTIN in this set-up → "Bill").
+    ["a composition restaurant", { ...SET, price_tax_mode: "composition" },
+      [{ ...os[0], tax_rate: 0, taxable_base: 0, nontax_amount: 250, items: [{ title: "Salad", qty: 1, price: 250, tax_mode: "exempt" }] }], "Bill of Supply"],
+    ["a bill charged 5% before its restaurant moved to composition", { ...SET, price_tax_mode: "composition" }, null, "Bill"],
     ["a cancelled sale", { ...SET, gstin: "24ABCDE1234F1Z5" },
       [{ ...os[0], status: "cancelled" }], "Cancelled Bill"],
   ];
@@ -577,7 +582,9 @@ dateBad.length === 0
       lines: [{ qty: 1, title: "Dal" }, null, { qty: 2, title: "Naan" }] }), /Dal/],
     ["a ticket of nothing but nulls", () => BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [null, undefined] }), /\(no items\)/],
     ["kotLineHtml with no argument", () => BILLDOC.kotLineHtml(), /class="kl"/],
-    ["banquetDocHtml with no argument", () => BILLDOC.banquetDocHtml(), /Tax Invoice/],
+    // (its proof of a real render is the sheet's heading and its money box — "Bill" with no GSTIN since
+    //  2026-10-16, item 12 — not the words "Tax Invoice")
+    ["banquetDocHtml with no argument", () => BILLDOC.banquetDocHtml(), /<div class="doct"><b>(Tax Invoice|Bill|Bill of Supply)<\/b>[\s\S]*INVOICE TOTAL/],
     ["a bill with a null among its lines", () => BILLDOC.billDocHtml({ name: "R", taxRows: [],
       lines: [null, { title: "Dal", qty: 1, price: 100 }], subtotal: 100, total: 100 }), /Dal/],
     ["a banquet sheet with a null line", () => BILLDOC.banquetDocHtml({ bill: { bill_no: "B", subtotal: 100, total: 100 },
@@ -949,6 +956,65 @@ dateBad.length === 0
   broke.length === 0
     ? ok("a hole in a list of orders or of lines costs nothing — no document is ever a blank window")
     : bad("a hole in a list throws, and a throw here is a blank window", broke.join(" · "));
+}
+
+/* ── A RESTAURANT WITH NO GSTIN CHARGES NO TAX (owner, 2026-10-16 — mig 426, "for 12th do c option") ──
+   The paper's half of the rule. SQL lfh_effective_tax_rate / lfh_banquet_tax_rate and lib/tax.ts carry
+   the other halves (the T30 parity run compares them restaurant by restaurant on dev). */
+{
+  const wrong = [];
+  const ord = { status: "served", subtotal: 200, taxable_base: 200, discount: 20, items: [{ title: "Dal", qty: 1, price: 200 }] };
+  const un = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [ord], settings: { tax_rate: 0.05, gstin: "" } }));
+  if (BILLDOC.taxModel({ tax_rate: 0.18, gstin: "" }).rate !== 0) wrong.push("taxModel still charges a restaurant with no GSTIN");
+  if (BILLDOC.taxModel({ tax_rate: 0.18, gst_registered: false }).rate !== 0) wrong.push("taxModel ignores the guest menu's gst_registered=false");
+  if (BILLDOC.taxModel({ tax_rate: 0.18, gstin: "24AAAAA0000A1Z5" }).rate !== 0.18) wrong.push("a registered restaurant's rate moved");
+  if (BILLDOC.taxModel({ tax_rate: 0.18 }).rate !== 0.18) wrong.push("an object never asked about its GSTIN stopped charging (it must keep the old answer)");
+  if (BILLDOC.bqTaxModel({ gstin: "", banquet_tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] }).rate !== 0) wrong.push("a banquet at a restaurant with no GSTIN is still taxed");
+  if (BILLDOC.bqTaxModel({ price_tax_mode: "composition", banquet_tax_components: [{ label: "CGST", rate: 9 }] }).rate !== 0) wrong.push("a composition-scheme restaurant's banquet is still taxed");
+  if (/CGST|SGST|Taxable value/.test(un)) wrong.push("a new bill at a restaurant with no GSTIN prints tax rows or a Taxable value line");
+  if (!/TOTAL<\/span><span>₹180</.test(un)) wrong.push("a ₹200 bill with ₹20 off at a restaurant with no GSTIN does not total ₹180");
+  if (!/class="kind">Bill</.test(un)) wrong.push("the sheet is not headed Bill");
+  // an OLD order, stamped 5% before mig 426, keeps what it was charged — the paper never re-prices it
+  const old = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [{ ...ord, tax_rate: 0.05 }], settings: { gstin: "" } }));
+  if (!/CGST/.test(old) || !/Taxable value/.test(old)) wrong.push("an order charged 5% before the rule lost its tax rows on a reprint");
+  const { readFileSync: rf426 } = await import("node:fs");
+  const mig = rf426(join(ROOT, "supabase/migrations/426_a_restaurant_without_a_gstin_charges_no_tax.sql"), "utf8");
+  if ((mig.match(/COALESCE\(TRIM\(\(SELECT gstin FROM s\)\), ''\) = '' THEN 0/g) || []).length !== 2) wrong.push("mig 426 no longer carries the rule in both rate functions");
+  if (!/'gst_registered', COALESCE\(TRIM\(s\.gstin\), ''\) <> ''/.test(mig)) wrong.push("the guest menu is no longer told whether the restaurant may charge GST");
+  // …and the banquet sheet is named by the same rule (registered → Tax Invoice, none → Bill, composition → Bill of Supply)
+  const bq = (st) => (BILLDOC.banquetDocHtml({ bill: { subtotal: 100, tax: 0, total: 100 }, lines: [], settings: st, autoPrint: false }).match(/<div class="doct"><b>([^<]+)/) || [])[1];
+  if (bq({ gstin: "24AAAAA0000A1Z5" }) !== "Tax Invoice") wrong.push("a registered restaurant's banquet sheet is no longer a Tax Invoice");
+  if (bq({ gstin: "" }) !== "Bill") wrong.push("a banquet sheet with no GSTIN still calls itself a Tax Invoice");
+  if (bq({ gstin: "24AAAAA0000A1Z5", price_tax_mode: "composition" }) !== "Bill of Supply") wrong.push("a composition restaurant's banquet sheet is not a Bill of Supply");
+  // …and the admin's preview may not show tax a restaurant with no GSTIN never charges
+  const { readFileSync: rfPv } = await import("node:fs");
+  if (!/const taxPrecise = composition \|\| pct === 0 \? 0 :/.test(rfPv(join(ROOT, "lib/billPreview.ts"), "utf8"))) wrong.push("the bill preview builds tax rows from the named lines even where the rate is 0 (no GSTIN)");
+  wrong.length
+    ? bad("a restaurant with no GSTIN can still be charged or shown tax", wrong.join(" · "))
+    : ok("a restaurant with no GSTIN charges no tax — on the bill, on a banquet, and in the guest's cart; an older bill keeps what it charged");
+}
+
+/* ── ON A PHONE, A PREVIEW'S EXPLANATION TAKES ITS OWN ROW (item 10, 2026-10-16) — screen only ── */
+{
+  const RULE = "@media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}";
+  const docs = [["bill", BILLDOC.billDocHtml({ note: "x" })], ["kitchen ticket", BILLDOC.kotDocHtml({ note: "x" })], ["banquet sheet", BILLDOC.banquetDocHtml({ bill: {}, lines: [], note: "x" })]];
+  const missing = docs.filter(([, h]) => !h.includes(RULE)).map(([n]) => n);
+  // …and a real print (no note) carries no toolbar rule at all on the ticket, so nothing reaches paper
+  const kotPrint = BILLDOC.kotDocHtml({});
+  missing.length === 0 && !kotPrint.includes("max-width:560px")
+    ? ok("on a phone, the bill, ticket and banquet previews put their explanation on its own row — screen only")
+    : bad("a preview squeezes its explanation on a phone", missing.length ? missing.join(", ") : "the ticket's print copy carries the toolbar rule");
+}
+
+/* ── A BILL KEEPS THE TAX IT CHARGED, WHATEVER THE SCHEME IS TODAY (item 13, 2026-10-16) ── */
+{
+  const os = [{ status: "served", subtotal: 1000, taxable_base: 1000, tax_rate: 0.05, items: [{ title: "Thali", qty: 1, price: 1000 }] }];
+  const h = BILLDOC.billDocHtml(BILLDOC.billData({ orders: os, settings: { price_tax_mode: "composition", gstin: "24AAAAA0000A1Z5" } }));
+  const ro = (h.match(/Round off<\/span><span>[^<]*/) || [""])[0];
+  const fresh = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [{ status: "served", subtotal: 1000, taxable_base: 0, nontax_amount: 1000, items: [{ title: "Thali", qty: 1, price: 1000, tax_mode: "exempt" }] }], settings: { price_tax_mode: "composition", gstin: "24AAAAA0000A1Z5" } }));
+  (/CGST 2\.5%/.test(h) && !ro && !/Bill of Supply/.test(h) && /TOTAL<\/span><span>₹1,050</.test(h) && /Bill of Supply/.test(fresh))
+    ? ok("a bill charged 5% and reprinted after a move to the composition scheme still shows its tax — and a new composition bill is still a Bill of Supply")
+    : bad("a reprint hides the tax it charged behind today's scheme", `heading ${(h.match(/class="kind">([^<]+)/) || [])[1]} · ${ro || "no round-off"} · fresh ${(fresh.match(/class="kind">([^<]+)/) || [])[1]}`);
 }
 
 console.log(fails

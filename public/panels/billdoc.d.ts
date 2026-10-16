@@ -178,6 +178,16 @@ export function billIdentity(
   settings: Record<string, unknown>,
   restaurant: Record<string, unknown>,
 ): BillIdentity;
+/** Is a `settings.modules` bag module (mig 326 — Loyalty points) ON for this restaurant? Allowed by
+ *  Aevidine and, when the owner controls it, enabled. Same rule as lib/tableTags.ts moduleBagLadder().
+ *  For what a screen SAYS only — the server stays the authority for anything that moves points. */
+export function moduleOn(settings: Record<string, unknown> | null | undefined, key: string): boolean;
+/** May this restaurant collect GST at all? No GSTIN → no (mig 426), from `gstin` or `gst_registered`.
+ *  An object with neither key keeps the old answer (registered). Twin of lib/tax.ts gstRegistered. */
+export function gstRegistered(settings: Record<string, unknown> | null | undefined): boolean;
+/** The restaurant's own named tax lines whose rates add up to `pct` (dine-in first, then banquet), or
+ *  null when no set it named matches — the caller then uses its own fallback. Item 14, 2026-10-16. */
+export function namedLinesFor(pct: number, settings: Record<string, unknown> | null | undefined): { label: string; rate: number }[] | null;
 export function splitTax(
   taxWhole: number,
   comps: { label?: string; rate?: number }[],
@@ -301,7 +311,9 @@ export function bqPaper(settings: Record<string, unknown>): {
   pad: boolean; size: "a4" | "a5"; top: number; bot: number; side: number;
   foot: boolean; sign: boolean; fill: boolean;
 };
-export function bqTaxModel(settings: Record<string, unknown>): TaxModel & { own: boolean };
+/** The banquet's rate — its own lines when it named any, else the dine-in rate; 0 for composition or no
+ *  GSTIN (mig 426). It has no `composition` field (TaxModel does), so it is typed on its own. */
+export function bqTaxModel(settings: Record<string, unknown>): { rate: number; pct: number; components: { label: string; rate: number }[]; own: boolean };
 export function bqOn(settings: Record<string, unknown>, k: string): boolean;
 export function bqWords(amount: number): string;
 /** The rows a bill SHOWS, in whole rupees, made to reconcile to the TOTAL (a "Round off" row

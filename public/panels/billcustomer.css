@@ -98,7 +98,10 @@
 .bcust-body .bc-status { min-height: 17px; font-size: 12.5px; font-weight: 700; margin: -6px 0 -4px; }
 .bcust-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 18px 18px; }
 .bcust-foot .btn { min-width: 116px; padding: 11px 18px; font-weight: 800; }
-.bcust-foot .btn.primary:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
+/* (A `:disabled` rule lived here. The button has never carried `disabled` since 2026-08-17 — a disabled
+   button swallows the tap that should say which box is missing — so the not-ready look is painted inline
+   by setReady() in billcustomer.js. Removed 2026-10-16, item 11. The rule below is NOT dead: it is the
+   ready-state glow, which setReady() switches off inline while the sheet is not ready.) */
 .bcust-foot .btn.primary:not(:disabled) { box-shadow: 0 4px 14px color-mix(in srgb, var(--gold) 35%, transparent); }
 @media (max-width: 480px) {
   .bcust-modal { width: 96vw; }
