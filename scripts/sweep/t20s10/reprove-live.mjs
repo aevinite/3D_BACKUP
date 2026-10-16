@@ -9,7 +9,7 @@ import { openWith, closeBrowser, patchJson } from "../t13/r2lib.mjs";
 const out = [];
 const re = async (id, fn) => { let r; try { r = await fn(); } catch (e) { r = { ok: false, note: `threw: ${e.message}` }; } out.push({ id, ...r }); };
 const ok = (note) => ({ ok: true, note }), no = (note) => ({ ok: false, note });
-const MULTI = { username: "diagmulti", password: "diag-multi-2026" };
+const MULTI = { username: "diagmulti", password: "diag-multi-2026", route: "/owner" };
 const settle = async (pg) => {
   await pg.waitForSelector(".ow2-stats5", { timeout: 60000 });
   await pg.waitForFunction(() => document.querySelectorAll(".ow2-stats5 .anim-skel").length === 0, null, { timeout: 90000 }).catch(() => {});
