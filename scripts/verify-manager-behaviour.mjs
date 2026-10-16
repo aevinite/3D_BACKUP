@@ -418,6 +418,26 @@ async function istClocks() {
   rest.length <= 2
     ? ok(`the rest of the panel adds no new unpinned clock (${rest.length} known, owned by later sweep terminals)`)
     : bad(`the rest of the panel now has ${rest.length} unpinned clocks (2 were known on 2026-10-12)`, "pin the new one: { …, timeZone: \"Asia/Kolkata\" }");
+  // THE MIDDLE THIRD (printZReport → openShiftPicker), held at ZERO with a WIDER net (sweep #10 T7,
+  // 2026-10-16). The pattern above only sees `new Date(…).toLocale…`, so a clock written through a
+  // variable — `d.toLocaleString([], …)` in the Audit list, `x.toLocaleDateString(undefined, …)` in
+  // the removal story — slipped past it, and whenLabel()'s date had no zone. Any .toLocale… call in
+  // this stretch must name a timeZone in the same call.
+  {
+    const s = app.indexOf("async function printZReport("), e = app.indexOf("\nfunction openShiftPicker(");
+    const mid = s > 0 && e > s ? app.slice(s, e) : "";
+    if (!mid) bad("printZReport / openShiftPicker moved — re-point the middle-third clock check");
+    else {
+      const startLine = app.slice(0, s).split("\n").length;
+      const calls = [...mid.matchAll(/\.toLocale(?:String|DateString|TimeString)\(([^;]*?)\)(?=[\s;),+.]|$)/g)];
+      const loose = calls.filter((m) => /\{/.test(m[1]) ? !/timeZone/.test(m[1]) : /^\s*$|^\s*(\[\]|undefined|"en-[A-Z]{2}")\s*$/.test(m[1]));
+      // A number's toLocaleString("en-IN") carries no clock, so only date-shaped receivers count.
+      const dated = loose.filter((m) => /(?:Date\([^)]*\)|\bd|\bx|\bnow|\bdt|\bdate)\s*$/.test(mid.slice(Math.max(0, m.index - 40), m.index)));
+      dated.length === 0
+        ? ok(`the middle third prints every clock in the restaurant's zone (${calls.length} toLocale calls read)`)
+        : bad(`${dated.length} clock(s) in the middle third print the READER's zone`, dated.map((m) => "app.js:" + (startLine + mid.slice(0, m.index).split("\n").length - 1)).join(", "));
+    }
+  }
   // Behaviour: lift fmtDate and run it under a New York clock.
   const line = (app.match(/^const fmtDate = .*$/m) || [""])[0];
   if (!line) { bad("fmtDate() is gone from the panel — re-point this check"); return; }

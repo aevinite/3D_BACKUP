@@ -8392,7 +8392,10 @@ function whenLabel(ts) {
   if (secs < 86400) return Math.floor(secs / 3600) + "h ago";
   const days = Math.floor(secs / 86400);
   if (days < 3) return days === 1 ? "yesterday" : days + " days ago";
-  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  // The restaurant's calendar day, never the reader's (sweep #10 T7, item 3) — fullWhen() below was
+  // pinned on 2026-07-06; this half of the same pair was not, so an owner abroad saw a log row near
+  // midnight dated a day off from the detail card that opens from it.
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 // fullWhen: the exact date + time for the click-to-open detail card, e.g.
@@ -9068,7 +9071,10 @@ function auditHtml() {
         r.table_number && "table " + r.table_number, r.item_title, r.actor, r.reason_note, r.reason_code,
         (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
   const shownMoney = AS ? AS.sumAmount(list) : 0;
-  const when = (t) => { const d = new Date(t); return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  // The restaurant's clock (sweep #10 T7, item 3): this printed in the READER's zone and locale, so
+  // the same removal read 21:30 here and 11:00 am on an owner's laptop in Europe — the one list a
+  // person checks against the paper. fmtWhen() is the panel's one India-pinned date + time.
+  const when = (t) => fmtWhen(t);
   return `<div class="ed-head"><h2>Audit · what was removed <span class="sub">· ${rows.length}</span></h2>
       <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
     <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
@@ -9203,8 +9209,10 @@ async function openRemovalDetail(id) {
   const items = (w && Array.isArray(w.items)) ? w.items : [];
   const row = (k, v) => v == null || v === "" ? "" : `<div class="au-d-row"><span>${esc(k)}</span><b>${v}</b></div>`;
   const whenLong = (iso) => { if (!iso) return ""; try { const x = new Date(iso);
-    return esc(x.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })
-      + " · " + x.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { return esc(iso); } };
+    // Asia/Kolkata, like every other clock in this panel (sweep #10 T7, item 3) — the story of a
+    // removal is evidence; its time must be the restaurant's, whoever opens it and wherever.
+    return esc(x.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
+      + " · " + x.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })); } catch { return esc(iso); } };
   const optTxt = (o) => Array.isArray(o) ? o.map((x) => typeof x === "string" ? x : ((x && x.label) || "")).filter(Boolean).join(", ") : "";
   const label = (AUDIT_KIND[d.kind] || ["•", d.kind])[1];
   const lines = items.map((it) => {
