@@ -1204,6 +1204,12 @@ console.log("\nT11-E · saying so when a read failed");
       /const earned = !activeRid \?/.test(dashPage) && /if \(earned\.length >= 2\)/.test(dashPage),
     "app/owner/page.tsx — a drilled restaurant's sheet must not chart its neighbours, and one bar is not a chart.",
   );
+  // item 5 — Today's 'Average per order' divided PAID takings by EVERY order and printed ₹0 when none was paid.
+  check(
+    "item 5 · Today's average says what it divides, and never prints ₹0 for 'nothing paid yet'",
+    /"none paid yet"/.test(dashPage) && /paid or still open"/.test(dashPage) && /todayOrd && todayRev \? inr\(todayRev \/ todayOrd\) : "—"/.test(dashPage),
+    "app/owner/page.tsx — the Today sheet's average row.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);

@@ -1855,7 +1855,15 @@ export default function OwnerDashboard() {
         rows: [
           ["Taken today", inr(todayRev)],
           ["Orders today", todayOrd.toLocaleString("en-IN")],
-          ["Average per order", inr(todayOrd ? todayRev / todayOrd : 0)],
+          // ── SAY WHAT IT DIVIDES, AND NEVER "₹0" FOR "NOTHING PAID YET" (sweep #10 T20, item 5) ──
+          // `todayRev` is PAID money and `todayOrd` is EVERY order (lfh_owner_overview counts open ones
+          // too), so 79 orders with nothing paid printed "Average per order ₹0" — the very doubt the
+          // tile face was reworded for on 2026-08-31 (item 26: "79 orders, none paid yet"). The same
+          // words here, and when there is a figure, the line under it says what was divided by what.
+          ["Average per order", todayOrd && todayRev ? inr(todayRev / todayOrd) : "—",
+            todayOrd === 0 ? "no orders yet today"
+            : todayRev === 0 ? "none paid yet"
+            : "money taken so far ÷ every order today, paid or still open"],
           ["Tables open now", String(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0))],
         ],
         note: "This one does not follow the period above — it is always today.",
