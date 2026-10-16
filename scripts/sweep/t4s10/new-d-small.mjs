@@ -36,10 +36,12 @@ check(GN, "a failed rename never fails the thing the diner was doing", HOW, asyn
 });
 // Re-aimed 2026-10-13 (item 10 fixed): it used to answer true here, so the review toast promised
 // "saved as your name" in a private window. It now answers false — and still renames past reviews.
+// RE-AIMED 2026-10-16 (and the fault it found FIXED): since T3 round 4 item 47 the name is kept in the page's memory,
+// which is fine for this page — but the answer must still be FALSE, because "saved as your name" promises the NEXT visit.
 check(GN, "storage switched off (private window): nothing is kept on the phone, the server half still renames past reviews, and the answer is FALSE so nobody is told it was saved (item 10)", HOW, async () => {
   const g = await fresh(GN); phone.lsBlocked = true; const r = g.setGuestName("Mia", "RID"); await flush();
   const renamed = W.rpcLog.some((x) => x.fn === "lfh_rename_my_reviews");
-  return { ok: r === false && phone.ls.size === 0 && renamed && g.getGuestName() === "", note: `answered ${r}, kept nothing, rename sent ${renamed}` };
+  return { ok: r === false && phone.ls.size === 0 && renamed, note: `answered ${r}, phone keys ${phone.ls.size}, rename sent ${renamed}, this page reads "${g.getGuestName()}"` };
 });
 check(GN, "the one name is PER RESTAURANT: a name given at Aangan does not appear at Sakura Sushi", HOW, async () => { const g = await fresh(GN); g.setGuestName("Mia", "RID"); phone.path = "/r/sakura-sushi/menu"; return g.getGuestName() === ""; });
 // ── guestDevice ──

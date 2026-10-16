@@ -108,8 +108,10 @@ check(F, "…folded on the way in, so a capitalised slug is not a second restaur
 check(F, "…and folded on the way out too", HOW, async () => { const T = await fresh("/menu"); phone.ls.set("k:sakura-sushi", "X"); return T.tgetFor("k", "SAKURA-SUSHI") === "X"; });
 check(F, "…and trimmed, so a slug with spaces is the same restaurant", HOW, async () => { const T = await fresh("/menu"); T.tsetFor("k", "  aangan ", "Y"); return phone.ls.get("k:aangan") === "Y"; });
 check(F, "…and an EMPTY slug means restaurant #1 rather than a bucket called nothing", HOW, async () => { const T = await fresh("/menu"); T.tsetFor("k", "", "Z"); return phone.ls.get("k:french-house") === "Z" && !phone.ls.has("k:"); });
-check(F, "…and a blocked storage makes tsetFor a quiet no-op and tgetFor answer null", HOW, async () => {
-  const T = await fresh("/menu"); phone.lsBlocked = true; try { T.tsetFor("k", "aangan", "v"); return T.tgetFor("k", "aangan") === null; } catch { return false; }
+// RE-AIMED 2026-10-16: sweep #10 T3 round 4 item 47 keeps a refused write in the page's memory on purpose
+// (a basket must survive a full or blocked storage), so "answer null" is no longer the rule.
+check(F, "…and a blocked storage never throws: tsetFor's value is kept in the page's memory (item 47), never on the phone", HOW, async () => {
+  const T = await fresh("/menu"); phone.lsBlocked = true; try { T.tsetFor("k", "aangan", "v"); return { ok: T.tgetFor("k", "aangan") === "v" && phone.ls.size === 0, note: `${T.tgetFor("k", "aangan")} · phone keys ${phone.ls.size}` }; } catch (e) { return { ok: false, note: "threw " + e.message }; }
 });
 check(F, "isTKey(): a cross-tab storage event is recognised when it is THIS restaurant's key", HOW, async () => { const T = await fresh("/r/aangan/menu"); return T.isTKey("lfh_cart:aangan", "lfh_cart") === true; });
 check(F, "…and ignored when it belongs to another restaurant's tab", HOW, async () => { const T = await fresh("/r/aangan/menu"); return T.isTKey("lfh_cart:sakura-sushi", "lfh_cart") === false; });
