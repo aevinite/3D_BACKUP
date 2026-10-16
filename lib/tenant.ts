@@ -84,6 +84,18 @@ function slugOf(raw: string): string {
   return s.trim().toLowerCase();
 }
 
+/**
+ * The only shape a restaurant's address can have. Every writer builds it with the same cleaner
+ * (app/api/admin/restaurants → `s.toLowerCase().replace(/[^a-z0-9]+/g, "-")…slice(0, 40)`), and all 307
+ * rows on the dev database match it. Anything else names no restaurant, so it is answered "unknown"
+ * WITHOUT asking the database (sweep #10 T1, item 2's follow-up): once slugOf() decodes escapes, a
+ * `%00` in an address became a real null byte, Postgres refused the lookup (22P05 "\u0000 cannot be
+ * converted to text"), and the honest "I couldn't ask" turned a stray address into the error screen
+ * instead of the guest's "this menu isn't available". It also means a crawler's invented strings cost
+ * no round trip and are never cached.
+ */
+const SLUG_SHAPE = /^[a-z0-9-]{1,80}$/;
+
 const bySlug = new Map<string, { value: Restaurant | null; at: number }>();
 const TTL_MS = 15000;
 // How long a LAST KNOWN answer may stand in when the database won't answer. Generous on purpose:
@@ -136,6 +148,7 @@ export async function getRestaurantBySlug(slugRaw: string): Promise<Restaurant |
   // and `/r/french-house` share one entry instead of reading the database twice.
   // …and a stray percent-escape or space must not either — see slugOf() above (sweep #10 T1, item 2).
   const slug = slugOf(slugRaw);
+  if (!SLUG_SHAPE.test(slug)) return null;   // no restaurant can have this address — see SLUG_SHAPE
   const hit = bySlug.get(slug);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   sweep(bySlug, STALE_ON_ERROR_MS);
@@ -212,7 +225,7 @@ const MOVED_TTL_MS = 60_000;
  */
 export async function slugMovedTo(slugRaw: string): Promise<string | null> {
   const slug = slugOf(slugRaw);
-  if (!slug) return null;
+  if (!SLUG_SHAPE.test(slug)) return null;
   const hit = movedSlug.get(slug);
   if (hit && Date.now() - hit.at < MOVED_TTL_MS) return hit.value;
   sweep(movedSlug, MOVED_TTL_MS);

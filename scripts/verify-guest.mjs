@@ -538,6 +538,17 @@ check("P170004", "both restaurant lookups decode an address's escapes before tri
   const noRawFold = !/String\(slugRaw \|\| ""\)\.trim\(\)\.toLowerCase\(\)/.test(t);
   return { ok: helper && both && noRawFold, note: `helper decodes=${helper} used by both lookups=${both} no un-decoded fold left=${noRawFold}` };
 });
+// …AND A DECODED ADDRESS THAT NO RESTAURANT COULD HAVE NEVER REACHES THE DATABASE (sweep #10 T1, item 2). Once
+// escapes are decoded, `%00` is a real null byte, Postgres refuses it, and the lookup's honest "I couldn't ask"
+// showed the error screen. Both lookups test the address's shape first and answer "unknown" without a read.
+check("P170012", "both restaurant lookups refuse an address no restaurant can have BEFORE asking the database", () => {
+  const t = code("lib/tenant.ts") || "";
+  const shape = /const SLUG_SHAPE = \/\^\[a-z0-9-\]\{1,80\}\$\/;/.test(t);
+  const g = t.indexOf("export async function getRestaurantBySlug"), m = t.indexOf("export async function slugMovedTo");
+  const before = (from, rpc) => { const a = t.indexOf("if (!SLUG_SHAPE.test(slug)) return null;", from), b = t.indexOf(rpc, from); return a > 0 && b > a; };
+  const ok1 = before(g, '.rpc("lfh_guest_restaurant"'), ok2 = before(m, '.rpc("lfh_slug_moved"');
+  return { ok: shape && ok1 && ok2, note: `shape rule=${shape} restaurant lookup=${ok1} moved lookup=${ok2}` };
+});
 
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
@@ -718,6 +729,11 @@ async function live(base) {
       const glyphs = nodes.filter((n) => !n.ignored && n.role?.value === "link" && /[\uf000-\uf8ff]/.test(n.name?.value || "")).map((n) => n.name.value.slice(0, 30));
       check("P170011", "LIVE: no dish card's spoken name contains an icon-font glyph", () =>
         ({ ok: glyphs.length === 0, note: glyphs.join(" | ") || "none" }));
+      await c.close(); }
+    { const { c, pg, status } = await open("/r/a%00b/menu", 3000);
+      const t = await pg.evaluate(() => document.body.innerText);
+      check("P170013", "LIVE: an address carrying a null byte gets the guest's 'menu isn't available', never the error screen", () =>
+        ({ ok: status === 404 && /isn’t available|doesn’t exist/.test(t) && !/couldn’t load this/i.test(t), note: `${status} · ${t.replace(/\s+/g, " ").slice(0, 60)}` }));
       await c.close(); }
     for (const path of ["/r/zz-no-such-place-t1/menu", "/r/french-house/item/zz-no-such-dish", "/r/french-house%09/menu", "/q/ZZZZZZ", "/zz-stray-t1"]) {
       const { c, pg } = await open(path, 3500);
