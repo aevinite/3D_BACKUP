@@ -21,6 +21,7 @@ import { tget, tset, isTKey, tenantSlug } from "@/lib/tenantStorage";
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the panel
 import SessionTableBill from "@/components/SessionTableBill";
+import { keepDigits } from "@/lib/digits";
 import {
   STEPS,
   STATUS_COPY,
@@ -1112,7 +1113,7 @@ export default function CartPanel() {
                               type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4}
                               aria-label="Correct table number" autoFocus
                               value={tableDraft}
-                              onChange={(e) => setTableDraft(e.target.value.replace(/\D/g, ""))}
+                              onChange={(e) => setTableDraft(keepDigits(e.target.value))}
                               onKeyDown={(e) => { if (e.key === "Enter") saveOrderTable(o); }}
                             />
                             <button type="button" onClick={() => saveOrderTable(o)} disabled={savingTable}>
@@ -1458,7 +1459,7 @@ export default function CartPanel() {
               aria-label="Table number" value={lockedTable || tableNumber}
               maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
               // Keep only digits so letters/symbols can never reach the field.
-              onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
+              onChange={(e) => setTableNumber(keepDigits(e.target.value))}
             />
 
             {/* The bill summary: subtotal, tax, and grand total.

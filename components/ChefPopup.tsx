@@ -15,6 +15,7 @@ import { getStoredSession } from "@/lib/session";
 import { useFeatures } from "@/lib/features";
 // Phone back button: while this popup is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
+import { keepDigits } from "@/lib/digits";
 
 // ChefPopup — the little "Need something?" pop-up where a guest picks a request
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
@@ -297,8 +298,9 @@ export default function ChefPopup() {
             value={lockedTable || tableNumber}
             maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
             onChange={(e) => {
-              // Keep only digits so letters/symbols can never reach the field.
-              const v = e.target.value.replace(/\D/g, "");
+              // Keep only digits so letters/symbols can never reach the field — written 0–9 whatever script the
+              // phone's number pad types (lib/digits.ts, item 43: a ٤ or ४ used to be thrown away, not kept).
+              const v = keepDigits(e.target.value);
               setTableNumber(v);
               // Typing your table number HERE counts as telling the app where you
               // sit (owner, 2026-06-12): remember it device-wide — the same memory
