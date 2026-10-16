@@ -57,7 +57,7 @@ row("P180007", "item 1 · /unready still leaves a served dish alone (the rule it
 row("P180008", "item 1 · the panel's refused ✓ still drops its optimistic overlay and repaints", () =>
   hasRe(APPC(), /pendingReady\.delete\(id\);\s*if \(it\.status !== "served"\) it\.status = prev;/));
 row("P180009", "item 1 · the panel's refused ALL READY still drops both overlays", () =>
-  hasRe(APPC(), /pendingReadyOrders\.delete\(orderId\);\s*snap\.forEach\(\(s\) => pendingReady\.delete\(s\.id\)\);\s*toast\("Failed: " \+ e\.message\);/));
+  hasRe(APPC(), /pendingReadyOrders\.delete\(orderId\);\s*snap\.forEach\(\(s\) => pendingReady\.delete\(s\.id\)\);[\s\S]{0,500}toast\("Failed: " \+ e\.message\);/));   // item 18 restores + redraws in between
 row("P180010", "item 7 · the kitchen route takes only the kitchen's three dish statuses — 'served' is the waiter's", () =>
   hasRe(branch('if (a === "items" && c === "status")'), /if \(!\["received", "preparing", "ready"\]\.includes\(status\)\) return err\("invalid status"\);/));
 
@@ -253,4 +253,15 @@ row("P180860", "the hermetic kitchen-route suites (u-route 200 rows, u-route3 22
     if (r.status !== 0 || !tail[0] || tail[3] !== "0") bad.push(`${s}: ${tail[0] || "exit " + r.status}`);
   }
   return bad.length === 0 || bad.join(" | ");
+});
+
+// ══ ROUND 2 · ITEM 18 · a refused tap puts the screen back at once, without waiting for a board read — P180911 ══
+row("P180911", "item 18 · a refused ✓ and a refused ALL READY restore the dishes (an old-style ticket from its copy), forget the card and redraw BEFORE the read", () => {
+  const a = APPC();
+  const mi = a.slice(a.indexOf("function markItemReady("), a.indexOf("async function undoReady(")); const mic = mi.slice(mi.indexOf("}).catch("));
+  const mo = a.slice(a.indexOf("function markOrderReady("), a.indexOf("async function askWhoPrints(")); const moc = mo.slice(mo.indexOf("}).catch("));
+  const before = (s, x, y) => s.indexOf(x) >= 0 && s.indexOf(x) < s.indexOf(y);
+  return (before(mic, "render();", "refreshQuietly();") && before(mic, "forgetCardHtml(", "render();")
+    && /const legacyBefore = /.test(mo) && /if \(it && it\.status !== "served"\) it\.status = s\.prev;/.test(moc) && /lo\.items = legacyBefore/.test(moc)
+    && before(moc, "forgetCardHtml(orderId);", "render();") && before(moc, "render();", "refreshQuietly();")) || "a refusal path waits for the read again";
 });

@@ -950,6 +950,11 @@ function markItemReady(id, btn) {
     // Clearing the stamp is the whole fix: the next reconcile sees "I have no idea what this card
     // says" and repaints it from the truth. Cheap, and it cannot make anything else stale.
     forgetCardHtml(o ? o.id : it.order_id);
+    // …AND REDRAW NOW, FROM WHAT THIS SCREEN ALREADY KNOWS (sweep #10 T11 round 2, item 18). The repaint used to
+    // wait for the board read below — and when that read ALSO failed (a busy evening: exactly when refusals and
+    // failed reads come together), the dish went on saying "ready" under a "Failed" message until some later read
+    // got through, up to a minute. The data was already put back above; the screen just never drew it.
+    render();
     toast("Failed: " + e.message);
     refreshQuietly();
   });
@@ -1050,6 +1055,9 @@ function markOrderReady(orderId) {
     .filter((i) => i.order_id === orderId && i.status !== "served")
     .map((i) => ({ id: i.id, prev: i.status }));
   pendingReadyOrders.add(orderId); // legacy-order overlay so a slow-DB reconcile can't revert it
+  // An old-style ticket keeps its dishes inside the order, with no ids for `snap` to remember — so its dishes are
+  // copied here, for the refusal below to put back (item 18).
+  const legacyBefore = (() => { const lo = (state.orders || []).find((x) => x.id === orderId); return lo && Array.isArray(lo.items) ? lo.items.map((i) => ({ ...i })) : null; })();
   setLocalReady((i) => i.order_id === orderId);
   const o = (state.orders || []).find((x) => x.id === orderId);
   if (o) {
@@ -1080,6 +1088,14 @@ function markOrderReady(orderId) {
     // JSON dishes — or the very next read paints it ready again.
     pendingReadyOrders.delete(orderId);
     snap.forEach((s) => pendingReady.delete(s.id));
+    // …AND PUT THE TICKET BACK ON SCREEN NOW (sweep #10 T11 round 2, item 18). This dropped the overlays and left the
+    // rest to the board read below; when that read failed too, the whole ticket stayed in the Ready lane saying
+    // "ready — waiter serving" under a "Failed" message, with nothing recorded on the server. Restore each dish to
+    // the status it had (an old-style ticket from its copy), forget what the card says, and redraw.
+    snap.forEach((s) => { const it = (state.items || []).find((x) => x.id === s.id); if (it && it.status !== "served") it.status = s.prev; });
+    { const lo = (state.orders || []).find((x) => x.id === orderId); if (lo && legacyBefore) lo.items = legacyBefore; }
+    forgetCardHtml(orderId);
+    render();
     toast("Failed: " + e.message);
     refreshQuietly();
   });
