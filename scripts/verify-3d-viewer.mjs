@@ -245,6 +245,14 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
       "page is real. Either `if (!(await getMenuItem(...))) notFound()` or `const dish = await " +
       "getMenuItem(...); if (!dish) notFound()` satisfies this."
   );
+  // Sweep #10 T2, item 2: restaurant #1's door was the one guest door without this line, so an old
+  // QR code or shared link opened LIGHT on a restaurant whose admin had chosen dark.
+  check(
+    `${label} boots in the restaurant's DARK default before the dish paints`,
+    /\{settings\.menuDefaultMode === "dark" && \(\s*<script\s*dangerouslySetInnerHTML=\{\{\s*__html: "\(function\(\)\{try\{if\(!localStorage\.getItem\('lfh_theme'\)\)document\.documentElement\.setAttribute\('data-theme','dark'\);\}catch\(e\)\{\}\}\)\(\);",/.test(src[file]),
+    `${file} → renders outside AppShell, so it must repeat the menu's dark-default boot script, ` +
+      "byte for byte, behind `settings.menuDefaultMode === \"dark\"`."
+  );
 }
 
 // The veg/non-veg mark must mean the same thing on the grid and on the dish page.
