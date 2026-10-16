@@ -265,3 +265,12 @@ row("P180911", "item 18 · a refused ✓ and a refused ALL READY restore the dis
     && /const legacyBefore = /.test(mo) && /if \(it && it\.status !== "served"\) it\.status = s\.prev;/.test(moc) && /lo\.items = legacyBefore/.test(moc)
     && before(moc, "forgetCardHtml(orderId);", "render();") && before(moc, "render();", "refreshQuietly();")) || "a refusal path waits for the read again";
 });
+
+// ══ ROUND 2 · ITEM 19 · a queued ticket is reported done only after the print call has actually run — P180969 ══
+row("P180969", "item 19 · the queue reports a job done from printKot's onDone verdict (after the real print call), never from its set-up answer", () => {
+  const a = APPC();
+  const pj = a.slice(a.indexOf("function processPrintJobs("), a.indexOf("// ══", a.indexOf("function processPrintJobs(")));
+  const pk = a.slice(a.indexOf("function printKot("), a.indexOf("function logKotPrintFailure("));
+  return (/const started = printKot\([^;]*onDone: report \}\);/.test(pj) && /if \(!started\) report\(false\);/.test(pj) && !/const okPrint = printKot\(/.test(pj)
+    && /let printed = true;/.test(pk) && /catch \(e\) \{\s*printed = false;/.test(pk) && /told\(printed\);/.test(pk) && pk.indexOf("told(printed);") > pk.indexOf("try { w.print(); }")) || "the job is reported before the print call runs again";
+});

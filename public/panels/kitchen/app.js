@@ -1556,15 +1556,22 @@ function printKot(order, itemRows, restaurant, opts) {
       // unfocused. Chrome — the only browser a print station runs, and the one this guide sets up —
       // prints the frame either way. So: print WITHOUT touching focus, and keep the old behaviour as a
       // FALLBACK for the one case that justified it, a print() that actually threw.
+      // `opts.onDone(ok)` is told how the print call ACTUALLY went (sweep #10 T11 round 2, item 19) — the queue
+      // reports a job done only once it knows, because `return true` below means "the paper was set up", not
+      // "it came out".
+      const told = (ok) => { try { if (opts && typeof opts.onDone === "function") opts.onDone(ok); } catch (_e) {} };
+      let printed = true;   // …unless BOTH attempts below throw
       try { w.print(); }
       catch (e1) {
         try { w.focus(); w.print(); }
         catch (e) {
+          printed = false;
           try { if (order && order.id != null) { printedIds.delete(order.id); savePrintedIds(); } } catch (_e) {}
           try { logKotPrintFailure(e); } catch (_e) {}
           try { notePrintTrouble(); } catch (_e) {}
         }
       }
+      told(printed);
       setTimeout(cleanup, 60000);
     }, 250);
     return true;
@@ -1684,15 +1691,23 @@ function processPrintJobs(jobs) {
       // marks a job we already tried once — if the first attempt did reach the printer after all,
       // the second sheet is a duplicate, and the one thing worse than two tickets on the rail is
       // two tickets on the rail that both look original (the reason the banner exists, 2026-08-04).
-      const okPrint = printKot(j.order, j.items || [], state.restaurant, { reprint: j.reprint !== false || (j.attempts || 0) > 0 });
-      // Remember the ORDER as printed, not just the job: the self-healing net below (autoPrintNet)
-      // and the manual 🖨 button both read printedIds, and without this a queue-printed ticket would
-      // look unprinted to them.
-      if (okPrint && j.order && j.order.id) { printedIds.add(j.order.id); savePrintedIds(); }
-      if (!okPrint) notePrintTrouble();
-      api("POST", `/print-jobs/${j.id}/done`, { ok: okPrint, error: okPrint ? undefined : "print call failed on the kitchen screen" })
-        .catch(() => {})
-        .finally(() => jobsInFlight.delete(j.id));
+      // REPORT WHAT ACTUALLY HAPPENED, ONCE IT HAS HAPPENED (sweep #10 T11 round 2, item 19). printKot() returns as
+      // soon as the paper is SET UP; the print call itself runs 250 ms later. This used to report `done { ok: true }`
+      // on that first answer — so when the print call then failed, the screen un-recorded the ticket and warned the
+      // cook, but the server had already closed the job and never offered it again: the ticket was simply lost,
+      // which is the one thing a queue exists to stop. Now the report waits for printKot's own verdict.
+      const report = (okPrint) => {
+        // Remember the ORDER as printed, not just the job: the self-healing net below (autoPrintNet)
+        // and the manual 🖨 button both read printedIds, and without this a queue-printed ticket would
+        // look unprinted to them.
+        if (okPrint && j.order && j.order.id) { printedIds.add(j.order.id); savePrintedIds(); }
+        if (!okPrint) notePrintTrouble();
+        api("POST", `/print-jobs/${j.id}/done`, { ok: okPrint, error: okPrint ? undefined : "print call failed on the kitchen screen" })
+          .catch(() => {})
+          .finally(() => jobsInFlight.delete(j.id));
+      };
+      const started = printKot(j.order, j.items || [], state.restaurant, { reprint: j.reprint !== false || (j.attempts || 0) > 0, onDone: report });
+      if (!started) report(false);   // the paper could not even be set up — no verdict is coming
       if (i < mine.length) setTimeout(step, 400);
     };
     step();
