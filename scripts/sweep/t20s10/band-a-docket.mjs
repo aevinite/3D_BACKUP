@@ -13,7 +13,7 @@
 // all-restaurants view. Each tile is closed a DIFFERENT way in turn (Escape, ✕, the backdrop, the
 // phone's BACK), so every setup proves all four ways out.
 import { openWith, closeBrowser } from "../t13/r2lib.mjs";
-import { chk, report, BASE, junk } from "./lib.mjs";
+import { chk, report, junk } from "./lib.mjs";
 
 const TD = "components/owner/TileDocket.tsx", PG = "app/owner/page.tsx";
 const SETUPS = [
