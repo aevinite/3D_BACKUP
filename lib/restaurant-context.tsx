@@ -180,11 +180,15 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
     // ONE rule, shared with the tenant-scoped storage the same widgets read from:
     //   /r/<slug>/…      → that slug (and the tab is pinned to it)
     //   /menu, /item/…   → restaurant #1, by definition
+    //   the dead-QR page → "" — no restaurant at all
     //   anything else    → the tenant this TAB was pinned to (the printed-QR door), else #1
     // Read inside the effect, never during render: it touches sessionStorage, which does not
     // exist on the server.
     const s = tenantSlug();
     setSlug(s);
+    // "" = the dead-QR page (lib/tenantStorage.ts → NO_TENANT_KEY): no restaurant, so no lookup, no
+    // retry, no toast — the same answer as a slug nobody owns, below, reached without asking.
+    if (!s) { setId(""); setReady(false); return; }
     if (s === DEFAULT_RESTAURANT_SLUG) { setId(DEFAULT_RESTAURANT_ID); setReady(true); return; }
     setReady(false);
     // Named, because the retry above has to be able to call it again. Identical body to before.

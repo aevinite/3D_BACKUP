@@ -1334,6 +1334,28 @@ flush();
   const rf = (gate.match(/const retryFlow = async \(\) => \{[\s\S]*?\n {2}\};/) || [""])[0];
   check("item — a Retry that cannot tell which restaurant this is says 'unknown', never the last screen's fault", /if \(!rid\) \{\s*setNetFault\("unknown"\);/.test(rf));
 }
+// ── 19. A QR CODE THAT MATCHES NOTHING BELONGS TO NO RESTAURANT (owner, 2026-10-16: "do the qr one") ──
+// §18's fault through the third door. /q/<a code nobody owns> renders GuestNotFound with no /r/<slug> in
+// its path, so the guest widgets fell back to the tab's pin — and a tab with none, to French House — and
+// asked the database about French House's settings, ban list and customer greeting. The dead-code page now
+// stamps its own address as "no restaurant"; tenantSlug() answers "" there; the context asks nothing.
+{
+  say("\n── 19. a QR code that matches nothing belongs to no restaurant (sweep #10 T4, 2026-10-16) ──");
+  const q = codeOnly(read("app/q/[code]/page.tsx"));
+  const ts = codeOnly(read("lib/tenantStorage.ts"));
+  const cx = codeOnly(read("lib/restaurant-context.tsx"));
+  const dead = (q.match(/if \(!hit\) \{[\s\S]*?\n {2}\}/) || [""])[0];
+  check("item — the dead-code page stamps its own address as \"no restaurant\" before hydration",
+    /sessionStorage\.setItem\(\$\{JSON\.stringify\(NO_TENANT_KEY\)\},location\.pathname\)/.test(dead) && /<GuestNotFound variant="qr" \/>/.test(dead));
+  check("item — …and a live code clears that mark as it pins its restaurant (a code can come back to life)",
+    /setItem\("lfh_tab_tenant",\$\{JSON\.stringify\(hit\.slug\)\}\);sessionStorage\.removeItem\(\$\{JSON\.stringify\(NO_TENANT_KEY\)\}\)/.test(q));
+  check("item — the key the page writes is the one lib/tenantStorage reads", /import \{ NO_TENANT_KEY \} from "@\/lib\/tenantStorage"/.test(q) && /export const NO_TENANT_KEY = "lfh_tab_no_tenant";/.test(ts));
+  const fallback = ts.slice(ts.indexOf("export function tenantSlug"), ts.indexOf("export function tkey"));
+  check("item — on exactly that address the tab belongs to nobody (\"\"), checked BEFORE the tab's pin and #1",
+    /if \(sessionStorage\.getItem\(NO_TENANT_KEY\) === path\) return "";[\s\S]*getItem\(LAST_SLUG_KEY\) \|\| DEFAULT_RESTAURANT_SLUG/.test(fallback));
+  check("item — the restaurant context answers no restaurant for \"\" without asking anybody",
+    /const s = tenantSlug\(\);\s*setSlug\(s\);\s*if \(!s\) \{ setId\(""\); setReady\(false\); return; \}\s*if \(s === DEFAULT_RESTAURANT_SLUG\)/.test(cx));
+}
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //
 // `flush()` prints `out.slice(printed)` and there were two calls, the last at the end of section 9

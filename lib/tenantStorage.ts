@@ -20,10 +20,26 @@ import { DEFAULT_RESTAURANT_SLUG } from "./tenant";
 // — on those we keep using the tenant the tab came from instead of guessing.
 const LAST_SLUG_KEY = "lfh_tab_tenant";
 
+// ── A QR CODE THAT MATCHES NOTHING BELONGS TO NO RESTAURANT (owner, 2026-10-16: "do the qr one") ──
+// app/q/[code] renders GuestNotFound for a code nobody owns — a sticker that was replaced, a typo, a
+// restaurant whose menu is switched off. That page has no /r/<slug> in its path, so the rule below
+// fell through to the tab's pin, and a tab with no pin to "french-house": every guest widget in the
+// root layout then asked the database about FRENCH HOUSE — its settings, its ban list, and the
+// returning-customer greeting — on a page that is about nobody. The same fault round 2 fixed for
+// `/r/<a slug nobody owns>/menu` (lib/restaurant-context.tsx), reached through the third door.
+//
+// So the dead-code page stamps THIS key with its own address before hydration, and while the tab
+// stands on exactly that address the answer is "" — no restaurant: storage scoped to nobody, and
+// the restaurant context asks nothing. Keyed to the ADDRESS, not set-and-forget, so the tab's real
+// pin is untouched and any other page in the tab is unaffected. A live code clears it (the same
+// code can come back to life when a restaurant switches its menu back on). Guard: verify:guest-doors §19.
+export const NO_TENANT_KEY = "lfh_tab_no_tenant";
+
 // Which restaurant does this tab belong to RIGHT NOW?
 //  - /r/<slug>/...            → that slug (and we remember it for this tab)
 //  - bare /menu, /item/...    → restaurant #1 (these paths ARE #1 by definition —
 //                               same rule as lib/restaurant-context.tsx)
+//  - the dead-QR page         → "" — no restaurant (see NO_TENANT_KEY above)
 //  - anything else (/view/..) → the slug this tab last visited, else #1
 export function tenantSlug(): string {
   if (typeof window === "undefined") return DEFAULT_RESTAURANT_SLUG;
@@ -61,6 +77,7 @@ export function tenantSlug(): string {
     try { sessionStorage.setItem(LAST_SLUG_KEY, DEFAULT_RESTAURANT_SLUG); } catch {}
     return DEFAULT_RESTAURANT_SLUG;
   }
+  try { if (sessionStorage.getItem(NO_TENANT_KEY) === path) return ""; } catch { /* refused — fall through */ }
   try { return sessionStorage.getItem(LAST_SLUG_KEY) || DEFAULT_RESTAURANT_SLUG; } catch { return DEFAULT_RESTAURANT_SLUG; }
 }
 
