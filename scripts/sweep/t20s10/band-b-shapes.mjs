@@ -11,7 +11,7 @@ import { openWith, closeBrowser, patchJson, refuse, fail500, setRange } from "..
 import { chk, report, junk } from "./lib.mjs";
 
 const PG = "app/owner/page.tsx", TD = "components/owner/TileDocket.tsx";
-const MULTI = { username: "diagmulti", password: "diag-multi-2026" };
+const MULTI = { username: "diagmulti", password: "diag-multi-2026", route: "/owner" };
 const FH = "00000000-0000-0000-0000-000000000001";
 const settle = async (pg) => {
   await pg.waitForSelector(".ow2-stats5", { timeout: 60000 });

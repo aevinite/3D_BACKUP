@@ -9,7 +9,7 @@ import { openWith, closeBrowser, setRange, screenText } from "../t13/r2lib.mjs";
 import { chk, report, junk } from "./lib.mjs";
 
 const PG = "app/owner/page.tsx", AN = "components/owner/AnimatedNumber.tsx";
-const MULTI = { username: "diagmulti", password: "diag-multi-2026" };
+const MULTI = { username: "diagmulti", password: "diag-multi-2026", route: "/owner" };
 const ready = async (pg) => {
   await pg.waitForSelector(".ow2-stats5", { timeout: 60000 });
   await pg.waitForFunction(() => document.querySelectorAll(".anim-skel").length === 0 && !/Loading…/.test(document.querySelector(".adm-main")?.innerText || ""), null, { timeout: 90000 }).catch(() => {});

@@ -20,7 +20,7 @@ const SETUPS = [
   { name: "desktop 1280 dark", width: 1280, height: 800, skin: "dark" },
   { name: "desktop 1280 light", width: 1280, height: 800, skin: "light" },
   { name: "A35 phone 360 dark", width: 360, height: 780, skin: "dark", mobile: true },
-  { name: "iPad 1194 light, two restaurants", width: 1194, height: 834, skin: "light", creds: { username: "diagmulti", password: "diag-multi-2026" } },
+  { name: "iPad 1194 light, two restaurants", width: 1194, height: 834, skin: "light", creds: { username: "diagmulti", password: "diag-multi-2026", route: "/owner" } },
 ];
 const TILES = ["Revenue", "Orders", "Today so far", "Expenses", "On hand"];
 const CLOSERS = ["Escape", "✕", "backdrop", "BACK"];
