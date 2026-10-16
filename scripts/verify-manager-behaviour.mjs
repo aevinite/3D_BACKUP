@@ -533,7 +533,37 @@ async function functionAsCondition() {
     : bad("the ✎ Edit toggle no longer asks whether a ticket is waiting", "it would ask about the kitchen and then unlock nothing");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition];
+// ── M · EVERY ✕ CANCEL THE TABLE POPUP OFFERS IS ONE THE SERVER WILL ACCEPT (sweep #10 T7, 2026-10-16)
+// The waiting ticket's ✕ Cancel asked "served? on the printed bill?" but not "paid?", while the
+// editor route refuses to cancel a paid order — and 💳 Mark all paid settles a ticket that is still
+// waiting. So a paid waiting ticket wore a ✕ that could only be refused. Both of the popup's cancel
+// offers (the waiting box's cancelBtn and the dish sheet's canCancel) are run here with stand-ins
+// for what they close over, and must refuse a paid ticket and offer an ordinary one.
+async function cancelOffers() {
+  console.log("\nM. every ✕ Cancel the table popup offers is one the server will accept");
+  const app = src("public/panels/editor/app.js");
+  const route = src("app/api/editor/[...path]/route.ts");
+  /patch\.status === "cancelled" && cur\.payment_status === "paid"/.test(route)
+    ? ok("the server still refuses to cancel a paid order — the rule both offers must match")
+    : bad("the server's paid-order refusal moved — re-point this check");
+  const grab = (re, label) => { const m = app.match(re); if (!m) { bad(`${label} is gone — re-point this check`); return null; } return m[1]; };
+  const cb = grab(/const cancelBtn = (\(o\) => \(\([^\n]*?\) \? "" : `)/, "the waiting box's cancelBtn");
+  const cc = grab(/const canCancel = (\(p\) => \{[^\n]*?\};)/, "the dish sheet's canCancel");
+  if (!cb || !cc) return;
+  const anyServed = (o) => !!o.served, invoiceLocksOrder = () => false, sess = {};
+  const offer = new Function("anyServed", "invoiceLocksOrder", "sess", `return ${cb}x\`);`)(anyServed, invoiceLocksOrder, sess);
+  const paid = { id: "a", payment_status: "paid" }, open = { id: "b", payment_status: "pending" };
+  offer(paid) === "" && offer(open) !== ""
+    ? ok("the waiting ticket's ✕ Cancel is not offered on a paid ticket, and is on an unpaid one")
+    : bad("the waiting ticket's ✕ Cancel is offered on a PAID ticket — the server can only refuse it");
+  const liveOrders = [paid, open];
+  const can = new Function("liveOrders", "anyServed", "invoiceLocksOrder", "sess", `return ${cc.replace(/;$/, "")};`)(liveOrders, anyServed, invoiceLocksOrder, sess);
+  !can({ _oid: "a" }) && can({ _oid: "b" })
+    ? ok("…and the dish sheet's ✕ Cancel ticket agrees")
+    : bad("the dish sheet's ✕ Cancel ticket disagrees with the server about a paid ticket");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

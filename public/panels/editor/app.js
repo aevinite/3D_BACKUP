@@ -12225,7 +12225,12 @@ function tablePanelParts(t, host = "float") {
     // sale on the books. The server refuses it as well (invoiceLockedByOrder in the editor route);
     // this only stops offering a button that would be refused, because hiding is never the guard.
     // A VOIDED invoice does not lock: that bill was reopened on purpose.
-    const cancelBtn = (o) => ((anyServed(o) || invoiceLocksOrder(sess, o)) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
+    // NOR A PAID TICKET (sweep #10 T7, item 2). The server refuses it ("Can't cancel a paid order —
+    // mark it unpaid (refund) first.", the editor route's status PATCH), and 💳 Mark all paid settles
+    // every unpaid ticket on the table INCLUDING one still waiting to be accepted — so a paid
+    // ticket in the waiting box is an ordinary state, and it wore a ✕ Cancel that could only ever be
+    // refused. The dish sheet's own canCancel already asked this; the two now agree.
+    const cancelBtn = (o) => ((anyServed(o) || invoiceLocksOrder(sess, o) || o.payment_status === "paid") ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
     // ── THE WAITING TICKET, IN ONE LINE (owner, 2026-09-17) ───────────────────────────────────
     // An un-accepted order used to be a card with its own dish rows, its own head and its own
     // foot — three lines of furniture before you read a dish. It is now one line: when it came,
