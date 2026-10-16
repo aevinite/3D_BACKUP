@@ -56,7 +56,13 @@
       if (over <= 1) break;
       var w = el.getBoundingClientRect().width || 1;
       var cur = parseFloat(cs.fontSize) || 16; // cs is live — reads the current size
-      var next = Math.max(MIN_PX, Math.floor(cur * ((w - over) / w) * 10) / 10);
+      // A PURE-TEXT FIGURE SHRINKS BY ITS OWN RATIO (sweep #10 T16 round 3, item 33). The delta rule
+      // above is for a box with fixed-size decorations; on a figure more than twice its box's width
+      // it goes NEGATIVE and dropped the figure straight to the 11 px floor — measured: "1,234 covers"
+      // in a 100 px box at 40 px became 11 px where ~13 px fits, the exact fault of 2026-08-15. With
+      // no decorations (no child elements) the width ratio is the right answer and cannot overshoot.
+      var factor = el.childElementCount === 0 ? el.clientWidth / el.scrollWidth : (w - over) / w;
+      var next = Math.max(MIN_PX, Math.floor(cur * factor * 10) / 10);
       // `break`, for the same reason as the `over <= 1` line above — and this one was still a
       // `return` (sweep #8 T12, 2026-09-04). It fires when the figure's OWN font is already at or
       // under the 11px floor, so there is no shrinking left to do: exactly the moment the tail
