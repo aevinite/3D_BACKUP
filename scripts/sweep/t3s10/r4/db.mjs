@@ -11,15 +11,18 @@ const REF = (URL_.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/) || [])[1];
 if (REF !== "wnsfcizclkbobwzcxqsf") { console.error("db.mjs: .env.local is not the dev project — refusing to run"); process.exit(2); }
 const KEY = env.SUPABASE_SERVICE_ROLE_KEY, TOKEN = env.SUPABASE_ACCESS_TOKEN;
 export const ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// The Management API answers 429 when a run asks too fast (area B sends ~200 queries in a few minutes): wait
+// 2, 4, 8, 16, 30, 30, 30 s — about two minutes in all — before calling it unanswered.
+const pause = (k) => new Promise((s) => setTimeout(s, Math.min(30_000, 2000 * 2 ** k)));
 export async function sql(query) {
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < 8; k++) {
     const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ query }) });
     const t = await r.text();
-    if (r.status === 429 || r.status >= 500) { await new Promise((s) => setTimeout(s, 1500 * (k + 1))); continue; }
+    if (r.status === 429 || r.status >= 500) { await pause(k); continue; }
     if (!r.ok) throw new Error(`sql ${r.status}: ${t.slice(0, 300)}`);
     return JSON.parse(t);
   }
-  throw new Error("sql: the database did not answer after 4 tries");
+  throw new Error("sql: the database did not answer after 8 tries");
 }
 export async function rest(path, { method = "GET", body, prefer } = {}) {
   const r = await fetch(`${URL_}/rest/v1/${path}`, { method, headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "content-type": "application/json", ...(prefer ? { Prefer: prefer } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -47,15 +50,15 @@ export async function inTxPrep(prep, call, read = "") {
     ${read}
     RAISE EXCEPTION 'R4:%', json_build_object('r', r, 'x', x)::text;
   END $r4$;`;
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < 8; k++) {
     const res = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ query: q }) });
     const t = await res.text();
-    if (res.status === 429 || res.status >= 500) { await new Promise((s) => setTimeout(s, 1500 * (k + 1))); continue; }
+    if (res.status === 429 || res.status >= 500) { await pause(k); continue; }
     let msg = t; try { msg = JSON.parse(t).message || t; } catch { /* raw */ }
     const m = msg.match(/R4:(\{[\s\S]*\})/);
     if (!m) throw new Error(`inTx: no result in ${msg.slice(0, 300)}`);
     return JSON.parse(m[1]);
   }
-  throw new Error("inTx: the database did not answer after 4 tries");
+  throw new Error("inTx: the database did not answer after 8 tries");
 }
 export const lit = (v) => v === null || v === undefined ? "NULL" : `'${String(v).replace(/'/g, "''")}'`;
