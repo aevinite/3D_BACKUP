@@ -381,7 +381,12 @@ dateBad.length === 0
     ["a restaurant with a GSTIN", { ...SET, gstin: "24ABCDE1234F1Z5" }, null, "Tax Invoice"],
     ["a restaurant with NO GSTIN", { ...SET }, null, "Bill"],
     ["a GSTIN of only spaces", { ...SET, gstin: "   " }, null, "Bill"],
-    ["a composition restaurant", { ...SET, price_tax_mode: "composition" }, null, "Bill of Supply"],
+    // RE-STATED 2026-10-16 (item 13): the paper is named by what the bill CHARGED. A composition bill
+    // charged nothing → Bill of Supply; a bill charged 5% before the move to composition keeps its tax and
+    // is named as a taxed bill (no GSTIN in this set-up → "Bill").
+    ["a composition restaurant", { ...SET, price_tax_mode: "composition" },
+      [{ ...os[0], tax_rate: 0, taxable_base: 0, nontax_amount: 250, items: [{ title: "Salad", qty: 1, price: 250, tax_mode: "exempt" }] }], "Bill of Supply"],
+    ["a bill charged 5% before its restaurant moved to composition", { ...SET, price_tax_mode: "composition" }, null, "Bill"],
     ["a cancelled sale", { ...SET, gstin: "24ABCDE1234F1Z5" },
       [{ ...os[0], status: "cancelled" }], "Cancelled Bill"],
   ];
@@ -984,6 +989,17 @@ dateBad.length === 0
   wrong.length
     ? bad("a restaurant with no GSTIN can still be charged or shown tax", wrong.join(" · "))
     : ok("a restaurant with no GSTIN charges no tax — on the bill, on a banquet, and in the guest's cart; an older bill keeps what it charged");
+}
+
+/* ── A BILL KEEPS THE TAX IT CHARGED, WHATEVER THE SCHEME IS TODAY (item 13, 2026-10-16) ── */
+{
+  const os = [{ status: "served", subtotal: 1000, taxable_base: 1000, tax_rate: 0.05, items: [{ title: "Thali", qty: 1, price: 1000 }] }];
+  const h = BILLDOC.billDocHtml(BILLDOC.billData({ orders: os, settings: { price_tax_mode: "composition", gstin: "24AAAAA0000A1Z5" } }));
+  const ro = (h.match(/Round off<\/span><span>[^<]*/) || [""])[0];
+  const fresh = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [{ status: "served", subtotal: 1000, taxable_base: 0, nontax_amount: 1000, items: [{ title: "Thali", qty: 1, price: 1000, tax_mode: "exempt" }] }], settings: { price_tax_mode: "composition", gstin: "24AAAAA0000A1Z5" } }));
+  (/CGST 2\.5%/.test(h) && !ro && !/Bill of Supply/.test(h) && /TOTAL<\/span><span>₹1,050</.test(h) && /Bill of Supply/.test(fresh))
+    ? ok("a bill charged 5% and reprinted after a move to the composition scheme still shows its tax — and a new composition bill is still a Bill of Supply")
+    : bad("a reprint hides the tax it charged behind today's scheme", `heading ${(h.match(/class="kind">([^<]+)/) || [])[1]} · ${ro || "no round-off"} · fresh ${(fresh.match(/class="kind">([^<]+)/) || [])[1]}`);
 }
 
 console.log(fails

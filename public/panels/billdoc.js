@@ -1663,7 +1663,12 @@
       taxComponents: compsMatch ? tm.components : [],
       taxableBase: taxableBase, nontax: nontax, mrpAmount: mrpAmount,
       discountBase: discountBase, discountFixed: discountFixed, hasMrp: hasMrp,
-      composition: tm.composition,
+      // A BILL IS A BILL OF SUPPLY ONLY IF IT CHARGED NO TAX (item 13, owner 2026-10-16: "do all that").
+      // This was today's setting alone, so a bill charged 5% (stamped, mig 284) and reprinted after the
+      // restaurant moved to the composition scheme came out headed "Bill of Supply" with its real GST
+      // hidden in a "Round off" (₹177 on a ₹5,129 bill, measured in sweep #10 T14). What the bill
+      // CHARGED decides what the paper says, the same way the stamped rate already decides the money.
+      composition: tm.composition && !(tax > 0),
       // NEW (2026-08-05), all zero/false on an ordinary bill so nothing renders differently:
       grossTaxed: grossTaxed,        // what the taxed ITEM ROWS add up to
       taxInside: taxInside,          // the part of `tax` already inside those prices
