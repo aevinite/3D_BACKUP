@@ -400,6 +400,10 @@
       : "Nothing is lost. These will send themselves as soon as there's internet."));
     hd.appendChild(wrap);
     var x = el("button", "lfh-off-x", "✕"); x.type = "button";
+    // A NAME A SCREEN READER CAN SAY (sweep #10 T16 round 3, item 27). "✕" alone is read out as a
+    // symbol, or not at all — the undo card, Report an issue and the Settings drawer already said
+    // "Close"/"Dismiss"; this one did not. Guard: R3-D (scripts/t16r3/fd-access.mjs).
+    x.setAttribute("aria-label", "Close");
     x.addEventListener("click", closeSheet);
     hd.appendChild(x);
     body.appendChild(hd);
