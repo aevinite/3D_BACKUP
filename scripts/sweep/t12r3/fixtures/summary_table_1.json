@@ -1,0 +1,37 @@
+{
+ "url": "/api/tablet/summary?table=1",
+ "status": 200,
+ "body": {
+  "tiles": {
+   "1": {
+    "due": 0,
+    "pay": "",
+    "tag": "",
+    "meta": "waiting for guests",
+    "reqs": 0,
+    "calls": 0,
+    "label": "Open",
+    "state": "waiting",
+    "counts": {
+     "ck": 0,
+     "nw": 0,
+     "rd": 0,
+     "sv": 0
+    },
+    "hasNew": false,
+    "hasReq": false,
+    "hasCall": false,
+    "hasJoin": false,
+    "members": 0,
+    "pending": 0
+   }
+  },
+  "order_count": 0,
+  "latest_order_table": "4",
+  "calls": [],
+  "requests": [],
+  "joiners": [],
+  "blocklist": [],
+  "merges": []
+ }
+}

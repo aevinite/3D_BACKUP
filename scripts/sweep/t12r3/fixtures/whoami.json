@@ -1,0 +1,10 @@
+{
+ "url": "/api/tablet/whoami",
+ "status": 200,
+ "body": {
+  "actor": "tablet",
+  "higherView": false,
+  "simulated": false,
+  "asName": null
+ }
+}

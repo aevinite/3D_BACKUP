@@ -1,0 +1,7 @@
+{
+ "url": "/api/tablet/banquet-items",
+ "status": 200,
+ "body": {
+  "items": []
+ }
+}

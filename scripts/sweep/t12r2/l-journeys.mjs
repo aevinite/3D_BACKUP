@@ -349,9 +349,18 @@ export async function blockL(R, firstId) {
       await sleep(2000);
       const seen = [];
       page.on("request", (q) => { if (q.url().includes("/api/")) seen.push(q.url().replace(BASE, "")); });
+      const ev0 = await page.evaluate(() => (window.__lfh_rt && window.__lfh_rt.events) || 0);
       await sleep(65000);
       const reads = seen.filter((u) => /\/api\/tablet\/(summary|state)/.test(u));
-      await check(id(), F_APP, "an idle tablet on a live connection reads the floor at most about once a minute", LV + " (65s watched)", async () => ok(reads.length <= 2, `${reads.length} floor read(s): ${reads.slice(0, 3).join(", ")}`));
+      // "IDLE" MEANS NOTHING HAPPENED ON THE FLOOR (round 3, 2026-10-16). French House is shared with
+      // other terminals' runs; when one of them orders at table 1, the tablet is RIGHT to re-read table
+      // 1 (`summary?table=1`) — that is the per-table refetch the egress rules ask for, not idle traffic.
+      // Round 3's re-run went red on exactly that (7 reads, two of them `?table=1` during someone else's
+      // order). So a one-table read is allowed while realtime delivered events; everything else must fit
+      // the 60-second backstop.
+      const ev = (await page.evaluate(() => (window.__lfh_rt && window.__lfh_rt.events) || 0)) - ev0;
+      const unexplained = reads.filter((u) => !(ev > 0 && /\/summary\?(?:[^#]*&)?table=/.test(u)));
+      await check(id(), F_APP, "an idle tablet on a live connection reads the floor at most about once a minute", LV + " (65s watched)", async () => ok(unexplained.length <= 2, `${reads.length} floor read(s), ${ev} live event(s), ${unexplained.length} not caused by an event: ${unexplained.slice(0, 3).join(", ")}`));
       await check(id(), F_APP, "…and never re-downloads the whole dish list while idle", LV + " (65s watched)", async () => ok(!reads.some((u) => /\/summary(\?|$)(?!.*nomenu)/.test(u) && !/nomenu=1/.test(u) && !/table=/.test(u)), reads.join(", ").slice(0, 160)));
       seen.length = 0;
       await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
