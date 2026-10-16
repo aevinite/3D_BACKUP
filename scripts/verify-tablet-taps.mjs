@@ -1631,6 +1631,16 @@ check(
   );
 }
 
+// ── THE GUEST BELL KEEPS TO THE WAITER'S SECTION (sweep #10 T12 round 3, item 9) ─────────────────────
+{
+  const i = src.indexOf("function syncGuestBell("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: the guest bell lists calls from the waiter's own section only (the floor's rule)",
+    /const mine = new Set\(floorTableList\(\)\.filter\(\(t\) => inMySection\(t\)\)\.map\(String\)\);/.test(body),
+    `${TABLET} syncGuestBell: floorTableList() is the whole restaurant — filter it through inMySection like passesFilter does.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

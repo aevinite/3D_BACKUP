@@ -171,7 +171,7 @@ export async function blockE(R = makeRunner("T12 · block E · across panels, tw
     ok(/two edges are both under 1150px — a phone either way up, an iPad held upright — draws FOUR per row/.test(read(F_APP))));
   await check("P181198", F_APP, "the waiter's ⚡ and the manager's Quick order are the same two-step shape (build first, table last)", J, () => ok(/build the order FIRST,\s*\n?\s*\/\/ pick the table LAST/.test(app)));
   await check("P181199", F_HTML, "the shell's loading block is announced to a screen reader (role=status, aria-live)", J, () => ok(/role="status" aria-live="polite"/.test(read(F_HTML))));
-  await check("P181200", F_APP, "a waiter's own notification bell reads only their own section's tables", J, () => ok(/const mine = new Set\(floorTableList\(\)\.map\(String\)\);/.test(app) && /if \(!mine\.has\(t\)\) continue;/.test(app)));
+  await check("P181200", F_APP, "a waiter's own notification bell reads only their own section's tables", J, () => ok(/const mine = new Set\(floorTableList\(\)\.filter\(\(t\) => inMySection\(t\)\)\.map\(String\)\);/.test(app) && /if \(!mine\.has\(t\)\) continue;/.test(app)));   // round 3: the section filter (item 9); P213939 drives it
   return R;
 }
 

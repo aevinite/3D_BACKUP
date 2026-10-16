@@ -1614,7 +1614,11 @@ function syncGuestBell() {
     // Guest menu off for this restaurant → no bell at all. Not a zero, not a greyed button.
     if (s.menu_enabled === false) { window.LFH_BELL.sync({ menuOn: false, rows: [], onOpen: null }); return; }
     const at = (v) => { const t = v ? new Date(v).getTime() : 0; return Number.isFinite(t) ? t : 0; };
-    const mine = new Set(floorTableList().map(String));
+    // …THROUGH THE SECTION, LIKE THE FLOOR (sweep #10 T12 round 3, item 9). floorTableList() is every
+    // table the restaurant draws; the floor shows a sectioned waiter only `passesFilter` → inMySection.
+    // Read alone, the bell listed — and buzzed for — calls at other waiters' tables, the very thing
+    // the note above says it must not. Round 1's check matched this line's TEXT and passed over it.
+    const mine = new Set(floorTableList().filter((t) => inMySection(t)).map(String));
     const rows = [];
     for (const c of (state.summary.calls || [])) {
       if (!c || c.resolved) continue;
