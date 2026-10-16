@@ -236,11 +236,19 @@ check("P62267","no panel is left on an older copy of a shared file",()=>{
 });
 check("P62268","the stylesheet is loaded BEFORE any script that measures layout",()=>loadsBefore("/panels/editor/style.css","/panels/editor/app.js"));
 check("P62269","…and before the icon font, so the panel's own rules win the cascade",()=>H.indexOf("/panels/vendor/fa/css/all.min.css")<H.indexOf("/panels/editor/style.css"));
-check("P62270","the panel's stylesheet is the LAST stylesheet, so nothing overrides it",()=>{
+// RE-STATED 2026-10-16 (sweep #10 T14): since 2026-09-06 the customer sheet ("Who is this bill for?") has its
+// own stylesheet, linked AFTER the panel's — /panels/billcustomer.css, shared with the waiter tablet. It
+// cannot override the panel: every rule in it is scoped to its own bcust-/bc- classes (verify:shared-panel-
+// styles holds that). So the question these two rows ask is now "nothing that could override the panel
+// comes after it" and "exactly the three sheets the panel needs".
+check("P62270","nothing that could override the panel's stylesheet loads after it",()=>{
   const sheets=[...H.matchAll(/<link rel="stylesheet" href="([^"?]+)/g)].map(m=>m[1]);
-  return sheets[sheets.length-1]==="/panels/editor/style.css"||`the last sheet is ${sheets[sheets.length-1]}`;
+  const after=sheets.slice(sheets.indexOf("/panels/editor/style.css")+1);
+  const css=fs.readFileSync(path.join(ROOT,"public/panels/billcustomer.css"),"utf8").replace(/\/\*[\s\S]*?\*\//g,"").replace(/@media[^{]*\{/g,"");
+  const own=[...css.matchAll(/([^{}]+)\{/g)].flatMap(m=>m[1].split(",").map(x=>x.trim())).filter(Boolean).every(x=>/^\.(bcust|bc)-/.test(x));
+  return (after.every(x=>x==="/panels/billcustomer.css") && own) || `after the panel's sheet: ${after.join(", ")}${own?"":" — and it styles classes outside its own sheet"}`;
 });
-check("P62271","exactly two stylesheets are loaded",()=>eq(countOf(H,/<link rel="stylesheet"/g),2));
+check("P62271","exactly three stylesheets are loaded — the icon font, the panel's, and the customer sheet's",()=>eq(countOf(H,/<link rel="stylesheet"/g),3));
 check("P62272","nothing in the manifest is fetched from the app's Next.js build",()=>hasNot(H,/_next/));
 check("P62273","the manifest names no file that only exists in another panel's folder",()=>{
   const bad=SCRIPTS.filter(s=>/\/panels\/(?:kitchen|tablet)\//.test(s));
