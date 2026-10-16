@@ -245,12 +245,77 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
       "page is real. Either `if (!(await getMenuItem(...))) notFound()` or `const dish = await " +
       "getMenuItem(...); if (!dish) notFound()` satisfies this."
   );
+  // Sweep #10 T2, item 2: restaurant #1's door was the one guest door without this line, so an old
+  // QR code or shared link opened LIGHT on a restaurant whose admin had chosen dark.
+  check(
+    `${label} boots in the restaurant's DARK default before the dish paints`,
+    /\{settings\.menuDefaultMode === "dark" && \(\s*<script\s*dangerouslySetInnerHTML=\{\{\s*__html: "\(function\(\)\{try\{if\(!localStorage\.getItem\('lfh_theme'\)\)document\.documentElement\.setAttribute\('data-theme','dark'\);\}catch\(e\)\{\}\}\)\(\);",/.test(src[file]),
+    `${file} → renders outside AppShell, so it must repeat the menu's dark-default boot script, ` +
+      "byte for byte, behind `settings.menuDefaultMode === \"dark\"`."
+  );
 }
+
+// ── the review note box stops where the database stops (sweep #10 T2, item 3) ─────────────────
+// lfh_submit_review keeps left(comment, N). The box had no limit: 799 characters typed, "Review
+// posted", 500 stored — the diner's own review cut mid-word after a reload, with nothing said.
+// The number is read from the NEWEST migration that defines the function, so a later migration
+// that changes it turns this red until the page agrees.
+{
+  const { readdirSync } = await import("node:fs");
+  const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /\.sql$/.test(f)).sort();
+  const defining = migs.filter((f) => /FUNCTION (public\.)?lfh_submit_review\(/.test(read(`supabase/migrations/${f}`)));
+  const last = defining.at(-1);
+  const body = last ? read(`supabase/migrations/${last}`).match(/FUNCTION (public\.)?lfh_submit_review\([\s\S]*?\$function\$\s*;|FUNCTION (public\.)?lfh_submit_review\([\s\S]*?\$\$\s*;/)?.[0] || "" : "";
+  const dbMax = (body.match(/left\(nullif\(trim\(p_comment\), ''\), (\d+)\)/) || [])[1];
+  const pageMax = (src[ITEM_CLIENT].match(/const REVIEW_NOTE_MAX = (\d+);/) || [])[1];
+  check(
+    "the dish page's review note box stops at the same length the database keeps",
+    !!dbMax && dbMax === pageMax && /id="review-text"[\s\S]{0,200}maxLength=\{REVIEW_NOTE_MAX\}/.test(src[ITEM_CLIENT]),
+    `${ITEM_CLIENT} → REVIEW_NOTE_MAX is ${pageMax ?? "missing"}, ${last ?? "no migration"} keeps ` +
+      `${dbMax ?? "an unreadable number of"} characters, and the textarea must carry maxLength={REVIEW_NOTE_MAX}.`
+  );
+}
+
+// Sweep #10 T2, item 7: two notes on the 3D screen said the opposite of the code — one cited R44
+// (a bill-numbering rejection) for the tags rule, which is R57; one said AR replays the reveal,
+// which R57 deleted. A note is read as the decision, so a wrong one is how a fix gets undone.
+check(
+  "the 3D screen's notes cite the tags rule as R57 and no longer say AR replays the reveal",
+  !/tags may not be removed \(R44\)/.test(src[VIEWER]) && !/AR replays it automatically on entry/.test(src[VIEWER]) &&
+    /tags may not be removed \(R57\)/.test(src[VIEWER]),
+  `${VIEWER} → R44 is the bill-number rejection; the callout-tag rule is R57 (docs/REJECTED-IDEAS.md).`
+);
+
+// Sweep #10 T2, item 5: the six hotspot <button>s were six dead Tab stops before Add to order.
+{
+  const pmv = src[PUBLIC_MV].replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  check(
+    "the 3D callout buttons are not stops on the keyboard's way to Add to order",
+    /className="hotspot hs-anchor"\s*id=\{`hs-\$\{tag\.id\}`\}\s*tabIndex=\{-1\}\s*aria-hidden="true"/.test(pmv) &&
+      /className="hotspot hs-tag"\s*id=\{`hs-tag-\$\{tag\.id\}`\}\s*tabIndex=\{-1\}/.test(pmv),
+    `${PUBLIC_MV} → both hotspot buttons need tabIndex={-1} (the anchor also aria-hidden): they do ` +
+      "nothing when focused, and three of them have no name. Never remove or hide the cards (R57)."
+  );
+}
+
+// Sweep #10 T2, item 4: the zoomed photo's ✕ — the only way out while zoomed — had no name.
+check(
+  "the zoomed photo's close button has a name a screen reader can say",
+  /<button\s+className="img-lightbox-close"[^>]*\saria-label="[^"]+"/.test(src[ITEM_CLIENT]),
+  `${ITEM_CLIENT} → its only child is an icon, so without aria-label it is announced as "button".`
+);
 
 // The veg/non-veg mark must mean the same thing on the grid and on the dish page.
 check(
   "the dish page hides the veg/non-veg mark on a single-diet menu, exactly as the grid does",
-  /const dietMeaningful =/.test(src[ITEM_CLIENT]) && /\{showDiet && \(/.test(src[ITEM_CLIENT]) &&
+  // A FACT, NOT A NAME (sweep #10 T2, 2026-10-16 — item 6). This used to ask only that a line
+  // starting `const dietMeaningful =` existed and that `{showDiet && (` was drawn — so
+  // `const dietMeaningful = true;`, or a showDiet that simply stopped using it, both stayed GREEN.
+  // Broken both ways on purpose and measured: exit 0. It now asks for the derivation itself (every
+  // dish on one side of the line → not meaningful) and that showDiet is built from it.
+  /const dietMeaningful =\s*allItems\.length === 0 \|\| !\(allItems\.every\(\(it\) => it\.veg\) \|\| allItems\.every\(\(it\) => !it\.veg\)\);/.test(src[ITEM_CLIENT]) &&
+    /const showDiet = !!features\.diet_filter && dietMeaningful;/.test(src[ITEM_CLIENT]) &&
+    /\{showDiet && \(/.test(src[ITEM_CLIENT]) &&
     /const dietMeaningful =/.test(src[MENU_VIEW]),
   `${ITEM_CLIENT} → derive showDiet the same way ${MENU_VIEW} derives dietShown, or a pure-veg ` +
     "restaurant shows no mark in the grid and one the moment a dish is opened."
@@ -543,6 +608,26 @@ check(
       "`session-started` used to replay the whole reveal so the cards animated themselves in over " +
         "the room. That is the thing R57 removes — delete it, don't leave it switched off."
     );
+    // ── AN iPHONE NEVER SAYS IT HAS COME BACK (sweep #10 T2, 2026-10-16 — item 1) ──────────────
+    // Quick Look and Scene Viewer are other apps; model-viewer fires no ar-status for either, so
+    // the only `endArSizing()` callers that ran on an iPhone were none. Measured: back from Quick
+    // Look the cards stayed hidden for the rest of the visit and the camera's zoom floor stayed at
+    // 5 cm; a second trip parked the camera 0.33 m away with the dish still at 40%.
+    {
+      const vc = v.replace(/^\s*\/\/.*$/gm, "");
+      check(
+        "…and a trip to Quick Look (iPhone) or Scene Viewer puts the screen back when it returns",
+        /try \{ await mv\.activateAR!\(\); \} catch \{\}\s*const st = mv\.getAttribute\("ar-status"\);\s*if \(st !== "session-started" && st !== "object-placed"\) endArSizing\(\);/.test(vc),
+        "after activateAR() resolves, a handoff that did not become a WebXR session (ar-status is " +
+          "still not-presenting) must be undone at once — nothing else will ever undo it on an iPhone."
+      );
+      check(
+        "…and a second AR tap first undoes any handoff still recorded, so it never measures a shrunk screen",
+        /const mv = mvRef\.current;\s*if \(arRestoreRef\.current\) endArSizing\(\);/.test(vc),
+        "without it the second trip records the 40% scale and the close-up camera as the 'before' " +
+          "state, and the screen it returns to shows the dish 2.5× too big."
+      );
+    }
   }
 
   for (const f of ["public/content/items/Croissant/config.json", "public/content/items/Waffle/config.json"]) {

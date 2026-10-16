@@ -81,6 +81,20 @@ export default async function ItemPage({
   // Hand both to the browser-side component, which does the real work.
   return (
     <>
+      {/* THE RESTAURANT'S DARK DEFAULT, ON THIS DOOR TOO (sweep #10 T2, 2026-10-16 — item 2).
+          The /r/<slug>/item twin, the menu and /q/<code> all emit this line; restaurant #1's own
+          door was the one that never got it (sweep #7 fixed the twin only). MEASURED with French
+          House set to dark: /r/french-house/item/<dish> and /r/french-house/menu booted dark, and
+          /item/<dish> — the address every old QR code and shared link still uses — booted LIGHT.
+          Byte-identical to the twin's, behind the same condition; it only acts when the guest has
+          saved no theme of their own. */}
+      {settings.menuDefaultMode === "dark" && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "(function(){try{if(!localStorage.getItem('lfh_theme'))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();",
+          }}
+        />
+      )}
       {/* The offline warning that survives a reload with no signal, when React never boots and
           components/OfflineNotice.tsx therefore cannot render. See that file for the measurement.
           It removes itself the moment React's own bar takes over. (Owner's item 11, 2026-09-01.) */}

@@ -164,9 +164,20 @@ export default function PublicModelViewer({
         config.tags?.map((tag) => (
           <React.Fragment key={tag.id}>
             {/* The anchor point on the model's surface, with a connector line */}
+            {/* NOT A STOP ON THE KEYBOARD'S WAY (sweep #10 T2, 2026-10-16 — item 5). These two are
+                <button>s because model-viewer places whatever is slotted as `hotspot-…`, and a button
+                is focusable by default — so Tab walked BACK → AR → the model → SIX hotspot buttons
+                (three of them empty, announced as just "button") before it ever reached Add to order.
+                Measured on the running 3D screen: eight Tabs and Add was still out of reach. Neither
+                button does anything (pointer-events none, no handler): the anchor is a line, so it is
+                hidden from screen readers too; the card's words stay readable to a screen reader —
+                they simply stop being a place the keyboard has to pass. Nothing changes on screen —
+                the cards are the look of this page and stay exactly as drawn (R57). */}
             <button
               className="hotspot hs-anchor"
               id={`hs-${tag.id}`}
+              tabIndex={-1}
+              aria-hidden="true"
               slot={`hotspot-${tag.id}`}
               data-position={`${tag.x} ${tag.y} ${tag.z}`}
               data-normal={`${tag.nx} ${tag.ny} ${tag.nz}`}
@@ -214,6 +225,7 @@ export default function PublicModelViewer({
             <button
               className="hotspot hs-tag"
               id={`hs-tag-${tag.id}`}
+              tabIndex={-1}
               slot={`hotspot-tag-${tag.id}`}
               // Where to place the card in 3D space. We prefer a saved precise
               // spot (_tx/_ty/_tz), then a saved tagPosition string, and finally

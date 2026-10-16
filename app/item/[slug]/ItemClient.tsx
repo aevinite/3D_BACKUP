@@ -59,6 +59,16 @@ const BTN_ROW_ABOVE_NAV_STRIPS = { position: "relative" as const, zIndex: 50 };
 // no height to spare) — this is the width half of the same idea.
 const PINNED_BAR_MAX_WIDTH = 1024;
 
+// THE NOTE BOX HOLDS WHAT THE DATABASE KEEPS, AND NOT ONE CHARACTER MORE (sweep #10 T2, 2026-10-16 —
+// item 3). `lfh_submit_review` saves `left(comment, 500)` (migration 386), and this box had no limit
+// at all. MEASURED with a real review posted and removed again: 799 characters typed, "Review posted",
+// the whole 799 drawn on screen — and 500 stored, so after a reload the diner's own review ended in
+// the middle of a word, with nothing ever having said so. Stopping the box at the same 500 means what
+// they see while typing is exactly what everyone will read. The name box already does this with
+// GUEST_NAME_MAX (40, the same function's other `left()`). scripts/verify-3d-viewer.mjs fails if this
+// number and the migration's ever drift apart.
+const REVIEW_NOTE_MAX = 500;
+
 // ── OBITUARY: THE SPINNER, THE "COULDN'T LOAD THIS DISH" CARD, "DISH NOT FOUND", AND TRY AGAIN ──
 // Removed 2026-09-02 (owner's item 12), because they could no longer render.
 //
@@ -942,12 +952,19 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               A z-index puts it back in front. Inline, like the two constants at the top of this
               file, because `app/globals.css` belongs to another part of this sweep; if that rule
               ever grows a z-index of its own this becomes redundant rather than wrong. */}
+          {/* IT HAD NO NAME (sweep #10 T2, 2026-10-16 — item 4). Its only child is an icon, so a
+              screen reader announced it as "button" and nothing else — and it is the only way out of
+              a zoomed photo (the backdrop does nothing while zoomed). Same fault, same remedy, as the
+              heart in sweep #8's item 10, and as the 3D details sheet's own ✕ ("Close"). English, like
+              the heart's label (R23 — the guest translation set is parked). */}
           <button
             className="img-lightbox-close"
             style={{ zIndex: 1 }}
+            aria-label="Close photo"
+            title="Close photo"
             onClick={(e) => { e.stopPropagation(); setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); }}
           >
-            <i className="fas fa-times"></i>
+            <i className="fas fa-times" aria-hidden="true"></i>
           </button>
           {/* The zoomable image. The style applies the current zoom + pan, and
               the touch handlers below implement pinch-to-zoom and dragging. */}
@@ -1270,6 +1287,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               id="review-text"
               placeholder={t.sharePlaceholder}
               rows={3}
+              maxLength={REVIEW_NOTE_MAX}
               value={reviewText}
               onChange={(e) => setReviewText(e.target.value)}
             ></textarea>
