@@ -38,7 +38,7 @@ async function runSeed(seed) {
     if (md === "slow") return { ...okAns(), delayMs: 250 };
     if (md === "busy") return { status: 503, body: { error: "busy" } };
     if (md === "refuse") return { status: 400, body: { error: "That value isn't allowed." } };
-    if (md === "clash") return { status: 409, body: { error: "Someone else changed this", clash: { plain: "Someone else changed this table a moment ago.", todo: "Look at the table and do it again if it's still needed." } } };
+    if (md === "clash") return { status: 409, body: { error: "Someone else changed this", clash: { plain: "Someone else changed this table a moment ago.", todo: "Look at the table and do it again if it's still needed.", retryable: false } } };   // the real shape (lib/clash.ts)
     if (md === "okfalse") return { status: 200, body: { ok: false, reason: "order_paid" } };
     if (md === "drop") return "drop";
     return okAns();
