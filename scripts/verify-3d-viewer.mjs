@@ -543,6 +543,26 @@ check(
       "`session-started` used to replay the whole reveal so the cards animated themselves in over " +
         "the room. That is the thing R57 removes — delete it, don't leave it switched off."
     );
+    // ── AN iPHONE NEVER SAYS IT HAS COME BACK (sweep #10 T2, 2026-10-16 — item 1) ──────────────
+    // Quick Look and Scene Viewer are other apps; model-viewer fires no ar-status for either, so
+    // the only `endArSizing()` callers that ran on an iPhone were none. Measured: back from Quick
+    // Look the cards stayed hidden for the rest of the visit and the camera's zoom floor stayed at
+    // 5 cm; a second trip parked the camera 0.33 m away with the dish still at 40%.
+    {
+      const vc = v.replace(/^\s*\/\/.*$/gm, "");
+      check(
+        "…and a trip to Quick Look (iPhone) or Scene Viewer puts the screen back when it returns",
+        /try \{ await mv\.activateAR!\(\); \} catch \{\}\s*const st = mv\.getAttribute\("ar-status"\);\s*if \(st !== "session-started" && st !== "object-placed"\) endArSizing\(\);/.test(vc),
+        "after activateAR() resolves, a handoff that did not become a WebXR session (ar-status is " +
+          "still not-presenting) must be undone at once — nothing else will ever undo it on an iPhone."
+      );
+      check(
+        "…and a second AR tap first undoes any handoff still recorded, so it never measures a shrunk screen",
+        /const mv = mvRef\.current;\s*if \(arRestoreRef\.current\) endArSizing\(\);/.test(vc),
+        "without it the second trip records the 40% scale and the close-up camera as the 'before' " +
+          "state, and the screen it returns to shows the dish 2.5× too big."
+      );
+    }
   }
 
   for (const f of ["public/content/items/Croissant/config.json", "public/content/items/Waffle/config.json"]) {

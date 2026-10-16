@@ -1117,6 +1117,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const handleLaunchAR = async () => {
     if (mvRef.current?.canActivateAR && mvRef.current.activateAR) {
       const mv = mvRef.current;
+      // A handoff still recorded here means the last one was never undone — put it back FIRST, so
+      // this one measures the real screen size and camera rather than the shrunk ones (measured
+      // before item 1 of sweep #10 T2: a second iPhone trip took the camera from 0.82 m to 0.33 m
+      // while the dish stayed at 40%, so the screen it came back to showed it 2.5× too big).
+      if (arRestoreRef.current) endArSizing();
       // THE CARDS GO FIRST, BEFORE ANYTHING MOVES. model-viewer hangs its hotspots off the SCENE,
       // not off the model — so `scale` does not move them, and the camera coming 2.5× closer to
       // keep the dish the same size flings them 2.5× apart instead: screenshotted, "Saffron
@@ -1162,7 +1167,24 @@ export default function ViewerClient({ folder }: { folder: string }) {
       // sphere is 40% of what it was, lands where it was meant to and the dish on screen does not
       // change size while Quick Look builds its file.
       if (closeUp) { try { mv.cameraOrbit = closeUp; } catch {} }
-      mv.activateAR!();
+      try { await mv.activateAR!(); } catch {}
+      // ── AN iPHONE NEVER SAYS IT HAS COME BACK (sweep #10 T2, 2026-10-16 — item 1) ─────────────
+      // Everything above is undone by handleARStatus when the session ENDS — and only a WebXR
+      // session (Android) ever reports that. Quick Look (iPhone) and Scene Viewer are other apps:
+      // model-viewer 3.4.0 opens them with an anchor click and fires no `ar-status` at all (read in
+      // the bundle: $openIOSARQuickLook builds the USDZ, clicks, returns). So on an iPhone nothing
+      // ever put the screen back. MEASURED with Quick Look stood in for: back on the page the three
+      // callout cards stayed hidden (`ar-presenting` never came off) for the rest of the visit, the
+      // camera's closest-approach floor stayed lifted to 5 cm and its smoothing at 0 — and a
+      // triple-tap replay then grew the dish to full size in a camera parked 40% as far away.
+      //
+      // By the time activateAR() resolves, Quick Look has its file (built from the 40% scene and
+      // handed over by that click), so the page can be put back at once — under the Quick Look
+      // screen, where nobody sees it. A WebXR session has reported `session-started` by now
+      // (model-viewer dispatches it at the end of present(), inside activateAR), and is left alone
+      // for `not-presenting` to finish, exactly as before.
+      const st = mv.getAttribute("ar-status");
+      if (st !== "session-started" && st !== "object-placed") endArSizing();
     } else {
       // Guest-facing message (no internal dev instructions). AR needs a supported
       // phone/tablet; on desktop or unsupported devices it just isn't available.
