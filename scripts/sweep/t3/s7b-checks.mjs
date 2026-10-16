@@ -279,8 +279,9 @@ P("P41096", "…and it is idempotent: a second run finds the flag and returns",
 P("P41097", "a scoped key is base + ':' + slug, with nothing else between",
   /return `\$\{base\}:\$\{tenantSlug\(\)\}`;/.test(F.tstore));
 P("P41098", "the explicit-slug read and write agree on that shape exactly",
-  /localStorage\.getItem\(`\$\{base\}:\$\{fold\(slug\)\}`\)/.test(F.tstore)
-  && /localStorage\.setItem\(`\$\{base\}:\$\{fold\(slug\)\}`, value\)/.test(F.tstore));
+  // re-pointed (sweep #10 T3 round 4): both now go through the memory-backed rawGet/rawSet (item 47) — same key shape
+  /return rawGet\(`\$\{base\}:\$\{fold\(slug\)\}`\)/.test(F.tstore)
+  && /rawSet\(`\$\{base\}:\$\{fold\(slug\)\}`, value\)/.test(F.tstore));
 P("P41099", "…so an order flushed for restaurant A lands under A even while the tab is on B",
   // re-pointed (sweep #10 T3 round 3): written by trackActiveOrder(…, slug), the one door (item 35)
   /trackActiveOrder\(\{[\s\S]{0,300}\}, slug\);/.test(F.outbox) && /if \(slug\) tsetFor\(ACTIVE_ORDERS_KEY, slug, text\);/.test(F.status));

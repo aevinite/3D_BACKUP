@@ -89,7 +89,8 @@ check("P172360", FILES.cart, "the waiting-on-the-gate button has a way back (a 6
 check("P172361", FILES.cart, "a double tap cannot send two orders — a synchronous lock beside the state", HOW, () =>
   /if \(cart\.length === 0 \|\| placing \|\| placingRef\.current\) return;/.test(CODE.cart) && count(CODE.cart, /placingRef\.current = false;/g) >= 3);
 check("P172362", FILES.cart, "the Place Order button is disabled while sending and says so", HOW, () => /disabled=\{placing\}/.test(CODE.cart) && /placing \? "Placing…" : "Place Order"/.test(CODE.cart));
-check("P172363", FILES.cart, "the table box takes digits only, at most four", HOW, () => /id="cart-table"[\s\S]{0,400}maxLength=\{4\}/.test(SRC.cart) && /setTableNumber\(e\.target\.value\.replace\(\/\\D\/g, ""\)\)/.test(CODE.cart));
+// re-pointed (sweep #10 T3 round 4): keepDigits keeps any script's digits as 0–9 instead of dropping them (item 43)
+check("P172363", FILES.cart, "the table box takes digits only, at most four", HOW, () => /id="cart-table"[\s\S]{0,400}maxLength=\{4\}/.test(SRC.cart) && /setTableNumber\(keepDigits\(e\.target\.value\)\)/.test(CODE.cart));
 check("P172364", FILES.cart, "a seated diner's table box is locked read-only to their own table", HOW, () => /value=\{lockedTable \|\| tableNumber\}/.test(CODE.cart) && /disabled=\{!!lockedTable\} readOnly=\{!!lockedTable\}/.test(CODE.cart));
 check("P172365", FILES.cart, "R55 still stands in the code: no remembered table count on the phone (and its REJECTED note is in place)", "SRC + docs/REJECTED-IDEAS.md R55", () =>
   /REJECTED \(owner, 2026-09-14\) — docs\/REJECTED-IDEAS\.md R55/.test(SRC.cart) && !/tset\("lfh_table_count|tableCount.*tset/.test(CODE.cart));

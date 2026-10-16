@@ -632,7 +632,10 @@ P("P16327", "…and it deletes the old unscoped key so no other restaurant can r
 P("P16328", "…and it runs at most once per device",
   /if \(localStorage\.getItem\(MIGRATED_FLAG\)\) return;/.test(F.tstore));
 P("P16329", "every storage read and write is wrapped, so private mode cannot crash the menu",
-  (F.tstore.match(/catch \{/g) || []).length >= 8);
+  // re-pointed (sweep #10 T3 round 4): every read/write now goes through rawGet/rawSet/rawRemove, each wrapped, which keep a refused write in memory (item 47)
+  /function rawGet[\s\S]{0,140}try \{ return localStorage\.getItem\(key\); \} catch/.test(F.tstore)
+  && /function rawSet[\s\S]{0,120}try \{ localStorage\.setItem\(key, value\);[^}]*\} catch/.test(F.tstore)
+  && /function rawRemove[\s\S]{0,120}try \{ localStorage\.removeItem\(key\);[^}]*\} catch/.test(F.tstore));
 P("P16330", "the outbox writes a flushed order's tracker entry under the ORDER's restaurant",
   /const slug = item\.restaurantSlug \|\| tenantSlug\(\);/.test(F.outbox)
   // re-pointed (sweep #10 T3 round 3): through the one door, lib/orderStatus.ts trackActiveOrder(…, slug) (item 35)

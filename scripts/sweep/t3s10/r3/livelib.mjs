@@ -45,9 +45,8 @@ export async function measure(p, sel) {
       // such as the bill's Place Order footer can sit over part of it)
       if (b.width < 40 || b.height < 40) { el.scrollIntoView({ block: "center" }); const n = el.getBoundingClientRect(); cx = n.left + n.width / 2; cy = n.top + n.height / 2; }
       const reach = (d) => [[cx - d, cy], [cx + d, cy], [cx, cy - d], [cx, cy + d]].every(([x, y]) => { const h = document.elementFromPoint(x, y); return !!h && (h === el || el.contains(h)); });
-      // the 44 px target everywhere; WCAG 2.2's hard 24 px minimum for the one control whose row hides what
-      // spills past it — the bin at the end of a bill line (see the note in app/globals.css)
-      const need = el.classList.contains("remove-item") ? 11 : 20;
+      // the 44 px target everywhere — the bin included since item 41 (2026-10-16) gave it its whole 44×44 box
+      const need = 20;
       if ((b.width < 40 || b.height < 40) && !reach(need)) small.push(`${el.getAttribute("aria-label") || el.textContent.trim().slice(0, 20) || el.className}`.slice(0, 40) + ` ${Math.round(b.width)}×${Math.round(b.height)}`);
     }
     return { text, spill: document.documentElement.scrollWidth > innerWidth + 1, small, found: roots.length };

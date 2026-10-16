@@ -92,7 +92,8 @@ P("P110022", "…and its item list only when it has items", has(C_CART, /o\.item
 P("P110023", "a live order's total goes through the USD→display converter, not the raw number", has(C_CART, /live-order-total[\s\S]{0,80}showPrice\(o\.total\)/));
 P("P110024", "'Wrong table? Fix it' appears only while the order is still early", has(C_CART, /\{\(o\.status === "received" \|\| o\.status === "preparing"\) && \(/));
 P("P110025", "…so a SERVED order's table can no longer be moved (the kitchen already sent it)", !has(C_CART, /o\.status === "served"[\s\S]{0,120}live-order-fixlink/));
-P("P110026", "the correction box takes digits only", has(C_CART, /setTableDraft\(e\.target\.value\.replace\(\/\\D\/g, ""\)\)/));
+// re-pointed (sweep #10 T3 round 4): keepDigits — any script's digits, written 0–9 (item 43)
+P("P110026", "the correction box takes digits only", has(C_CART, /setTableDraft\(keepDigits\(e\.target\.value\)\)/));
 P("P110027", "…is capped at 4 characters, like the main table field", countOf(C_CART, /maxLength=\{4\}/g) >= 1);
 P("P110028", "…focuses itself, so the diner can type straight away", has(C_CART, /aria-label="Correct table number" autoFocus/));
 P("P110029", "…is labelled for a screen reader", has(C_CART, /aria-label="Correct table number"/));
@@ -242,7 +243,8 @@ P("P110146", "…and the value shown is the session's, not whatever was typed be
 P("P110147", "…with a note saying why it cannot be changed, and how to change it", has(C_CART, /You&apos;re at table \{lockedTable\}/) && has(C_CART, /Leave the table/));
 P("P110148", "a QR-scanned table says where the number came from", has(C_CART, /from your table&apos;s QR/));
 P("P110149", "…and that note appears only while the field still holds exactly that number", has(C_CART, /scannedTable && tableNumber === scannedTable/));
-P("P110150", "only digits can reach the field", has(C_CART, /setTableNumber\(e\.target\.value\.replace\(\/\\D\/g, ""\)\)/));
+// re-pointed (sweep #10 T3 round 4): keepDigits — any script's digits, written 0–9 (item 43)
+P("P110150", "only digits can reach the field", has(C_CART, /setTableNumber\(keepDigits\(e\.target\.value\)\)/));
 P("P110151", "…it is capped at four characters", has(C_CART, /maxLength=\{4\}/));
 P("P110152", "…it asks the phone for a number pad", has(C_CART, /inputMode="numeric" pattern="\[0-9\]\*"/));
 P("P110153", "…and it is labelled for a screen reader beyond its placeholder", has(C_CART, /aria-label="Table number"/));
