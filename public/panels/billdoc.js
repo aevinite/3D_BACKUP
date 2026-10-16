@@ -2298,7 +2298,16 @@ function banquetDocHtml(a) {
     money.push(`<div class="ms" style="font-weight:700"><span>${bal > 0 ? "Balance due" : "Balance"}</span><i>${bq2(Math.max(0, bal))}</i></div>`);
   }
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Tax Invoice ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
+  // WHAT THIS SHEET IS CALLED — the bill's own rule, now on the banquet sheet too (item 12, 2026-10-16).
+  // The owner's 2026-07-31 layout ("a banquet bill ALWAYS prints as a tax invoice") is the REGISTERED
+  // restaurant's sheet and is unchanged for it. A restaurant with no GSTIN charges no tax since mig 425,
+  // and a sheet headed "Tax Invoice" with no registration and no tax is not one (CGST Rule 46 — the
+  // reason the thermal bill says "Bill" there since 2026-08-22); a composition-scheme restaurant may only
+  // issue a Bill of Supply, with the declaration (T7 F9 for the bill). Same three names as billDocHtml.
+  const bqComposition = priceTaxMode(s) === "composition";
+  const bqRegistered = !!String(bi.gstin || "").trim();
+  const bqDocName = bqComposition ? "Bill of Supply" : (bqRegistered ? "Tax Invoice" : "Bill");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${bqDocName} ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
 <style>
   /* A5/A4 sheet print recipe: an EXPLICIT @page size is correct here (unlike the 80mm
      thermal bill, where forcing a size makes CUPS rotate the job) because the tray
@@ -2365,7 +2374,7 @@ function banquetDocHtml(a) {
   <div class="body">
     ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
       <div class="ad">${esc(bi.address)}${bi.phone ? "<br/>Ph " + esc(bi.phone) : ""}${bi.gstin ? "<br/>GSTIN " + esc(bi.gstin) : ""}</div></div>`}
-    <div class="doct"><b>Tax Invoice</b></div>
+    <div class="doct"><b>${bqDocName}</b></div>
     <table class="bx">
       <tr>
         <td style="width:53%"><div class="lbl">Supplier</div><div class="who">${esc(bi.name)}</div>
@@ -2397,6 +2406,7 @@ function banquetDocHtml(a) {
     </div>
     ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
     ${bqOn(s, "by") && b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
+    ${bqComposition ? `<div style="font-size:7.4pt;margin-top:1.6mm;text-align:center">Composition taxable person — not eligible to collect tax on supplies.</div>` : ""}
     ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
   </div>
 </div>

@@ -577,7 +577,9 @@ dateBad.length === 0
       lines: [{ qty: 1, title: "Dal" }, null, { qty: 2, title: "Naan" }] }), /Dal/],
     ["a ticket of nothing but nulls", () => BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [null, undefined] }), /\(no items\)/],
     ["kotLineHtml with no argument", () => BILLDOC.kotLineHtml(), /class="kl"/],
-    ["banquetDocHtml with no argument", () => BILLDOC.banquetDocHtml(), /Tax Invoice/],
+    // (its proof of a real render is the sheet's heading and its money box — "Bill" with no GSTIN since
+    //  2026-10-16, item 12 — not the words "Tax Invoice")
+    ["banquetDocHtml with no argument", () => BILLDOC.banquetDocHtml(), /<div class="doct"><b>(Tax Invoice|Bill|Bill of Supply)<\/b>[\s\S]*INVOICE TOTAL/],
     ["a bill with a null among its lines", () => BILLDOC.billDocHtml({ name: "R", taxRows: [],
       lines: [null, { title: "Dal", qty: 1, price: 100 }], subtotal: 100, total: 100 }), /Dal/],
     ["a banquet sheet with a null line", () => BILLDOC.banquetDocHtml({ bill: { bill_no: "B", subtotal: 100, total: 100 },
@@ -974,6 +976,11 @@ dateBad.length === 0
   const mig = rf425(join(ROOT, "supabase/migrations/425_a_restaurant_without_a_gstin_charges_no_tax.sql"), "utf8");
   if ((mig.match(/COALESCE\(TRIM\(\(SELECT gstin FROM s\)\), ''\) = '' THEN 0/g) || []).length !== 2) wrong.push("mig 425 no longer carries the rule in both rate functions");
   if (!/'gst_registered', COALESCE\(TRIM\(s\.gstin\), ''\) <> ''/.test(mig)) wrong.push("the guest menu is no longer told whether the restaurant may charge GST");
+  // …and the banquet sheet is named by the same rule (registered → Tax Invoice, none → Bill, composition → Bill of Supply)
+  const bq = (st) => (BILLDOC.banquetDocHtml({ bill: { subtotal: 100, tax: 0, total: 100 }, lines: [], settings: st, autoPrint: false }).match(/<div class="doct"><b>([^<]+)/) || [])[1];
+  if (bq({ gstin: "24AAAAA0000A1Z5" }) !== "Tax Invoice") wrong.push("a registered restaurant's banquet sheet is no longer a Tax Invoice");
+  if (bq({ gstin: "" }) !== "Bill") wrong.push("a banquet sheet with no GSTIN still calls itself a Tax Invoice");
+  if (bq({ gstin: "24AAAAA0000A1Z5", price_tax_mode: "composition" }) !== "Bill of Supply") wrong.push("a composition restaurant's banquet sheet is not a Bill of Supply");
   wrong.length
     ? bad("a restaurant with no GSTIN can still be charged or shown tax", wrong.join(" · "))
     : ok("a restaurant with no GSTIN charges no tax — on the bill, on a banquet, and in the guest's cart; an older bill keeps what it charged");
