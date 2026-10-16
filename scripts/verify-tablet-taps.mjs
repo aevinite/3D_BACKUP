@@ -1610,6 +1610,16 @@ check(
   `${TABLET} openPaymentMethodModal: resolve the tip with the split marker — the split screen seeds from opts.tip.`,
 );
 
+// ── A DISH EDIT SAVED OFFLINE IS NOT "UPDATED" (sweep #10 T12 round 3, item 7) ───────────────────────
+{
+  const i = src.indexOf("function openDishEditModal("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: a dish edit kept by the device queue says it is saved, never 'Dish updated'",
+    (body.match(/keep\(await api\("POST"/g) || []).length === 3 && /if \(saved\) \{ toast\(savedMsg\(saved\)\); return; \}/.test(body),
+    `${TABLET} openDishEditModal: every write's answer is read — the queue's { queued:true } is not the kitchen having it.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

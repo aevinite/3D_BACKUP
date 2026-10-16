@@ -1932,16 +1932,22 @@ function openDishEditModal(itemId) {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one waiter's "more spicy" silently wiping another's "less spicy".
+      // SAVED IS NOT UPDATED (sweep #10 T12 round 3, item 7). With no internet each write below is kept
+      // by the device's queue, and this said "Dish updated" about a change the kitchen had not got —
+      // the note or the allergy a cook needs. Remember whether the queue answered any of them.
+      let saved = null;
+      const keep = (r) => { if (isQueued(r) && !saved) saved = r; };
       if (note !== String(item.note || "").trim()) {
-        await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
+        keep(await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } }));
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved, ...algWhy }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
+        keep(await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved, ...algWhy }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } }));
       }
       if (order.id && !same(newOrderAllergies, orderAllergies)) {
-        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies, ...algWhy }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+        keep(await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies, ...algWhy }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } }));
       }
       close();
+      if (saved) { toast(savedMsg(saved)); return; }   // load() would only no-op offline
       await load(); if (!state.ordering) renderPanel();
       toast("Dish updated");
     } catch (e) {
