@@ -7861,7 +7861,15 @@ function bindEditor() {
       // What this photo replaces, so the route can drop the old file instead of leaving one
       // behind for every re-photograph. It only ever acts on an address in our own bucket.
       if (state.sel && state.sel.image) fd.append("replaces", String(state.sel.image));
-      const res = await fetch("/api/editor" + ridQ("/dish-photo"), { method: "POST", body: fd });
+      // A DEADLINE, ASKED FOR (sweep #10 T7, item 4). This was the one write in the panel with none:
+      // on a database that is up but answering nothing (30–90s measured on 2026-07-31) or a stalled
+      // restaurant Wi-Fi, the button sat on "Uploading…", greyed, with no end — the exact fault
+      // issue-raise.js's photo upload was given a 30s ceiling for. Same 30s, same reason (a photo is
+      // a slower request than a JSON write), and AbortSignal.timeout is feature-tested because
+      // READING it throws on an older phone (verify:abort-guard).
+      let deadline;
+      try { deadline = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(30000) : undefined; } catch (e) { deadline = undefined; }
+      const res = await fetch("/api/editor" + ridQ("/dish-photo"), { method: "POST", body: fd, signal: deadline });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.url) throw new Error(j.error || "Couldn't upload that photo.");
       setPath(state.sel, "image", j.url);
@@ -7870,11 +7878,14 @@ function bindEditor() {
     } catch (e) {
       // No reply at all = no internet. Say that, rather than the browser's own wording.
       const offline = !navigator.onLine || (e && e.name === "TypeError");
+      // Our own deadline firing says so in words, never the browser's "signal timed out".
+      const slow = !!e && (e.name === "TimeoutError" || e.name === "AbortError");
       if (btn) { btn.disabled = false; btn.textContent = "📷 Upload a photo"; }
       say(offline
         ? "No internet, so the photo couldn't be uploaded — try again once you're back online."
+        : slow ? "The upload took too long, so it was stopped — the photo wasn't saved. Try again."
         : (e && e.message) || "Couldn't upload that photo.");
-      toast(offline ? "No internet — the photo wasn't uploaded." : ((e && e.message) || "Couldn't upload that photo."), "err");
+      toast(offline ? "No internet — the photo wasn't uploaded." : slow ? "The upload took too long — the photo wasn't saved." : ((e && e.message) || "Couldn't upload that photo."), "err");
     }
   };
 

@@ -583,7 +583,39 @@ async function cancelOffers() {
     : bad("the dish sheet's ✕ Cancel ticket disagrees with the server about a paid ticket");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers];
+// ── N · EVERY DIRECT fetch() IN THE MANAGER PANEL HAS AN END (sweep #10 T7, 2026-10-16) ──────────
+// Writes go through api() and the outbox, which carry a deadline. The dish-photo upload cannot (a
+// File does not fit in the JSON queue), so it is a plain fetch — and it had NO deadline: on a stalled
+// network "📷 Upload a photo" sat on "Uploading…", greyed, for ever. Every fetch( in app.js must
+// either go through LFH_NET (its own 15s read ceiling) or pass a signal, and the photo's timeout
+// must be read in words.
+async function fetchesEnd() {
+  console.log("\nN. every direct fetch() in the manager panel has an end");
+  const app = src("public/panels/editor/app.js");
+  const calls = [...app.matchAll(/(?<![\w.$])fetch\(([^\n]*)/g)].map((m) => ({ line: app.slice(0, m.index).split("\n").length, txt: m[1] }));
+  const bare = calls.filter((c) => !/signal\s*:/.test(c.txt) && !/LFH_NET/.test(app.split("\n")[c.line - 1]));
+  // The middle third (printZReport → openShiftPicker) is held at ZERO. The other thirds are other
+  // sweep terminals' ground: six there on 2026-10-16 (the staff and table-section reads, the print
+  // claim, the two act-as clears) — a RATCHET, so that number may fall and may not rise.
+  const lineOf = (needle) => app.slice(0, app.indexOf(needle)).split("\n").length;
+  const s = lineOf("async function printZReport("), e = lineOf("\nfunction openShiftPicker(") + 1;
+  const mid = bare.filter((c) => c.line >= s && c.line < e), rest = bare.filter((c) => c.line < s || c.line >= e);
+  mid.length === 0
+    ? ok(`every direct fetch() in the middle third carries a signal or rides LFH_NET (${calls.length} in the file)`)
+    : bad(`${mid.length} direct fetch() call(s) in the middle third can wait for ever`, mid.map((c) => "app.js:" + c.line).join(", "));
+  rest.length <= 6
+    ? ok(`…and the rest of the panel adds no new one (${rest.length} known, owned by the other thirds' terminals)`)
+    : bad(`the rest of the panel now has ${rest.length} direct fetch() calls with no end (6 were known on 2026-10-16)`, rest.map((c) => "app.js:" + c.line).join(", "));
+  const up = app.slice(app.indexOf('const photoInput = document.getElementById("dishPhotoFile");'), app.indexOf('const ms = $("#membSearch");'));
+  /typeof AbortSignal\.timeout === "function" \? AbortSignal\.timeout\(30000\)/.test(up) && /signal: deadline/.test(up)
+    ? ok("the dish-photo upload asks for a 30s deadline (feature-tested, like issue-raise.js)")
+    : bad("the dish-photo upload has no deadline again — a stalled network leaves 'Uploading…' for ever");
+  /e\.name === "TimeoutError"/.test(up) && /The upload took too long/.test(up)
+    ? ok("…and when it fires the person reads it in words, not 'signal timed out'")
+    : bad("the dish-photo timeout would print the browser's own words");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }
