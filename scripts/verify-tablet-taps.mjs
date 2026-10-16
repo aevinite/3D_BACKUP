@@ -1641,6 +1641,16 @@ check(
   );
 }
 
+// ── THE DRAWER'S CLOCK IS THE RESTAURANT'S (sweep #10 T12 round 3, item 10) ───────────────────────────
+{
+  const i = src.indexOf("const tickClock = () => {"), body = src.slice(i, src.indexOf("\n};", i));
+  check(
+    "tablet: the drawer's clock is pinned to the restaurant's zone (Asia/Kolkata), never the device's",
+    /toLocaleTimeString\("en-IN", \{ hour: "2-digit", minute: "2-digit", timeZone: "Asia\/Kolkata" \}\)/.test(body) && !/toLocaleTimeString\(\[\]/.test(body),
+    `${TABLET} tickClock: \`[]\` with no timeZone is the tablet's own zone — a factory-default tablet shows the wrong hour.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

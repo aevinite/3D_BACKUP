@@ -5960,7 +5960,11 @@ const tickClock = () => {
   if (!dc) return;
   const drawer = dc.closest(".tbl-drawer");
   if (drawer && !drawer.classList.contains("open")) return;
-  dc.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // THE RESTAURANT'S CLOCK, NOT THE TABLET'S (sweep #10 T12 round 3, item 10). `[]` with no zone is
+  // whatever this device is set to — a tablet left on its factory zone showed a time hours out, in the
+  // same drawer as KOT and bill times pinned to Asia/Kolkata. The order card was fixed for exactly this
+  // on 2026-09-13 (T11 time-zone family); this clock was the one left behind.
+  dc.textContent = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 };
 tickClock(); setInterval(tickClock, 1000);
 
