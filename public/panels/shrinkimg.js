@@ -71,7 +71,11 @@
     return new Promise(function (resolve) {
       var url = URL.createObjectURL(file);
       var img = new Image();
-      img.onload = function () { resolve(img); };
+      // LET THE ADDRESS GO ONCE THE PICTURE IS IN (sweep #10 T16 round 3, item 31). It used to be
+      // revoked only on an error, so on a browser with no createImageBitmap (iPads before iOS 15)
+      // every photo shrunk kept its whole original — megabytes each — pinned in memory for as long as
+      // the panel stayed open. A decoded <img> draws the same after its address is revoked.
+      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
       img.onerror = function () { URL.revokeObjectURL(url); resolve(null); };
       img.src = url;
     });
