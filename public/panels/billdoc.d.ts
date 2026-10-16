@@ -182,6 +182,9 @@ export function billIdentity(
  *  Aevidine and, when the owner controls it, enabled. Same rule as lib/tableTags.ts moduleBagLadder().
  *  For what a screen SAYS only — the server stays the authority for anything that moves points. */
 export function moduleOn(settings: Record<string, unknown> | null | undefined, key: string): boolean;
+/** May this restaurant collect GST at all? No GSTIN → no (mig 425), from `gstin` or `gst_registered`.
+ *  An object with neither key keeps the old answer (registered). Twin of lib/tax.ts gstRegistered. */
+export function gstRegistered(settings: Record<string, unknown> | null | undefined): boolean;
 export function splitTax(
   taxWhole: number,
   comps: { label?: string; rate?: number }[],

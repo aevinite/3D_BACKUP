@@ -951,6 +951,34 @@ dateBad.length === 0
     : bad("a hole in a list throws, and a throw here is a blank window", broke.join(" · "));
 }
 
+/* ── A RESTAURANT WITH NO GSTIN CHARGES NO TAX (owner, 2026-10-16 — mig 425, "for 12th do c option") ──
+   The paper's half of the rule. SQL lfh_effective_tax_rate / lfh_banquet_tax_rate and lib/tax.ts carry
+   the other halves (the T30 parity run compares them restaurant by restaurant on dev). */
+{
+  const wrong = [];
+  const ord = { status: "served", subtotal: 200, taxable_base: 200, discount: 20, items: [{ title: "Dal", qty: 1, price: 200 }] };
+  const un = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [ord], settings: { tax_rate: 0.05, gstin: "" } }));
+  if (BILLDOC.taxModel({ tax_rate: 0.18, gstin: "" }).rate !== 0) wrong.push("taxModel still charges a restaurant with no GSTIN");
+  if (BILLDOC.taxModel({ tax_rate: 0.18, gst_registered: false }).rate !== 0) wrong.push("taxModel ignores the guest menu's gst_registered=false");
+  if (BILLDOC.taxModel({ tax_rate: 0.18, gstin: "24AAAAA0000A1Z5" }).rate !== 0.18) wrong.push("a registered restaurant's rate moved");
+  if (BILLDOC.taxModel({ tax_rate: 0.18 }).rate !== 0.18) wrong.push("an object never asked about its GSTIN stopped charging (it must keep the old answer)");
+  if (BILLDOC.bqTaxModel({ gstin: "", banquet_tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] }).rate !== 0) wrong.push("a banquet at a restaurant with no GSTIN is still taxed");
+  if (BILLDOC.bqTaxModel({ price_tax_mode: "composition", banquet_tax_components: [{ label: "CGST", rate: 9 }] }).rate !== 0) wrong.push("a composition-scheme restaurant's banquet is still taxed");
+  if (/CGST|SGST|Taxable value/.test(un)) wrong.push("a new bill at a restaurant with no GSTIN prints tax rows or a Taxable value line");
+  if (!/TOTAL<\/span><span>₹180</.test(un)) wrong.push("a ₹200 bill with ₹20 off at a restaurant with no GSTIN does not total ₹180");
+  if (!/class="kind">Bill</.test(un)) wrong.push("the sheet is not headed Bill");
+  // an OLD order, stamped 5% before mig 425, keeps what it was charged — the paper never re-prices it
+  const old = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [{ ...ord, tax_rate: 0.05 }], settings: { gstin: "" } }));
+  if (!/CGST/.test(old) || !/Taxable value/.test(old)) wrong.push("an order charged 5% before the rule lost its tax rows on a reprint");
+  const { readFileSync: rf425 } = await import("node:fs");
+  const mig = rf425(join(ROOT, "supabase/migrations/425_a_restaurant_without_a_gstin_charges_no_tax.sql"), "utf8");
+  if ((mig.match(/COALESCE\(TRIM\(\(SELECT gstin FROM s\)\), ''\) = '' THEN 0/g) || []).length !== 2) wrong.push("mig 425 no longer carries the rule in both rate functions");
+  if (!/'gst_registered', COALESCE\(TRIM\(s\.gstin\), ''\) <> ''/.test(mig)) wrong.push("the guest menu is no longer told whether the restaurant may charge GST");
+  wrong.length
+    ? bad("a restaurant with no GSTIN can still be charged or shown tax", wrong.join(" · "))
+    : ok("a restaurant with no GSTIN charges no tax — on the bill, on a banquet, and in the guest's cart; an older bill keeps what it charged");
+}
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the paper does not read the same everywhere, or its rows do not describe its rupees.`
   : "\nAll checks passed — one clock, one day, and every printed figure describes itself.");

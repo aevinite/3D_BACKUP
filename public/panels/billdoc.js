@@ -479,7 +479,11 @@
     // concept this document exists to have none of. The tax LINE was suppressed and the row that
     // describes it was left behind.
     var composition = !!d.composition;
-    var restate = !inclusive && !inclOnly && !composition;
+    // …nor does a sheet with no GSTIN that ADDED no tax: since mig 425 such a restaurant charges none, so
+    // "Taxable value" would name a concept the bill does not have (the composition reasoning above). An
+    // older bill from before 425, charged at its stamped rate, still carries tax rows and keeps the line.
+    var restate = !inclusive && !inclOnly && !composition
+      && (!!String(d.gstin == null ? "" : d.gstin).trim() || (d.taxRows || []).length > 0);
     // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
     // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
     var R = billRows(d);
@@ -1353,6 +1357,18 @@
   // priceTaxMode / taxModel: the ONE tax model. Mirrors lib/tax.ts and SQL lfh_effective_tax_rate;
   // a composition-scheme restaurant's rate genuinely IS zero (mig 272), not "5% we then hide".
   function priceTaxMode(s) { return String((s || {}).price_tax_mode || "excl"); }
+  /* gstRegistered(settings) — MAY THIS RESTAURANT COLLECT GST AT ALL? (owner, 2026-10-16, mig 425 —
+     "for 12th do c option".) No GSTIN → not registered → its rate is 0, the same answer a
+     composition-scheme restaurant gets. Known from the row's own `gstin`, or from `gst_registered`
+     (the yes/no the guest menu gets instead of the GSTIN). An object carrying neither key was never
+     asked and keeps the old answer. Twins: lib/tax.ts gstRegistered · SQL lfh_effective_tax_rate. */
+  function gstRegistered(settings) {
+    var s = settings;
+    if (!s || typeof s !== "object") return true;
+    if (typeof s.gst_registered === "boolean") return s.gst_registered;
+    if (Object.prototype.hasOwnProperty.call(s, "gstin")) return String(s.gstin == null ? "" : s.gstin).trim() !== "";
+    return true;
+  }
   function taxModel(settings) {
     var s = settings || {};
     var comps = Array.isArray(s.tax_components) ? s.tax_components
@@ -1360,6 +1376,7 @@
       .filter(function (c) { return c.label && c.rate > 0; }) : [];
     var composition = priceTaxMode(s) === "composition";
     if (composition) return { rate: 0, pct: 0, components: [], composition: composition };
+    if (!gstRegistered(s)) return { rate: 0, pct: 0, components: [], composition: false };   // mig 425
     if (comps.length) {
       var pct = comps.reduce(function (a, c) { return a + c.rate; }, 0);
       return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, composition: composition };
@@ -1913,6 +1930,9 @@
   // restaurant's dine-in model when it has set none.
   function bqTaxModel(settings) {
   const s = settings || {};
+  // A business that may not collect GST charges none on a banquet either (mig 425 — the banquet's own
+  // lines used to win even for a composition-scheme restaurant; lfh_banquet_tax_rate now agrees).
+  if (priceTaxMode(s) === "composition" || !gstRegistered(s)) return { rate: 0, pct: 0, components: [], own: false };
   const raw = Array.isArray(s.banquet_tax_components) ? s.banquet_tax_components : [];
   const comps = raw.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }))
     .filter((c) => c.label && c.rate > 0);
@@ -2370,6 +2390,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     kotWhen: kotWhen,
     billIdentity: billIdentity,
     moduleOn: moduleOn,
+    gstRegistered: gstRegistered,
     splitTax: splitTax,
     discPct: discPct,
     phone10: phone10,

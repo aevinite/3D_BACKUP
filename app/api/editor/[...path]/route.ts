@@ -796,9 +796,12 @@ function billTaxOf(g: BillTaxRow[], settingsRate: number): { disc: number; taxab
   }
   return { disc, taxable, tax };
 }
-/** The columns effectiveTaxRate() needs — one small row, read only on a discount write. */
+/** The columns effectiveTaxRate() needs — one small row, read only on a discount write.
+ *  THE SHARED LIST, never a hand-written one (sweep #10 T14, 2026-10-16): this said
+ *  "tax_rate,tax_components,price_tax_mode", so once a restaurant with no GSTIN charged 0 (mig 425)
+ *  its discount maths still ran at 5% — the composition trap TAX_SETTINGS_COLUMNS exists for. */
 async function taxSettings(restaurantId: string) {
-  return (await sb.from("settings").select("tax_rate,tax_components,price_tax_mode")
+  return (await sb.from("settings").select(TAX_SETTINGS_COLUMNS)
     .eq("restaurant_id", restaurantId).maybeSingle()).data || {};
 }
 

@@ -53,6 +53,20 @@ function components(raw: TaxSettings): { label: string; rate: number }[] {
  *  total into its parts. Empty when the restaurant uses a single flat rate instead. */
 export function taxComponents(raw: TaxSettings): { label: string; rate: number }[] { return components(raw); }
 
+/** IS THIS RESTAURANT REGISTERED FOR GST? (owner, 2026-10-16 — mig 425, "do c option".)
+ *  A business with no GSTIN may not collect GST, so its rate is 0, exactly as a composition-scheme
+ *  restaurant's is. Two ways to know: the settings row's own `gstin` (every server read selects it —
+ *  it is in TAX_SETTINGS_COLUMNS), or `gst_registered`, the yes/no the guest menu is handed instead of
+ *  the GSTIN itself (lfh_guest_settings, mig 425). A hand-built object carrying NEITHER key was never
+ *  asked, so it keeps the old answer — the key's absence is not a registration being blank.
+ *  Twins: SQL lfh_effective_tax_rate (mig 425) · billdoc.js gstRegistered. */
+export function gstRegistered(raw: unknown): boolean {
+  const r = raw as { gstin?: unknown; gst_registered?: unknown } | null | undefined;
+  if (!r || typeof r !== "object") return true;
+  if (typeof r.gst_registered === "boolean") return r.gst_registered;
+  if (Object.prototype.hasOwnProperty.call(r, "gstin")) return String(r.gstin ?? "").trim() !== "";
+  return true;
+}
 /** The effective tax rate as a DECIMAL (e.g. 0.05 for 5%).
  *
  *  A COMPOSITION-SCHEME restaurant's rate is 0 (mig 272). It cannot legally pass GST to the
@@ -61,6 +75,7 @@ export function taxComponents(raw: TaxSettings): { label: string; rate: number }
  *  discount × (1 + rate)` in the app would have over-subtracted on a discounted bill. */
 export function effectiveTaxRate(raw: TaxSettings): number {
   if (String((raw as { price_tax_mode?: unknown })?.price_tax_mode ?? "") === "composition") return 0;
+  if (!gstRegistered(raw)) return 0;
   const comps = components(raw);
   if (comps.length) return comps.reduce((a, c) => a + c.rate, 0) / 100;
   const rate = Number((raw as { tax_rate?: unknown })?.tax_rate) || 0.05;
@@ -99,7 +114,9 @@ export type DishTaxMode = "default" | "excl" | "incl" | "mrp" | "none";
  *
  *  Guarded by `npm run verify:tax-mode`, which fails when a settings select feeds the tax
  *  helpers without this column present. */
-export const TAX_SETTINGS_COLUMNS = "tax_rate, tax_components, price_tax_mode";
+// …and `gstin` (mig 425): a restaurant with no GSTIN charges nothing, so the same silent trap applies to
+// a select that forgets it.
+export const TAX_SETTINGS_COLUMNS = "tax_rate, tax_components, price_tax_mode, gstin";
 
 // NonNullable first, then re-add the nullable arms: TaxSettings already ends in `| null |
 // undefined`, and intersecting a union with an object type distributes over it and drops
