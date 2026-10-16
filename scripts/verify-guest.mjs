@@ -527,6 +527,18 @@ check("P170001", "the two scroll-cue effects re-measure on the DEFERRED search t
     note: `chip row=${rowDeps} suggestions=${panelDeps} no effect keyed on the typed text=${typedNowhere} declared above both=${declaredFirst}` };
 });
 
+// ONE ADDRESS, READ ONE WAY, BY EVERY DOOR (sweep #10 T1, item 2). A page received `/r/french-house%20/menu`
+// with the escape still in it and found no restaurant, while the menu-data API decoded the same address and
+// answered 200 — so the dead end offered "Go to the menu" pointing back at itself. Both lookups in
+// lib/tenant.ts now go through slugOf(), which decodes before it trims and folds. Driven in the live half.
+check("P170004", "both restaurant lookups decode an address's escapes before trimming and folding it", () => {
+  const t = code("lib/tenant.ts") || "";
+  const helper = /function slugOf\(raw: string\): string \{[\s\S]{0,200}?decodeURIComponent\(s\)[\s\S]{0,120}?return s\.trim\(\)\.toLowerCase\(\);/.test(t);
+  const both = (t.match(/const slug = slugOf\(slugRaw\);/g) || []).length === 2;
+  const noRawFold = !/String\(slugRaw \|\| ""\)\.trim\(\)\.toLowerCase\(\)/.test(t);
+  return { ok: helper && both && noRawFold, note: `helper decodes=${helper} used by both lookups=${both} no un-decoded fold left=${noRawFold}` };
+});
+
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
 // 0 over the saved position before the restore could read it, so every Back landed at the top of
@@ -683,6 +695,25 @@ async function live(base) {
       check("P170003", "LIVE: after a search is cleared — the chip row that runs past the edge gets its fade back", () =>
         ({ ok: !!row && row.over > 4 && row.cue === "1", note: JSON.stringify(row) }));
       await c.close(); }
+
+    // LIVE: A STRAY SPACE ON A PASTED LINK STILL OPENS THE MENU, AND NO DEAD END POINTS AT ITSELF
+    // (sweep #10 T1, item 2). The second half is the general rule the first one broke: a "Go to the menu"
+    // button whose address is the page it sits on is a loop, whatever caused it.
+    for (const [id, path] of [["P170005", "/r/french-house%20/menu"], ["P170006", "/r/%20french-house/menu"]]) {
+      const { c, pg } = await open(path, 3500);
+      const r = await pg.evaluate(() => ({ path: location.pathname, cards: document.querySelectorAll(".item-card").length }));
+      check(id, `LIVE: ${path} opens French House's menu on its one address`, () =>
+        ({ ok: r.path === "/r/french-house/menu" && r.cards > 0, note: `${r.path}, ${r.cards} dishes` }));
+      await c.close();
+    }
+    for (const path of ["/r/zz-no-such-place-t1/menu", "/r/french-house/item/zz-no-such-dish", "/r/french-house%09/menu", "/q/ZZZZZZ", "/zz-stray-t1"]) {
+      const { c, pg } = await open(path, 3500);
+      const loops = await pg.evaluate(() => [...document.querySelectorAll(".gnf a, .nf a")]
+        .map((a) => a.getAttribute("href")).filter((h) => h && new URL(h, location.href).pathname === location.pathname));
+      check("P170007", `LIVE: the dead end at ${path} offers no way out that points back at itself`, () =>
+        ({ ok: loops.length === 0, note: loops.join(", ") || "none" }));
+      await c.close();
+    }
 
     // LIVE: every shape of wrong turn. The five guest ones must reach a real menu; the switched-off
     // restaurant must NOT (its menu is closed, and a redirect would be a lie about that); the staff
