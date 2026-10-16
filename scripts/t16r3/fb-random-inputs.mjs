@@ -7,12 +7,14 @@ import { createRequire } from "node:module";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { C, ok, rng, panelFile } from "./lib.mjs";
+import { C, ok, rng, panelFile, ROOT } from "./lib.mjs";
 
 // auditsort.js through require — from a temp copy, so a mutation run judges the broken copy too.
-const tmp = mkdtempSync(join(tmpdir(), "t16r3b-"));
-writeFileSync(join(tmp, "auditsort.js"), panelFile("auditsort.js"));
-const A = createRequire(import.meta.url)(join(tmp, "auditsort.js"));
+// (Unbroken, it is required from its real path, so a coverage run credits the real file.)
+const req = createRequire(import.meta.url);
+let A;
+if (process.env.T16_MUT_REL === "public/panels/auditsort.js") { const tmp = mkdtempSync(join(tmpdir(), "t16r3b-")); writeFileSync(join(tmp, "auditsort.js"), panelFile("auditsort.js")); A = req(join(tmp, "auditsort.js")); }
+else A = req(join(ROOT, "public/panels/auditsort.js"));
 
 const NAMES = ["Asha", "asha", "Zed", "", null, "  ", "Ölga", "ravi kumar", "Émile", "12", undefined, "admin"];
 const KINDS = ["invoice_voided", "bill_deleted", "order_cancelled", "discount", "comp", "price_change", "nonsense", "", null];

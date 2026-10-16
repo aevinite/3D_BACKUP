@@ -46,7 +46,7 @@ export async function runChecks({ only = null, families = null, quiet = false, b
     if (typeof res === "string" && res.startsWith("skip:")) { mark = "⏭"; note = res.slice(5).trim(); }
     else if (res && typeof res === "object" && "ok" in res) { mark = res.ok ? "✅" : "❌"; note = res.note || note; }
     else mark = res ? "✅" : "❌";
-    rows.push({ id: c.id, family: c.family, subject: c.subject, what: c.what, mark, note: String(note).replace(/\s+/g, " ").slice(0, 300), ms: Date.now() - t0 });
+    rows.push({ id: c.id, family: c.family, subject: c.subject, what: c.what, mark, note: String(note).replace(/\s+/g, " ").slice(0, process.env.R3_NOTE ? 4000 : 300), ms: Date.now() - t0 });
     if (!quiet && mark !== "✅") console.log(`  ${mark} ${c.id}  ${c.subject} — ${c.what}${note ? ` — ${String(note).slice(0, 240)}` : ""}`);
     if (process.env.R3_PROGRESS) console.log(`  ${mark} ${c.id} ${Date.now() - t0}ms`);
     if (bail && mark === "❌") { console.log(`❌ ${c.id}`); break; }

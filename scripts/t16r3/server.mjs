@@ -9,12 +9,19 @@
 import http from "node:http";
 import { chromium, webkit, firefox } from "playwright";
 import { panelFile } from "./lib.mjs";
+// The MEASURING tool (not the test plan) is round 2's: with T16_COV=<dir> every Chromium page records which
+// characters of each shared file ran — node scripts/sweep/t16s10/cov.mjs report <dir> reads it back.
+import { covStart, covStop, covFlush } from "../sweep/t16s10/cov.mjs";
 
 const pages = new Map();
 let api = () => ({ status: 200, body: { ok: true } });
 export const log = [];
 const hung = new Set();
 export function setApi(fn) { api = fn; log.length = 0; }
+// A stand-in file at a fixed address (the live-update client at /vendor/supabase.js, the offline worker
+// at /sw.js) — so the REAL helper that loads it can be driven end to end.
+const statics = new Map();
+export function file(path, type, body) { statics.set(path, { type, body }); }
 export function page(name, { scripts = [], body = "", pre = "", head = "", after = "" } = {}) {
   pages.set(name, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script>${pre}</script>${head}</head><body>${body}` +
     scripts.map((s) => `<script src="/panels/${s}"></script>`).join("") + (after ? `<script>${after}</script>` : "") + "</body></html>");
@@ -28,6 +35,7 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname.startsWith("/p/")) { const h = pages.get(u.pathname.slice(3)); res.writeHead(h ? 200 : 404, { "content-type": "text/html; charset=utf-8" }); return res.end(h || "no such page"); }
   if (u.pathname === "/login" || u.pathname === "/start") { res.writeHead(200, { "content-type": "text/html" }); return res.end(`<!doctype html><title>${u.pathname}</title>${u.pathname}`); }
+  if (statics.has(u.pathname)) { const f = statics.get(u.pathname); res.writeHead(200, { "content-type": f.type, "cache-control": "no-store", "service-worker-allowed": "/" }); return res.end(f.body); }
   if (u.pathname === "/favicon.ico") { res.writeHead(204); return res.end(); }
   const chunks = [];
   req.on("data", (c) => chunks.push(c));
@@ -57,12 +65,13 @@ export async function open(path, o = {}) {
     hasTouch: !!o.touch, isMobile: !!o.touch && eng !== "firefox", colorScheme: o.dark ? "dark" : "light" });
   if (o.init) await ctx.addInitScript(o.init);
   const p = await ctx.newPage();
+  if (eng === "chromium") await covStart(p);
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
   if (o.clock) await p.clock.install();
   await p.goto(BASE + path, { waitUntil: "load" });
-  return { page: p, ctx, errors, close: () => ctx.close().catch(() => {}) };
+  return { page: p, ctx, errors, close: async () => { await covStop(p); await ctx.close().catch(() => {}); } };
 }
-export async function shutdown() { for (const r of hung) { try { r.destroy(); } catch {} } for (const b of Object.values(browsers)) await b.close().catch(() => {}); server.close(); }
+export async function shutdown() { await covFlush(); for (const r of hung) { try { r.destroy(); } catch {} } for (const b of Object.values(browsers)) await b.close().catch(() => {}); server.close(); }
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function until(fn, ms = 6000, step = 50) { const end = Date.now() + ms; while (Date.now() < end) { try { if (await fn()) return true; } catch {} await sleep(step); } return false; }
