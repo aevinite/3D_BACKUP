@@ -403,7 +403,17 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     const text = owner ? fs.readFileSync(path.join(migDir, owner), "utf8") : "";
     // Only the block for THIS function — a migration may define several.
     const start = text.search(new RegExp(`FUNCTION (public\\.)?${fn}\\s*\\(`));
-    const block = start < 0 ? "" : text.slice(start, start + 4000);
+    // To the function's OWN closing tag ($$, $function$, …), not a fixed 4,000 characters: migration 425's
+    // version of lfh_call_waiter_table is longer, its merge-parent hop sat past the cut, and this check
+    // went red on a function that does the right thing (sweep #10 T12 round 3, 2026-10-16).
+    const block = (() => {
+      if (start < 0) return "";
+      const rest = text.slice(start);
+      const tag = (rest.match(/\bAS\s+(\$[A-Za-z_]*\$)/) || [])[1];
+      if (!tag) return rest.slice(0, 12000);
+      const open = rest.indexOf(tag), close = rest.indexOf(tag, open + tag.length);
+      return close > open ? rest.slice(0, close + tag.length) : rest.slice(0, 12000);
+    })();
     check(
       `guest: ${fn} resolves through the merge parent (${why})`,
       /lfh_merge_parent_table/.test(block),
