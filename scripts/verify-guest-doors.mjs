@@ -188,8 +188,13 @@ check("a FAILED tenant resolve does not fall back to restaurant #1",
   /\.catch\(/.test(resolveTail) && /setId\(""\)/.test(resolveTail));
 check("…and it does not declare itself `ready` on the way past",
   /\.catch\(\(\) => \{[\s\S]{0,400}setReady\(false\)/.test(resolveTail));
-check("…while a lookup that SUCCEEDS with no row still resolves to #1 (a slug nobody owns is a different answer)",
-  /setId\(DEFAULT_RESTAURANT_ID\); setName\(null\); setReady\(true\)/.test(resolveTail));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15) — the same owner rule as item 21 ("make sure this never
+// happens"), carried one step further. A lookup that SUCCEEDS with no row used to resolve to #1, and the
+// not-found page that answers it still mounts every guest widget: measured on the built app, each then
+// asked the database about French House (settings, ban list, customer greeting). It now answers like the
+// failed lookup — no id, not ready. §18 below holds the rule; this row now asserts the new answer.
+check("…and a lookup that SUCCEEDS with no row (a slug nobody owns) is no restaurant too — never #1",
+  /setId\(""\); setName\(null\); setReady\(false\);/.test(resolveTail) && !/setId\(DEFAULT_RESTAURANT_ID\); setName\(null\); setReady\(true\)/.test(resolveTail));
 check("the server half the empty id relies on is still there — a guest write with no restaurant is REFUSED",
   ["app/api/guest/place-order/route.ts", "app/api/guest/call-waiter/route.ts"].every((f) => {
     const s = read(f);
@@ -503,8 +508,10 @@ check("…and the diner gets a sentence, not three pulsing bars",
   /\{!loaded && stalled \? \(/.test(tbill) && /can&apos;t reach the restaurant&apos;s system right now/.test(tbill));
 check("…which says nothing is lost, and offers a way to ask again",
   /Nothing is lost/.test(tbill) && /pollRef\.current\?\.\(\)/.test(tbill));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the dot now greys whenever the LATEST read failed (`stalled`),
+// not only before the first answer (`!loaded && stalled`) — the rule this row states, made stronger.
 check("…and the green 'live' dot stops claiming a live connection while it is up",
-  /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(tbill));
+  /style=\{stalled \? \{ background: "var\(--muted\)"/.test(tbill));
 // The skeleton itself must survive: it is what stops the "no dishes yet" message flashing.
 check("the loading skeleton is still there for the normal first load",
   /className="stb-loading"/.test(tbill) && /className="stb-skel"/.test(tbill));
@@ -1226,6 +1233,65 @@ flush();
   { const gone = ["ot-sheet", "ot-hide-link", "ot-cancelled-note", "ot-table-row", "ot-save", "order-confirm-done", "allergy-banner", "allergy-popup", "cart-item-warn"];
     const left = gone.filter((c) => new RegExp(`\\.${c}\\b`).test(css));
     check(`item 39 — the retired detail sheet, success step, allergy banner and warn line have no styles left (${left.join(", ") || "none"})`, !left.length); }
+}
+// ── 18. A SLUG NOBODY OWNS IS "NO RESTAURANT", NEVER RESTAURANT #1 (sweep #10 T4 round 2, 2026-10-15) ──
+// The not-found page for /r/<a slug nobody owns>/… still mounts every guest widget (GuestChrome sits in
+// the root layout). When the lookup answered null, lib/restaurant-context handed them restaurant #1 and
+// `ready`, so each asked the database about French House — its settings, its ban list, its customer
+// greeting — on a page that is not French House. Both "not found" answers must now be "no id, not ready".
+{
+  say("\n── 18. a slug nobody owns is no restaurant, never restaurant #1 (sweep #10 T4 round 2) ──");
+  const ctxSrc = codeOnly(read("lib/restaurant-context.tsx"));
+  const then = (ctxSrc.match(/\.then\(\(r\) => \{[\s\S]*?\}\)/) || [""])[0];
+  check("item — a lookup that found NO restaurant leaves no id and never says ready", /if \(r\?\.id\) \{ setId\(r\.id\); setName\(r\.name \|\| null\); setReady\(true\); return; \}\s*setId\(""\); setName\(null\); setReady\(false\);/.test(then));
+  check("item — …and nothing in that answer reaches for restaurant #1", !!then && !/DEFAULT_RESTAURANT_ID/.test(then));
+  check("item — the failed lookup still answers the same way (no id, not ready)", /\.catch\(\(\) => \{[\s\S]{0,120}setId\(""\);[\s\S]{0,200}setReady\(false\);/.test(ctxSrc));
+  check("item — the hook every widget reads hands out \"\" until the restaurant is settled", /return ready \? id : "";/.test(ctxSrc));
+}
+// ── 15. A BUSY SECOND AT THE JOIN NEVER COSTS A DINER THEIR DISHES (sweep #10 T4 round 2, 2026-10-15) ──
+// components/SessionCartSync's first merge re-merged only when the write was refused as 'cart_moved'. Any
+// other failure (a busy database, a dropped signal) had already marked the merge done, so the next refresh
+// wrote the table's old basket over the phone and the dishes the diner brought were gone — measured in the
+// screen lab. ANY failed first write must re-merge; and the merge must keep this phone's own lines.
+{
+  say("\n── 15. a busy second at the join never costs a diner their dishes (sweep #10 T4 round 2) ──");
+  const sync = codeOnly(read("components/SessionCartSync.tsx"));
+  const first = (sync.match(/const w = await setSessionCart\(s\.token, merged,[\s\S]{0,400}?\n\s*\}\n/) || [""])[0];
+  check("item — the first merge's write is read, and EVERY failure re-merges next tick (not only 'cart_moved')",
+    /if \(!w\.ok\) \{\s*reconciledToken\.current = null;/.test(first) && !/reason === "cart_moved"/.test(first));
+  check("item — …and the merge keeps every line this phone has that the table lacks",
+    /for \(const li of local\) if \(!map\.has\(lineKey\(li\)\)\) map\.set\(lineKey\(li\), li\);/.test(sync) && /if \(server\.length === 0\) return local;/.test(sync));
+  check("item — a failed LATER change (the delta) re-merges too, rather than being forgotten",
+    /\} else \{\s*reconciledToken\.current = null;\s*\}/.test(sync));
+}
+// ── 16. THE TABLE BILL'S "LIVE" DOT NEVER CLAIMS LIVE OVER A BILL IT COULD NOT REFRESH (T4 round 2) ──
+// components/SessionTableBill greyed its pulsing dot only when the FIRST read failed (`!loaded && stalled`).
+// A restaurant that stopped answering mid-meal left the last good bill on screen — right — under a dot still
+// pulsing "live", over numbers that could be minutes old. The dot now follows the latest read alone.
+{
+  say("\n── 16. the table bill's live dot follows the latest read (sweep #10 T4 round 2) ──");
+  const tb = codeOnly(read("components/SessionTableBill.tsx"));
+  const dot = (tb.match(/<span className="stb-dot"[\s\S]{0,240}?\/>/) || [""])[0];
+  check("item — the dot greys whenever the latest read failed, not only before the first answer", /style=\{stalled \?/.test(dot) && !/!loaded && stalled/.test(dot));
+  check("item — …a later failure still keeps the last good bill (the stalled message is for the first read only)", /\{!loaded && stalled \? \(/.test(tb));
+  check("item — …and a read that lands clears it", /setStalled\(false\);/.test(tb));
+}
+// ── 17. A JOIN THE RESTAURANT ANSWERED IS NEVER "COULDN'T REACH IT" (sweep #10 T4 round 2, 2026-10-15) ──
+// components/SessionGate: the join's own rate limit and a device ban fell through to "We couldn't reach the
+// restaurant's system just now", so a diner tried again at once (the limit) or forever (the ban). The
+// no-signal order save could throw past its caller and leave "One moment…" up for good, and the Retry that
+// could not tell the restaurant kept the previous screen's fault (a wifi mark on a restaurant problem).
+{
+  say("\n── 17. a join the restaurant answered is said as its answer (sweep #10 T4 round 2) ──");
+  const gate = codeOnly(read("components/SessionGate.tsx"));
+  const jf = (gate.match(/const joinFailedNote = [\s\S]*?;\n/) || [""])[0];
+  check("item — a join over its limit says to WAIT, not that the restaurant could not be reached", /r\.reason === "rate_limited" \? "That's a lot of tries in a row — please wait a moment, then try again\."/.test(jf));
+  check("item — …a banned phone is sent to a member of staff, not told to try again", /r\.reason === "banned" \? "We can't seat this phone at a table — please speak to a member of staff\."/.test(jf));
+  check("item — …and anything else still goes through the one three-way verdict", /: reachNote\(faultOfAnswer\(r\)\)/.test(jf));
+  check("item — the no-signal order save cannot strand the sheet on 'One moment…' (its failure falls through)",
+    /navigator\.onLine === false\) \{\s*try \{ await saveForLater\(true\); return; \} catch \{/.test(gate));
+  const rf = (gate.match(/const retryFlow = async \(\) => \{[\s\S]*?\n {2}\};/) || [""])[0];
+  check("item — a Retry that cannot tell which restaurant this is says 'unknown', never the last screen's fault", /if \(!rid\) \{\s*setNetFault\("unknown"\);/.test(rf));
 }
 // ── SHOW WHAT WAS COUNTED (sweep #9 T3 round 2) ────────────────────────────────────────────────
 //

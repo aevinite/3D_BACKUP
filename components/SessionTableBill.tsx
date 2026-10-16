@@ -208,9 +208,13 @@ export default function SessionTableBill() {
       <div className="stb-head">
         {/* The green pulsing dot MEANS "this is live". While we are telling the diner we cannot
             reach the restaurant's system, it would be claiming the opposite, so it goes grey and
-            stops pulsing until a read lands. (sweep 7 T3) */}
+            stops pulsing until a read lands. (sweep 7 T3) — AND after a LATER read fails (sweep #10
+            T4 round 2): the last good bill stays on screen, which is right, but it is no longer
+            live, so the dot no longer says it is. It was `!loaded && stalled`, so only a failed
+            FIRST read greyed it; a restaurant that stopped answering mid-meal kept a pulsing
+            "live" dot over a bill that could be minutes old. */}
         <span className="stb-dot" aria-hidden="true"
-          style={!loaded && stalled ? { background: "var(--muted)", boxShadow: "none", animation: "none" } : undefined} />
+          style={stalled ? { background: "var(--muted)", boxShadow: "none", animation: "none" } : undefined} />
         Your table{table ? ` · Table ${table}` : ""}
         {/* Only show the guest count when more than one person shares the table. */}
         {members > 1 && <span className="stb-members">{members} guests</span>}

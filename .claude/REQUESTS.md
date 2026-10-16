@@ -1931,3 +1931,14 @@ UI also of the manager panel bill section — it doesn't look as cool as it shou
 - [x] **First-login card** — a save made with no signal lets the person carry on. Guard: verify:panel-helpers-driven §3.
 - [x] **The "saved on this device" sheet** — every waiting change has a readable name, and same-instant changes keep their order after a reload. Guard: verify:outbox §16, §17.
 - [x] **The whole test re-planned by measurement** — coverage (every reachable line runs) + mutation testing (510 breaks, 459 caught, the other 49 shown harmless). `.claude/sweep/T16-S10-findings.md` → Round 2.
+
+## 2026-10-15 — owner (sweep #10 T4): "start a phases test again replan whole test make sure every single thing within the boundaries … covered … I want it completely error free"
+
+- [x] **Re-run first** — the 579 round-1 checks and the 2,000 earlier rows on the table-session files, against today's code and the guards they lean on; nine old checks re-aimed (their subject moved on purpose). Backend only, nothing on screen.
+- [x] **Every line and every break point, measured** — coverage of all 24 files (in memory and in a new screen lab for the seven screens) and mutation testing until every one of the 1,022 break points was tried: 859 caught, 163 shown to make no difference. 361 new checks, all green, live on the built app too. Backend only, nothing on screen.
+- [x] **A mistyped or dead restaurant link no longer makes the page ask about French House** — Guest menu → `/r/<a slug nobody owns>/…` → the "not available" page asks the database nothing for restaurant #1. Guard: verify:guest-doors §18.
+- [x] **A busy second at the join no longer wipes the dishes a diner brought** — Guest menu → join a table that has its own basket: your own dishes reach the table on the next refresh. Guard: verify:guest-doors §15.
+- [x] **The table bill's "live" dot stops pulsing when a refresh fails** — Guest menu → basket → "Your table". Guard: verify:guest-doors §16.
+- [x] **A refused join is said as what it was** — Guest menu → table sheet: "too many tries — wait a moment" / "speak to a member of staff", not "couldn't reach the restaurant". Guard: verify:guest-doors §17.
+- [ ] **WAITING ON THE OWNER:** `/q/<a code nobody owns>` still lets the guest widgets fall back to French House — the fix belongs to the QR-door page (another territory). See the report's Part 4.
+

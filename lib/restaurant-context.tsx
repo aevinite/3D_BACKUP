@@ -219,12 +219,21 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
         // somebody else's money. `ready` stays FALSE, which is what BanGate and CustomerGreeter
         // already wait on.
         //
-        // A lookup that succeeds and returns null (a slug nobody owns) is a DIFFERENT answer and keeps
-        // its old behaviour: there is no restaurant to be wrong about.
+        // A SLUG NOBODY OWNS IS "NO RESTAURANT", NOT RESTAURANT #1 (sweep #10 T4 round 2, 2026-10-15).
+        // A lookup that succeeds and returns null used to set restaurant #1 and `ready` — on the
+        // reasoning that there was "no restaurant to be wrong about". Measured on the built app: the
+        // not-found page for `/r/<a slug nobody owns>/menu` still mounts every guest widget
+        // (components/GuestChrome.tsx is in the root layout), and each of them then asked the database
+        // about FRENCH HOUSE — its settings, its ban list, and lfh_greet_device, which greets a known
+        // French House customer by name. A mistyped link, or the QR code of a restaurant that has gone,
+        // is not French House. It now takes the same answer as the failed lookup above it — no id,
+        // never ready — which every widget already waits on, so the page asks nothing of anybody.
+        // A real restaurant's pages cannot reach this branch: they resolve. Guarded by
+        // verify:guest-doors §18 and the screen lab (scripts/sweep/t4s10/new-j-lab.mjs).
         .then((r) => {
           if (!alive) return;
           if (r?.id) { setId(r.id); setName(r.name || null); setReady(true); return; }
-          setId(DEFAULT_RESTAURANT_ID); setName(null); setReady(true);
+          setId(""); setName(null); setReady(false);
         })
         .catch(() => {
           if (!alive) return;

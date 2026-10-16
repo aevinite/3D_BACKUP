@@ -229,8 +229,11 @@ P("P16161", "the returning-guest greeting checks the answer before using the nam
   /if \(cancelled \|\| !r \|\| r\.known !== true\) return;/.test(F.greeter));
 P("P16162", "…and an empty name is not greeted as one",
   /if \(!name\) return;/.test(F.greeter));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the first-merge write now re-merges on ANY failure, not only
+// 'cart_moved' — a busy second used to mark the merge done and let the next refresh wipe the dishes a diner
+// brought to the table (measured in scripts/sweep/t4s10's screen lab). The rule this row states still holds.
 P("P16163", "the shared-cart first merge reads whether it was refused, and re-merges rather than forcing",
-  /if \(!w\.ok && \(w as \{ reason\?: string \}\)\.reason === "cart_moved"\)/.test(F.sync));
+  /const w = await setSessionCart\(s\.token, merged,[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(!w\.ok\) \{\s*\n\s*reconciledToken\.current = null;/.test(F.sync));
 P("P16164", "…and a later delta adopts whatever the server merged back",
   /if \(res\.ok && Array\.isArray\(merged\)\)/.test(F.sync));
 P("P16165", "…and a transient pull failure does NOT reset the sync state (it would resurrect a removed dish)",
@@ -338,8 +341,10 @@ P("P16208", "the loading skeleton still exists for the ordinary first load",
   /className="stb-loading"/.test(F.tbill) && /className="stb-skel"/.test(F.tbill));
 P("P16209", "…and the true 'nothing ordered yet' message is still a separate, later state",
   /No dishes sent to the kitchen yet/.test(F.tbill));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): the dot now greys whenever the LATEST read failed (`stalled`),
+// not only before the first answer (`!loaded && stalled`) — the rule this row states, made stronger.
 P("P16210", "the green live dot stops claiming a live connection while that message is up",
-  /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(F.tbill));
+  /style=\{stalled \? \{ background: "var\(--muted\)"/.test(F.tbill));
 // RE-AIMED, sweep #10 T4 (2026-10-12). Sweep #9 item 7 DELIBERATELY added a third "working" screen:
 // Place order and Call a waiter now open the sheet on "One moment…" BEFORE the restaurant's rules are
 // read, so a tap is never silent. Every exit from it is a named screen (net_error, ask_table, or the
@@ -735,8 +740,9 @@ P("P16368", "…with a line identity that keeps the same dish with different opt
   /const lineKey = \(i: Line\) => `\$\{i\.id\}__\$\{i\.sig \?\? "\[\]"\}`;/.test(F.sync));
 P("P16369", "…and the one whole-array write tells the server what it was editing FROM",
   /setSessionCart\(s\.token, merged, \(r as \{ cart_updated_at\?: string \| null \}\)\.cart_updated_at \?\? null\)/.test(F.sync));
+// RE-AIMED, sweep #10 T4 round 2 (2026-10-15): same line, now re-merging on any failed first write (see P16163).
 P("P16370", "…so a concurrent add is REFUSED and re-merged, never overwritten",
-  /reconciledToken\.current = null; \/\/ someone else got there first — merge again next tick/.test(F.sync));
+  /if \(!w\.ok\) \{\s*\n\s*reconciledToken\.current = null; \/\/ someone else got there first, or nobody heard — merge again next tick/.test(F.sync));
 P("P16371", "every later change is a DELTA, so a co-diner's add is never dropped",
   /mergeSessionCart\(token, added, removed, qty\)/.test(F.sync));
 P("P16372", "…computed against the last state we synced, not against a render value",

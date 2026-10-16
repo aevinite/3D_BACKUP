@@ -995,7 +995,9 @@ check("P59096","one ask per return, not two",()=>
 check("P59097","a network blip never lifts or drops the wall by accident",()=>
   has(BAN,/if \(r\.ok !== false && r\.banned\)/));
 check("P59098","an unblock request only claims success when a row really changed",()=>
-  has(BAN,/if \(r\.ok\) setRequested\(true\);\n\s*else setFailed\(true\); \/\/ refuse visibly rather than pretend/));
+  // RE-AIMED, sweep #10 T4 round 2 (2026-10-15): sweep #10 T4 item 4 (2026-10-12) turned the one failure flag into
+  // the REASON sentence (number / busy / offline / not sent). The rule holds — success only when a row changed.
+  has(BAN,/if \(r\.ok\) \{ setRequested\(true\); return; \}\s*\n[\s\S]{0,600}?setFailed\(\s*\n?\s*r\.reason === "not_blocked"/));
 check("P59099","the send button refuses a too-short number rather than posting it",()=>
   has(BAN,/if \(p\.length < 5 \|\| sending\) return;/));
 check("P59100","not banned renders nothing",()=>has(BAN,/if \(!banned\) return null;/));
@@ -1264,7 +1266,8 @@ check("P59225","a first read that never lands says so instead of shimmering for 
 check("P59226","that screen offers a way to ask again",()=>
   has(STB,/onClick=\{\(\) => \{ setStalled\(false\); pollRef\.current\?\.\(\); \}\}/));
 check("P59227","the live dot stops claiming to be live while we cannot reach the system",()=>
-  has(STB,/style=\{!loaded && stalled \? \{ background: "var\(--muted\)", boxShadow: "none", animation: "none" \} : undefined\}/));
+  // RE-AIMED, sweep #10 T4 round 2 (2026-10-15): greys on ANY failed latest read now, not only the first.
+  has(STB,/style=\{stalled \? \{ background: "var\(--muted\)", boxShadow: "none", animation: "none" \} : undefined\}/));
 check("P59228","EVERY money figure on the guest's bill is the server's",()=>
   hasNot(codeOf(STB),/subtotal \* |\* rate|\* 0\.\d/));
 check("P59229","the MRP row is drawn only when the SERVER sends the split",()=>
@@ -1643,7 +1646,10 @@ check("P59467","a table's opening splash is its own restaurant's, once per visit
 check("P59468","a maintenance screen does not promise a time nobody can keep",()=>
   hasNot(codeOf(MAINT),/few minutes/));
 check("P59469","a blocked guest is given something to do, not just a wall",()=>has(BAN,/Request unblock/));
-check("P59470","…and is only told their request landed when it really did",()=>has(BAN,/else setFailed\(true\)/));
+check("P59470","…and is only told their request landed when it really did",()=>
+  // RE-AIMED, sweep #10 T4 round 2 (2026-10-15): sweep #10 T4 item 4 (2026-10-12) turned the one failure flag into
+  // the REASON sentence (number / busy / offline / not sent). The rule holds — success only when a row changed.
+  has(BAN,/if \(r\.ok\) \{ setRequested\(true\); return; \}/) && has(BAN,/setFailed\(""\);/));
 check("P59471","a host approving a friend is told when it did not work",()=>has(SO,/We couldn't let them in just now/));
 check("P59472","a diner's own saved order is visible to them, with something to do about it",()=>
   has(GOC,/Try again/) === true && has(GOC,/Remove/) === true);
