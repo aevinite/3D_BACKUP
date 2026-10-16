@@ -715,6 +715,9 @@ async function live(base) {
       const named = nodes.filter((n) => !n.ignored && /^(Non-)?Vegetarian$/.test(n.name?.value || "")).length;
       check("P170009", "LIVE: every veg / non-veg badge on the menu is reachable by a screen reader", () =>
         ({ ok: badges > 0 && named === badges, note: `${badges} badges drawn, ${named} in the accessibility tree` }));
+      const glyphs = nodes.filter((n) => !n.ignored && n.role?.value === "link" && /[\uf000-\uf8ff]/.test(n.name?.value || "")).map((n) => n.name.value.slice(0, 30));
+      check("P170011", "LIVE: no dish card's spoken name contains an icon-font glyph", () =>
+        ({ ok: glyphs.length === 0, note: glyphs.join(" | ") || "none" }));
       await c.close(); }
     for (const path of ["/r/zz-no-such-place-t1/menu", "/r/french-house/item/zz-no-such-dish", "/r/french-house%09/menu", "/q/ZZZZZZ", "/zz-stray-t1"]) {
       const { c, pg } = await open(path, 3500);
@@ -1086,6 +1089,21 @@ check("P170008", "no page hides the veg / non-veg badge from a screen reader by 
     for (const m of c.matchAll(/<(div|span)\b([^>]*)>\s*<VegIcon\b/g)) if (/aria-hidden/.test(m[2])) bad.push(f.split("/").pop());
   }
   return { ok: bad.length === 0, note: bad.length ? `aria-hidden wrapper in ${bad.join(", ")}` : "both places that draw the badge leave it readable" };
+});
+// AN ICON-FONT GLYPH IS NOT A WORD (sweep #10 T1, item 4). A Font Awesome <i> draws a private-use character;
+// unless it is hidden, or sits inside a control that has its own spoken label, that character becomes part of
+// the accessible name of whatever holds it. The two cubes on a 3D dish card did exactly that.
+check("P170010", "every icon on a dish card is hidden from a screen reader or sits inside a labelled button", () => {
+  const c = code("components/FoodCard.tsx") || "";
+  const bad = [];
+  for (const m of c.matchAll(/<i className="fas ([^"]+)"([^>]*)>/g)) {
+    if (/aria-hidden="true"/.test(m[2])) continue;
+    const before = c.slice(Math.max(0, m.index - 400), m.index);
+    const btn = before.lastIndexOf("<button"), close = before.lastIndexOf("</button>");
+    if (btn > close && /aria-label=/.test(before.slice(btn))) continue;
+    bad.push(m[1]);
+  }
+  return { ok: bad.length === 0, note: bad.join(", ") || "every icon is hidden or inside a labelled button" };
 });
 check("P102060", "…and the badge still carries no colour of its own", () =>
   ({ ok: !rx(code("components/VegIcon.tsx"), /#[0-9a-fA-F]{3,6}/),

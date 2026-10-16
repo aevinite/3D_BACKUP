@@ -344,9 +344,12 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           />
           {/* Show a little "4D" cube badge only if this dish has a 3D model
               (and the restaurant hasn't switched the 3D feature off). */}
+          {/* The cube is drawn by the icon font, so without aria-hidden a screen reader reads its
+              glyph as part of the card's name — measured in Chrome's tree: "Avocado & Cream Cheese,
+              <U+F1B2> 4D, …" (sweep #10 T1, item 4). The word "4D" beside it is what is meant. */}
           {has3d ? (
             <div className="badge-4d">
-              <i className="fas fa-cube"></i> 4D
+              <i className="fas fa-cube" aria-hidden="true"></i> 4D
             </div>
           ) : null}
         </div>
@@ -354,7 +357,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           <div className="dish-name" ref={nameRef}>
             {localized(item.titleI18n || {}, lang) || item.title}
             {/* A small cube icon beside the name for 4D dishes */}
-            {has3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
+            {has3d ? <i className="fas fa-cube dish-4d-icon" aria-hidden="true"></i> : null}
           </div>
           {/* Rating (real average) and prep time. Dishes with no reviews yet
               show only the prep time — no invented stars, no extra badges
