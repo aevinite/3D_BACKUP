@@ -19,7 +19,6 @@ const bar = (p) => p.evaluate(() => { const b = document.getElementById("lfhOffB
 const sheetText = (p) => p.evaluate(() => { const s = document.querySelector(".lfh-off-sheet"); return s ? s.innerText.replace(/\s+/g, " ").trim() : null; });
 const send = (p, t, k = "discount") => p.evaluate(([t, k]) => window.LFH_OUTBOX.send({ base: "/api/editor", method: "POST", path: `/tables/${t}/${k}`, body: { x: 1 }, table: t }).catch((e) => ({ thrown: e.message })), [t, k]);
 const offline = (p) => p.evaluate(() => { sessionStorage.setItem("off", "1"); window.__on = false; window.dispatchEvent(new Event("offline")); });
-const online = (p) => p.evaluate(() => { sessionStorage.removeItem("off"); window.__on = true; window.dispatchEvent(new Event("online")); });
 
 C("I", "offline.js", "no signal and a change waiting: the bar says 'No internet — you can keep working · 1 change waiting to send' as a status, See opens 'Saved on this device' with the change 'waiting for internet'; the table's tile carries ⏳ with a spoken name", async () => {
   setApi(() => ({ status: 200, body: { ok: true } }));

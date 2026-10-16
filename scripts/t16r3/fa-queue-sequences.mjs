@@ -11,7 +11,7 @@
 //   3. ORDER PER TABLE — on every table, accepted changes arrive in the order they were made.
 //   4. EVERYTHING LISTED READS AS WORDS — no id, no raw path in any label.
 //   5. THE PAGE NEVER THROWS, and the queue is settled (nothing left waiting).
-import { C, ok, rng } from "./lib.mjs";
+import { C, rng } from "./lib.mjs";
 import { page, open, setApi, log, sleep, until } from "./server.mjs";
 
 const PACE = "window.LFH_TEST_PACING={first:60,base:80,max:240,wake:0,stuck:60000};";
@@ -68,7 +68,7 @@ async function runSeed(seed) {
     else if (roll < 0.80) { trace.push("reload"); await p.reload().catch(() => {}); await p.waitForFunction(() => !!window.LFH_OUTBOX).catch(() => {}); }
     else if (roll < 0.90) { trace.push("wake"); await p.evaluate(() => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); }).catch(() => {}); }
     else { const ms = R.int(20, 400); trace.push(`wait${ms}`); await sleep(ms); }
-    if (process.env.R3_TRACE) console.log(trace[trace.length - 1].padEnd(14), JSON.stringify(await p.evaluate(() => { const x = window.LFH_OUTBOX.getSnapshot(); return { q: x.queued.map((y) => y.body && y.body.seq), f: x.failed.map((y) => y.body && y.body.seq) }; }).catch((e) => "gone")));
+    if (process.env.R3_TRACE) console.log(trace[trace.length - 1].padEnd(14), JSON.stringify(await p.evaluate(() => { const x = window.LFH_OUTBOX.getSnapshot(); return { q: x.queued.map((y) => y.body && y.body.seq), f: x.failed.map((y) => y.body && y.body.seq) }; }).catch(() => "gone")));
   }
   // ── settle: the server is healthy, the device online, and the person taps Try again ──
   for (const t of Object.keys(mode)) mode[t] = "ok";

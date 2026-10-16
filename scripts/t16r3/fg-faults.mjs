@@ -37,7 +37,7 @@ export async function openPanel(role, dir, fault) {
   // The crash reporter's beacon is caught in the page and kept there.
   await ctx.addInitScript(() => {
     window.__crash = [];
-    try { navigator.sendBeacon = function (u, b) { try { b && b.text ? b.text().then((t) => window.__crash.push(u + " " + t)) : window.__crash.push(u + " " + b); } catch (e) {} return true; }; } catch (e) {}
+    try { navigator.sendBeacon = function (u, b) { try { b && b.text ? b.text().then((t) => window.__crash.push(u + " " + t)) : window.__crash.push(u + " " + b); } catch { /* never break the page */ } return true; }; } catch { /* a browser without sendBeacon */ }
   });
   const seen = { gets: [], writes: 0 };
   // A mutation run: the real panel is handed the BROKEN copy of the one shared file under test.
@@ -95,9 +95,9 @@ async function recovers(h, fault, liftAt) {
 }
 
 const SCEN = {
-  "a BUSY server for the first 10 seconds (every read answers 503 + X-LFH-Busy)": { kind: "busy", mk: (t0) => (u) => (Date.now() - t0 < 10000 ? "busy" : "ok"), lift: 10000 },
-  "a server that HANGS for the first 20 seconds (every read waits and never answers)": { kind: "hang", mk: (t0) => (u) => (Date.now() - t0 < 20000 ? "hang" : "ok"), lift: 20000 },
-  "an ERRATIC server for 30 seconds (each read: fine, busy, dropped or slow, at random) with the tab losing and regaining focus": { kind: "chaos", mk: (t0, R) => (u) => (Date.now() - t0 < 30000 ? R.pick(["ok", "ok", "busy", "drop", "slow"]) : "ok"), lift: 30000 },
+  "a BUSY server for the first 10 seconds (every read answers 503 + X-LFH-Busy)": { kind: "busy", mk: (t0) => () => (Date.now() - t0 < 10000 ? "busy" : "ok"), lift: 10000 },
+  "a server that HANGS for the first 20 seconds (every read waits and never answers)": { kind: "hang", mk: (t0) => () => (Date.now() - t0 < 20000 ? "hang" : "ok"), lift: 20000 },
+  "an ERRATIC server for 30 seconds (each read: fine, busy, dropped or slow, at random) with the tab losing and regaining focus": { kind: "chaos", mk: (t0, R) => () => (Date.now() - t0 < 30000 ? R.pick(["ok", "ok", "busy", "drop", "slow"]) : "ok"), lift: 30000 },
 };
 for (const [role, dir] of PANELS) for (const [name, sc] of Object.entries(SCEN)) C("G", `${dir} panel (real)`, `${role}: ${name} — never throws, no crash report, no technical words${sc.kind === "busy" ? ", never blames the internet" : ""}, and comes back by itself`, async () => {
   if (!BASE) return "skip: needs a running app — pass --base http://localhost:<port> (never a default port)";
