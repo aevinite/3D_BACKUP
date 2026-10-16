@@ -72,7 +72,7 @@ terminals' rows — keep both sides.
 | T17 | `P186001`–`P187000` + `P161001`–`P163997` (rounds 3–6; extra ids from the planning gap, owner item 21) | Logins, sign-outs and the gates every request passes | `T17-S10.md` | 3997 | 3991 | 29 | 29 |
 | T18 | `P187001`–`P188000` + `P165001`–`P165999` (round 2, the last free block of the planning gap — claimed on `main` before a row was written; owner asked 2026-10-10 for 500–1000 more, "every single bit") | The access and permission model | `T18-S10.md` | 1106 | 1106 | 27 | 27 |
 | T19 | `P188001`–`P189000` | The admin's Access screens and people | ⏳ not run yet | — | — | — | — |
-| T20 | `P189001`–`P190000` | The owner's home dashboard | ⏳ not run yet | — | — | — | — |
+| T20 | `P189001`–`P190000` | The owner's home dashboard | `T20-S10.md` | 503 | 503 | 9 | 9 |
 | T21 | `P190001`–`P191000` | The owner's Reports, every chart, and the analytics behind them | ⏳ not run yet | — | — | — | — |
 | T22 | `P191001`–`P192000` | The owner's Audit & logs, and the Team | ⏳ not run yet | — | — | — | — |
 | T23 | `P192001`–`P193000` | The owner's Customers, Pay Later, Loyalty, Inventory, Complaints and Ratings | ⏳ not run yet | — | — | — | — |

@@ -54,9 +54,9 @@ await chk(id(9), "every tile says WHY, in the same words", async () => {
   return subs.length === 5 && same.length === 5 ? true : `captions: ${JSON.stringify(subs)}`;
 });
 await chk(id(10), "no tile opens a popup in this state", async () => {
-  const before = await A.pg.locator(".ow2-tile").count();
+  const before = await A.pg.locator(".tdk").count();
   for (let i = 0; i < 5; i++) { await A.pg.locator(".ow2-kpi").nth(i).click({ force: true }); await A.pg.waitForTimeout(200); }
-  const after = await A.pg.locator(".ow2-tile").count();
+  const after = await A.pg.locator(".tdk").count();
   return before === 0 && after === 0 ? true : `${after} popups opened`;
 });
 await chk(id(11), "…and none of them is a clickable button any more", async () => {
@@ -308,16 +308,16 @@ await chk(id(67), "the tile popup's 'Open Audit & logs' link follows the OVERVIE
   // open this section at all", the other is "did this particular read work". Refusing the read
   // must NOT hide the door, or a blip would look like a permission.
   await G.pg.locator(".ow2-kpi").first().click();
-  await G.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const link = await G.pg.locator(".ow2-tile .nlink").count();
+  await G.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const link = await G.pg.locator(".tdk .nlink").count();
   await G.pg.keyboard.press("Escape");
   await G.pg.waitForTimeout(300);
   return link === 1 ? true : `the door was withheld because ONE read failed (links=${link})`;
 });
 await chk(id(68), "…but the sentence explaining cancellations still stands on its own", async () => {
   await G.pg.locator(".ow2-kpi").first().click();
-  await G.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const t = await G.pg.locator(".ow2-tile").innerText();
+  await G.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const t = await G.pg.locator(".tdk").innerText();
   await G.pg.keyboard.press("Escape");
   await G.pg.waitForTimeout(300);
   return /cancelled bill is not money you lost/i.test(t) ? true : "the explanation went with the link";

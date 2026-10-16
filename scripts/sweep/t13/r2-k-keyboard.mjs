@@ -109,18 +109,18 @@ await chk(id(n++), "…and ENTER on a tile opens its popup", async () => {
   if (!f) return "no tile reachable";
   await pg.keyboard.press("Enter");
   await pg.waitForTimeout(600);
-  return (await pg.locator(".ow2-tile").count()) === 1 ? true : "Enter on a tile did nothing";
+  return (await pg.locator(".tdk").count()) === 1 ? true : "Enter on a tile did nothing";
 });
 await chk(id(n++), "…and the popup announces itself as a dialog with a name", async () => {
-  const role = await pg.locator(".ow2-tile-wrap").getAttribute("role");
-  const label = await pg.locator(".ow2-tile-wrap").getAttribute("aria-label");
-  const modal = await pg.locator(".ow2-tile-wrap").getAttribute("aria-modal");
+  const role = await pg.locator(".tdk-wrap").getAttribute("role");
+  const label = await pg.locator(".tdk-wrap").getAttribute("aria-label");
+  const modal = await pg.locator(".tdk-wrap").getAttribute("aria-modal");
   return role === "dialog" && !!label && modal === "true" ? true : `role=${role} label=${label} modal=${modal}`;
 });
 await chk(id(n++), "…and ESCAPE closes it", async () => {
   await pg.keyboard.press("Escape");
   await pg.waitForTimeout(450);
-  return (await pg.locator(".ow2-tile").count()) === 0 ? true : "Escape left the popup open";
+  return (await pg.locator(".tdk").count()) === 0 ? true : "Escape left the popup open";
 });
 await chk(id(n++), "…and SPACE opens one too, the way a button should", async () => {
   await pg.locator("body").click({ position: { x: 3, y: 3 } });
@@ -128,15 +128,15 @@ await chk(id(n++), "…and SPACE opens one too, the way a button should", async 
   if (!f) return "no tile reachable";
   await pg.keyboard.press("Space");
   await pg.waitForTimeout(600);
-  const open = (await pg.locator(".ow2-tile").count()) === 1;
+  const open = (await pg.locator(".tdk").count()) === 1;
   await pg.keyboard.press("Escape"); await pg.waitForTimeout(350);
   return open ? true : "Space on a tile did nothing";
 });
 await chk(id(n++), "…and the popup's close control is reachable and labelled", async () => {
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const label = await pg.locator(".ow2-tile .x").getAttribute("aria-label");
-  const tag = await pg.locator(".ow2-tile .x").evaluate((e) => e.tagName);
+  await pg.waitForSelector(".tdk", { timeout: 10000 });
+  const label = await pg.locator(".tdk .x").getAttribute("aria-label");
+  const tag = await pg.locator(".tdk .x").evaluate((e) => e.tagName);
   await pg.keyboard.press("Escape"); await pg.waitForTimeout(350);
   return tag === "BUTTON" && label === "Close" ? true : `tag=${tag} label=${label}`;
 });
@@ -283,7 +283,7 @@ await E.ctx.close();
 await chk(id(n++), "opening and closing a popup does not strand focus on nothing", async () => {
   await pg.locator("body").click({ position: { x: 3, y: 3 } });
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile", { timeout: 10000 });
+  await pg.waitForSelector(".tdk", { timeout: 10000 });
   await pg.keyboard.press("Escape");
   await pg.waitForTimeout(500);
   const f = await focused();

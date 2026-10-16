@@ -72,6 +72,13 @@ export async function resolveOwnerHomeRid(
  */
 export async function loginNameTaken(key: string): Promise<boolean> {
   const dup = await sb.from("staff_users").select("id").eq("username", key).is("deleted_at", null).limit(1);
+  // ── A FAILED READ IS NOT "THE NAME IS FREE" (sweep #10 T20, item 7) ─────────────────────────────
+  // This returned `!!dup.data?.[0]` whatever happened, and a read that FAILS has no data — so a
+  // database blip answered "free". This check is GLOBAL while the database's own unique rule is per
+  // restaurant (mig 245), so nothing behind it would catch a second owner taking a live owner's name
+  // from another restaurant: two people with one login name. Measured: with the read failing, this
+  // answered false. It now refuses to answer; the caller's request fails and nothing is renamed.
+  if (dup.error) throw new Error("Couldn't check whether that name is free just now — please try again.");
   return !!dup.data?.[0];
 }
 
@@ -95,7 +102,13 @@ export async function loginNameTaken(key: string): Promise<boolean> {
  * Returns null when the name is free, otherwise a sentence the admin can act on.
  */
 export async function nameTakenMessage(key: string): Promise<string | null> {
-  const holders = await liveHoldersOfName(key);
+  // A failed read is a REFUSAL with a sentence, never "free" (item 7, above). Both callers already
+  // return this message as a 409 and stop, so the admin reads why and nothing is created.
+  let holders: Awaited<ReturnType<typeof liveHoldersOfName>>;
+  try { holders = await liveHoldersOfName(key); }
+  catch {
+    return `We couldn’t check whether “${key}” is free just now — please try again in a moment.`;
+  }
   if (!holders.length) return null;
   const h = holders[0];
   let where = "";
@@ -114,5 +127,8 @@ export async function liveHoldersOfName(key: string): Promise<
   const q = await sb.from("staff_users")
     .select("id, name, username, role, active, restaurant_id")
     .eq("username", key).is("deleted_at", null).limit(10);
+  // Same rule (item 7): an empty list means "nobody holds it", so a failed read must not produce one —
+  // the owner-restore flow would otherwise hand a live name to the restored owner.
+  if (q.error) throw new Error("Couldn't check who holds that name just now — please try again.");
   return (q.data || []) as { id: string; name: string | null; username: string; role: string; active: boolean; restaurant_id: string | null }[];
 }

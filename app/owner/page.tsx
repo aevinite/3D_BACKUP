@@ -80,7 +80,9 @@ type Restaurant = {
   // look dead — every money cell below says "hidden" instead (found 2026-08-04).
   reportsOff?: boolean;
 };
-type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean> };
+type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean>;
+  // Which optional modules ANY restaurant of this owner has switched on (the overview route's probe).
+  modules?: { payroll: boolean; inventory: boolean } };
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
 type TsRow = { bucket: string; restaurantId?: string; revenue: number; orders: number };
 type TsPrevRow = { bucket: string; revenue: number };
@@ -332,17 +334,16 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
     const close = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.(`[data-rng="${id}"]`)) setOpen(false);
     };
-    // ── ESCAPE, TOO (T13 round 2, 2026-09-05) ───────────────────────────────────────────────
-    // This closed on an outside click and on the phone's BACK, and did nothing at all on Escape —
-    // while the tile popup and the estate drawer have both bound it for months. The drawer was
-    // given Escape on 2026-08-06 for exactly this reason, written down at the time: "on a desktop
-    // that meant the one habit that works everywhere else silently did nothing here." This is the
-    // control on the page he touches most, and it was the one still missing it.
-    // Measured from the keyboard: the list stayed open and aria-expanded stayed true.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // ── ESCAPE IS THE BACK-STACK MANAGER'S NOW — OBITUARY (sweep #10 T20, item 9) ──────────────────
+    // This used to bind its own Escape (T13 round 2, 2026-09-05: "the control he touches most was the one
+    // still missing it"). On 2026-10-03 lib/backStack.ts learned Escape for EVERY registered layer — it
+    // closes whichever popup is on top — and the two together closed TWO layers on one key: this page's
+    // listener shut the popup first, so the manager, a beat later, found the layer UNDER it on top and shut
+    // that too. Measured on the tile sheet inside one restaurant: sheet gone at 37 ms, the restaurant view
+    // closed at 109 ms, and he was back on "All restaurants". Escape still closes this list — through
+    // useBackClose above, the one way. Do not add a keydown listener back to any overlay on this page.
     document.addEventListener("click", close);
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", key); };
+    return () => { document.removeEventListener("click", close); };
   }, [open, id]);
   const cur = RANGES.find((r) => r.k === value)!;
   return (
@@ -408,11 +409,9 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
     const close = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.("[data-restdrop]")) setOpen(false);
     };
-    // Escape as well — the same gap, and the same cure, as the period dropdown above.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // Escape closes it through useBackClose above — see the obituary in the period dropdown (item 9).
     document.addEventListener("click", close);
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("click", close); document.removeEventListener("keydown", key); };
+    return () => { document.removeEventListener("click", close); };
   }, [open]);
   const idx = activeRid ? rests.findIndex((r) => r.id === activeRid) : -1;
   const cur = idx >= 0 ? rests[idx] : null;
@@ -1032,7 +1031,22 @@ export default function OwnerDashboard() {
   useEffect(() => { if (activeRid) { setActs(null); setActsErr(false); fetchActs(activeRid); } }, [activeRid, fetchActs]);
   // Same trigger as the activity log: when the chosen restaurant changes, ask again. Clearing it
   // first matters — a stale count from the previous restaurant is worse than no count.
-  useEffect(() => { if (activeRid) { setStockCounts(null); fetchStockCounts(activeRid); } }, [activeRid, fetchStockCounts]);
+  //
+  // ── ONLY ASK WHERE THE ANSWER CAN BE YES (sweep #10 T20, item 1 — a regression of rows P05802 /
+  // P05804, green on 2026-09-05) ────────────────────────────────────────────────────────────────────
+  // This asked on every dashboard open, and for an owner WITHOUT Inventory & stock the route answers
+  // 403 by design (hiding is never the only guard). So every such open cost a refused request and a
+  // red "Failed to load resource" line in the console, for an answer that could only ever be "no".
+  // The overview already says whether ANY restaurant of his has the module (`modules.inventory`), so
+  // when it says no, nothing is asked. `!== false` and not `=== true`: an overview without the field
+  // (an old instant-paint snapshot) still asks, which is the old behaviour, never a missing badge.
+  // Left as it was: a mixed estate drilled into its one restaurant WITHOUT the module still asks and is
+  // still refused — the overview carries the union, not a per-restaurant answer.
+  const invPossible = ov?.modules?.inventory !== false;
+  useEffect(() => {
+    if (activeRid && invPossible) { setStockCounts(null); fetchStockCounts(activeRid); }
+    else setStockCounts(null);
+  }, [activeRid, invPossible, fetchStockCounts]);
 
   // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
   // are compute-on-view cached server-side (mig 196), so this stays cheap.
@@ -1433,27 +1447,15 @@ export default function OwnerDashboard() {
   // Which tile is open, or null. Every figure it shows is already in hand, so opening it costs no
   // request. Registered with the back-stack manager like every other overlay on this page.
   const [tileOpen, setTileOpen] = useState<null | "revenue" | "orders" | "today" | "expenses" | "onhand">(null);
+  // Escape closes it through this one registration (lib/backStack, 2026-10-03). Its own keydown listener
+  // is gone — together they closed the sheet AND the restaurant view under it (item 9, see RangeDrop).
   useBackClose("owner-kpi-tile", !!tileOpen, () => setTileOpen(null));
-  useEffect(() => {
-    if (!tileOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTileOpen(null); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [tileOpen]);
 
   // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
   const [drawerRid, setDrawerRid] = useState<string | null>(null);
+  // Escape closes it too (T5 sweep, 2026-08-06: "the one habit that works everywhere else") — now through
+  // this registration alone; the drawer's own keydown listener went with item 9 (see RangeDrop).
   useBackClose("owner-rest-drawer", !!drawerRid, () => setDrawerRid(null));
-  // Escape closes it too. It already closed on the hardware/browser Back and on the backdrop and
-  // the ✕ — but not on Escape, while the reports Studio's overlay has always bound it. On a
-  // desktop that meant the one habit that works everywhere else silently did nothing here
-  // (found while driving the interactions, T5 sweep 2026-08-06).
-  useEffect(() => {
-    if (!drawerRid) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawerRid(null); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [drawerRid]);
   const drawer = useMemo(() => {
     if (!drawerRid || !ov) return null;
     const r = ov.restaurants.find((x) => x.id === drawerRid);
@@ -1838,7 +1840,17 @@ export default function OwnerDashboard() {
         rows: [
           ["Taken today", inr(todayRev)],
           ["Orders today", todayOrd.toLocaleString("en-IN")],
-          ["Average per order", inr(todayOrd ? todayRev / todayOrd : 0)],
+          // ── SAY WHAT IT DIVIDES, AND NEVER "₹0" FOR "NOTHING PAID YET" (sweep #10 T20, item 5) ──
+          // `todayRev` is PAID money and `todayOrd` is EVERY order (lfh_owner_overview counts open ones
+          // too), so 79 orders with nothing paid printed "Average per order ₹0" — the very doubt the
+          // tile face was reworded for on 2026-08-31 (item 26: "79 orders, none paid yet"). The same
+          // words here, and when there is a figure, the line under it says what was divided by what —
+          // in ONE line at 360px: a longer wording wrapped on a phone and made this row taller than its
+          // neighbours, the uneven rhythm the docket was built to avoid (measured, T20-S10 P189116).
+          ["Average per order", todayOrd && todayRev ? inr(todayRev / todayOrd) : "—",
+            todayOrd === 0 ? "no orders yet today"
+            : todayRev === 0 ? "none paid yet"
+            : "taken so far ÷ every order, paid or open"],
           ["Tables open now", String(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0))],
         ],
         note: "This one does not follow the period above — it is always today.",
@@ -2392,9 +2404,15 @@ export default function OwnerDashboard() {
         if (!d) return null;
         // WHOSE numbers these are, said on the popup itself: "it should also show for all restaurant
         // or of a particular restaurant". The heading answers it before he reads a figure.
+        // ── AND ONLY THE RESTAURANTS THE FIGURES COVER (sweep #10 T20, item 3) ───────────────────
+        // This said `all ${restCount} restaurants` — every restaurant he owns, including one whose
+        // Reports the admin has withheld, whose money the overview sends as ZERO and the analytics
+        // route leaves out. So on an estate of two with one withheld, every sheet was headed "all 2
+        // restaurants" over figures covering one: the fault `restScopeText` was written for on
+        // 2026-08-05 (row P20828), on the one surface that never used it.
         const who = activeRid
           ? (ov?.restaurants.find((r) => r.id === activeRid)?.name ?? "this restaurant")
-          : `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`;
+          : restScopeText;
 
         // ── WHAT EACH TILE DRAWS ────────────────────────────────────────────────────────────
         // Built from `pl(globalRange)`, which is already in memory for this scope and range, and
@@ -2408,18 +2426,26 @@ export default function OwnerDashboard() {
         // intersected (`scope` differs), so the two fields this block needs are picked out.
         const pay = pl(globalRange) as
           | { timeseries: TsRow[]; paymentMethods: Pay[] } | undefined;
-        const dailyPts = (() => {
-          if (!pay) return [] as { x: string; v: number }[];
-          const by = new Map<string, number>();
+        // ── ONE ROW PER DAY, CARRYING BOTH FIGURES THE PAYLOAD ALREADY HAS (sweep #10 T20, item 2) ──
+        // The Orders sheet used to draw "Orders a day" as revenue ÷ the PAID average — "about 6 orders"
+        // — although every timeseries row carries its own real `orders` count. The estimate could not
+        // see an order nobody had paid for yet, so on French House's This month the bars added up to
+        // 45 under a headline of 98 orders, on the same sheet. The real count is used now, and the days
+        // are sorted, because a Map's insertion order is time order only by luck (see sparkOf).
+        const daily = (() => {
+          if (!pay) return [] as { key: string; rev: number; ord: number }[];
+          const by = new Map<string, { rev: number; ord: number }>();
           for (const t of pay.timeseries) {
             const k = istKey(new Date(t.bucket), globalRange);
-            by.set(k, (by.get(k) || 0) + t.revenue);
+            const c = by.get(k) || { rev: 0, ord: 0 };
+            c.rev += t.revenue; c.ord += t.orders || 0;
+            by.set(k, c);
           }
-          // `keyLabel` exists for exactly this: istKey() builds "2026-09-05", and an axis that
-          // reads "2026-09-05" is a key leaking onto the screen. It gives "5 Sept" / "3 PM".
-          return [...by.entries()].map(([x, v]) => ({ x: keyLabel(x), v, hint: `${keyLabel(x)} · ${inr(v)}` }));
+          return [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([key, v]) => ({ key, ...v }));
         })();
-        const avgTicket = kMain?.avg || 0;
+        // `keyLabel` exists for exactly this: istKey() builds "2026-09-05", and an axis that
+        // reads "2026-09-05" is a key leaking onto the screen. It gives "5 Sept" / "3 PM".
+        const dailyPts = daily.map((d) => ({ x: keyLabel(d.key), v: d.rev, hint: `${keyLabel(d.key)} · ${inr(d.rev)}` }));
         const tileCap = tileOpen === "revenue" ? `collected across ${who}`
           : tileOpen === "orders" ? `bills opened · ${RANGE_LABEL[globalRange]}`
           : tileOpen === "today" ? `${todayOrd.toLocaleString("en-IN")} orders · ${(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0)).toLocaleString("en-IN")} tables open`
@@ -2442,19 +2468,25 @@ export default function OwnerDashboard() {
             .map((m) => ({ k: m.method, v: m.revenue, t: inr(m.revenue) }));
           tileSideTitle = "How the money arrived";
         } else if (tileOpen === "orders") {
-          tileChart = { kind: "bars", pts: dailyPts.map((p) => ({ x: p.x, v: avgTicket ? Math.round(p.v / avgTicket) : 0,
-            hint: `${p.x} · about ${avgTicket ? Math.round(p.v / avgTicket) : 0} orders` })) };
+          tileChart = { kind: "bars", pts: daily.map((d) => ({ x: keyLabel(d.key), v: d.ord,
+            hint: `${keyLabel(d.key)} · ${d.ord.toLocaleString("en-IN")} order${d.ord === 1 ? "" : "s"}` })) };
           tileChartTitle = `Orders a day · ${RANGE_LABEL[globalRange]}`;
           tileSide = (pay?.paymentMethods || []).filter((m) => m.orders > 0)   // see the note above
             .map((m) => ({ k: m.method, v: m.orders, t: m.orders.toLocaleString("en-IN") }));
           tileSideTitle = "Orders by method";
-        } else if (tileOpen === "today" && restCount > 1) {
+        // ── A SHEET ABOUT ONE RESTAURANT DRAWS ONLY THAT RESTAURANT (sweep #10 T20, item 4) ───────
+        // This was `restCount > 1`, which is true on a two-restaurant estate even after he has drilled
+        // into ONE of them — so the French House sheet charted Pizza Palace's takings beside it. Only
+        // the all-restaurants view compares restaurants, and only when two of them can be compared.
+        } else if (tileOpen === "today" && !activeRid) {
           const rs = (ov?.restaurants || []).filter((r) => !r.reportsOff);
           // `compare`: restaurants side by side, not a trend — one trading beside two at ₹0 is a
           // fair picture, so the docket's two-real-days gate does not apply here.
-          tileChart = { kind: "bars", compare: true, pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
-            hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
-          tileChartTitle = "Taken today, by restaurant";
+          if (rs.length >= 2) {
+            tileChart = { kind: "bars", compare: true, pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
+              hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
+            tileChartTitle = "Taken today, by restaurant";
+          }
         } else if (tileOpen === "expenses") {
           // ── NO FUDGE FACTOR NOW THAT THE BAR MEANS A SHARE (2026-10-04) ──────────────
           // `v` used to be Math.max(foodLost, staffOut * 0.004) — a floor so a tiny figure still
@@ -2472,12 +2504,17 @@ export default function OwnerDashboard() {
             { k: `Less food binned · ${inr(foodLost)}`, s: "− Food", v: -foodLost },
             { k: `On hand · ${inr(onHand)}`, s: "On hand", v: onHand, total: true }] };
           tileChartTitle = "How it was reached";
-          tileSide = (ov?.restaurants || []).filter((r) => r.revenueAll > 0)   // see the note above
+          // "Earned where" splits the money ACROSS restaurants, so it belongs to the all-restaurants
+          // view only (item 4, above) and only when two of them earned — a one-restaurant owner was
+          // shown a single slice reading "100%", a share bar of one, which is not a picture.
+          const earned = !activeRid ? (ov?.restaurants || []).filter((r) => r.revenueAll > 0) : [];   // see the note above
+          if (earned.length >= 2) {
             // ONE COLOUR PER RESTAURANT, here too — the share bar is the fourth surface that
             // names these three, and it has to agree with the sidebar and the league table.
-            .map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll),
+            tileSide = earned.map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll),
                            c: restaurantColor(r.id, (ov?.restaurants || []).map((x) => x.id)) }));
-          tileSideTitle = "Earned where (all time)";
+            tileSideTitle = "Earned where (all time)";
+          }
         }
         return (
           // ── THE DOCKET (owner, 2026-10-04; he picked it from five) ──────────────────────

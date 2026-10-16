@@ -432,9 +432,12 @@ check("the merged-inventory rung read is capped, not sequential",
 check("the dashboard no longer counts open tables it never shows",
   !/from\("sessions"\)[\s\S]{0,120}status", "open"/.test(analyticsRoute) && !/openTables/.test(analyticsRoute),
   "a ~165ms live count on every request, rendered by nothing (the overview payload has it)");
-// the drawer closes the way every other overlay does
-check("the restaurant drawer closes on Escape too",
-  /if \(e\.key === "Escape"\) setDrawerRid\(null\)/.test(dashPage),
+// the drawer closes the way every other overlay does — Escape included. Since sweep #10 T20 item 9 that is
+// through its back-stack registration ALONE (lib/backStack answers Escape for the top layer); its own
+// keydown listener was removed because the two together closed the layer under it as well.
+check("the restaurant drawer closes on Escape too (through the back-stack manager)",
+  /useBackClose\("owner-rest-drawer", !!drawerRid, \(\) => setDrawerRid\(null\)\)/.test(dashPage) &&
+    /if \(e\.key !== "Escape" \|\| e\.isComposing\) return;/.test(read("lib/backStack.ts")),
   "it closed on Back, the backdrop and the ✕ — but not the one habit that works everywhere else");
 
 console.log("\n── 21. ONE RESTAURANT, ONE COLOUR — INCLUDING THE SHELL (T5, 2026-08-07) ──");
@@ -1162,6 +1165,84 @@ console.log("\nT11-E · saying so when a read failed");
     "…and the scoped path still narrows by restaurant id",
     /q\.in\("restaurant_id", ids\)/.test(body),
     "lib/ownerCache.ts — an owner must still only fingerprint their own estate.",
+  );
+}
+
+// ── THE OWNER'S HOME DASHBOARD AND ITS DOCKET (sweep #10 T20, 2026-10-16) ─────────────────────────
+// Eight faults found driving the dashboard and the tile sheets (components/owner/TileDocket.tsx, which
+// no ledger row had ever named) plus the admin's name check in lib/ownerHome.ts. One check per item;
+// the live proofs are the T20-S10 ledger rows P189181–P189240 and P189336–P189337.
+{
+  const docket = read("components/owner/TileDocket.tsx");
+  const ownerHome = read("lib/ownerHome.ts");
+  // item 1 — a REGRESSION (rows P05802 / P05804, green 2026-09-05): the stock badge (2026-10-03) asked
+  // /api/owner/inventory on every dashboard open, and for every owner without Inventory the route
+  // refuses with a 403 — a failed request and a red console line on each open, for an answer that can
+  // only be "no". The overview already says whether ANY restaurant of his has the module.
+  check(
+    "item 1 · the stock count is only asked for when the owner's estate has Inventory at all",
+    /const invPossible = ov\?\.modules\?\.inventory !== false;/.test(dashPage) &&
+      /if \(activeRid && invPossible\) \{ setStockCounts\(null\); fetchStockCounts\(activeRid\); \}/.test(dashPage),
+    "app/owner/page.tsx — the stock-count effect must check ov.modules.inventory before it asks; " +
+      "otherwise every Inventory-less dashboard open costs a refused request and a console error.",
+  );
+  // item 2 — "Orders a day" was revenue ÷ the paid average, so its bars summed to the PAID count
+  // (45) under a headline of every order (98). The real per-day count is in the same payload.
+  check(
+    "item 2 · the Orders sheet's day bars are real order counts, not revenue ÷ average",
+    !/p\.v \/ avgTicket/.test(dashPage) && !/about \$\{/.test(dashPage) && /v: d\.ord,/.test(dashPage),
+    "app/owner/page.tsx — build the Orders chart from timeseries[].orders; an estimate cannot add up to the headline.",
+  );
+  // item 3 — the sheet's heading said "all 2 restaurants" over figures covering one (Reports withheld).
+  check(
+    "item 3 · the docket names the restaurants its figures really cover (restScopeText), never 'all N'",
+    /const who = activeRid\s*\n?\s*\? \(ov\?\.restaurants\.find\(\(r\) => r\.id === activeRid\)\?\.name \?\? "this restaurant"\)\s*\n?\s*: restScopeText;/.test(dashPage),
+    "app/owner/page.tsx — the docket heading must use restScopeText, which counts only the reported set.",
+  );
+  // item 4 — a sheet about ONE restaurant drew the whole estate (Today's bars, On hand's 'Earned where'),
+  // and a one-restaurant owner got a one-slice 100% share bar.
+  check(
+    "item 4 · Today's restaurant bars and On hand's 'Earned where' appear only on the estate view, with 2+ restaurants",
+    /tileOpen === "today" && !activeRid\)/.test(dashPage) && /if \(rs\.length >= 2\)/.test(dashPage) &&
+      /const earned = !activeRid \?/.test(dashPage) && /if \(earned\.length >= 2\)/.test(dashPage),
+    "app/owner/page.tsx — a drilled restaurant's sheet must not chart its neighbours, and one bar is not a chart.",
+  );
+  // item 5 — Today's 'Average per order' divided PAID takings by EVERY order and printed ₹0 when none was paid.
+  check(
+    "item 5 · Today's average says what it divides, and never prints ₹0 for 'nothing paid yet'",
+    /"none paid yet"/.test(dashPage) && /"taken so far ÷ every order, paid or open"/.test(dashPage) && /todayOrd && todayRev \? inr\(todayRev \/ todayOrd\) : "—"/.test(dashPage),
+    "app/owner/page.tsx — the Today sheet's average row.",
+  );
+  // item 6 — with exactly two days the axis index list was [0, 1, 1]: a duplicate React key and the last
+  // date printed twice, once centred off the right edge of the card.
+  check(
+    "item 6 · the docket's axis labels are de-duplicated (two days print two dates, not three)",
+    /\[\.\.\.new Set\(\[0, Math\.floor\(pts\.length \/ 2\), pts\.length - 1\]\)\]/.test(docket) &&
+      /\[\.\.\.new Set\(\[0, pts\.length - 1\]\)\]/.test(docket),
+    "components/owner/TileDocket.tsx — Area and Bars must not label the same index twice.",
+  );
+  // item 7 — a failed read answered "the name is free", so a blip let a second owner take a live name.
+  check(
+    "item 7 · ownerHome's name checks treat a failed read as 'could not check', never as 'free'",
+    /if \(dup\.error\) throw /.test(ownerHome) && /if \(q\.error\) throw /.test(ownerHome) &&
+      /catch \{\s*\n?\s*return `We couldn’t check whether/.test(ownerHome),
+    "lib/ownerHome.ts — loginNameTaken / liveHoldersOfName must not read an error as an empty answer.",
+  );
+  // item 8 — globals.css strips every link's underline with !important, so the sheet's own underline lost.
+  check(
+    "item 8 · the docket's 'Open Audit & logs →' link keeps its underline (!important beats globals.css)",
+    /text-decoration:underline !important/.test(docket),
+    "components/owner/TileDocket.tsx — a: { text-decoration: none !important } in app/globals.css wins otherwise.",
+  );
+  // item 9 — the page bound its OWN Escape on four overlays, and lib/backStack (2026-10-03) answers Escape
+  // for the top layer too. The page's listener closed the popup first, so the manager found the layer
+  // UNDER it on top and closed that as well: Escape on a tile sheet inside one restaurant threw him back
+  // to All restaurants (measured: sheet gone at 37 ms, restaurant view closed at 109 ms).
+  check(
+    "item 9 · no overlay on the dashboard binds its own Escape — the back-stack manager is the one way",
+    !/addEventListener\("keydown"/.test(dashPage) &&
+      ["owner-kpi-tile", "owner-rest-drawer", "owner-rest", "owner-rng-"].every((id) => dashPage.includes(`useBackClose(${id.endsWith("-") ? "`" + id : '"' + id}`)),
+    "app/owner/page.tsx — a second Escape handler beside useBackClose closes TWO layers on one key press.",
   );
 }
 

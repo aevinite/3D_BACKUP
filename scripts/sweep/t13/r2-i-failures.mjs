@@ -243,15 +243,15 @@ await chk(id(n++), "an unread food-loss figure is admitted on the Expenses tile 
 });
 await chk(id(n++), "…and inside the Expenses popup", async () => {
   await F.pg.locator(".ow2-kpi").nth(3).click();
-  await F.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const t = (await F.pg.locator(".ow2-tile").innerText()).replace(/\s+/g, " ");
+  await F.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const t = (await F.pg.locator(".tdk").innerText()).replace(/\s+/g, " ");
   await F.pg.keyboard.press("Escape"); await F.pg.waitForTimeout(300);
   return /couldn’t read|couldn't read|may be short/i.test(t) ? true : `the popup reads: ${JSON.stringify(t.slice(0, 140))}`;
 });
 await chk(id(n++), "…and the On hand popup admits its answer may be too HIGH", async () => {
   await F.pg.locator(".ow2-kpi").nth(4).click();
-  await F.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const t = (await F.pg.locator(".ow2-tile").innerText()).replace(/\s+/g, " ");
+  await F.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const t = (await F.pg.locator(".tdk").innerText()).replace(/\s+/g, " ");
   await F.pg.keyboard.press("Escape"); await F.pg.waitForTimeout(300);
   return /too high|missing from the sum/i.test(t) ? true : `the popup reads: ${JSON.stringify(t.slice(0, 140))}`;
 });
@@ -391,8 +391,8 @@ await chk(id(n++), "a failed money read does not blank the dashboard", async () 
   (await MO.pg.locator(".ow2-kpi").count()) === 5 ? true : "the page lost its tiles over a money read");
 await chk(id(n++), "…and the Revenue popup simply omits the discount line rather than showing a wrong one", async () => {
   await MO.pg.locator(".ow2-kpi").first().click();
-  await MO.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const t = (await MO.pg.locator(".ow2-tile").innerText()).replace(/\s+/g, " ");
+  await MO.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const t = (await MO.pg.locator(".tdk").innerText()).replace(/\s+/g, " ");
   await MO.pg.keyboard.press("Escape"); await MO.pg.waitForTimeout(300);
   const hasDiscount = /Discounts given/i.test(t);
   const hasNaN = /NaN|undefined|₹NaN/.test(t);

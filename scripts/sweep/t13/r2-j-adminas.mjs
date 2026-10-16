@@ -112,8 +112,8 @@ await chk(id(n++), "…and every tile popup's 'See the full detail' link", async
   const bad = [];
   for (let i = 0; i < 5; i++) {
     await A.pg.locator(".ow2-kpi").nth(i).click();
-    await A.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-    const h = await A.pg.locator(".ow2-tile .full").getAttribute("href").catch(() => null);
+    await A.pg.waitForSelector(".tdk", { timeout: 10000 });
+    const h = await A.pg.locator(".tdk .full").getAttribute("href").catch(() => null);
     if (!h || !/[?&]rid=/.test(h)) bad.push(h);
     await A.pg.keyboard.press("Escape");
     await A.pg.waitForTimeout(280);
@@ -127,8 +127,8 @@ await chk(id(n++), "…and those links name the SCOPE ON SCREEN in `view`, separ
   // the one we entered" — the bug they fixed was showing only one). So from the estate view
   // `view=all` is CORRECT, and the first version of this row demanded the pin's id instead.
   await A.pg.locator(".ow2-kpi").first().click();
-  await A.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const h = await A.pg.locator(".ow2-tile .full").getAttribute("href");
+  await A.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const h = await A.pg.locator(".tdk .full").getAttribute("href");
   await A.pg.keyboard.press("Escape"); await A.pg.waitForTimeout(280);
   const u = new URL(h, BASE);
   const onEstate = (await A.pg.locator(".hq-table").count()) > 0;
@@ -149,8 +149,8 @@ await chk(id(n++), "the pin is read ONCE from the address, after mount", () => {
 });
 await chk(id(n++), "the tile popups say WHOSE numbers these are", async () => {
   await A.pg.locator(".ow2-kpi").first().click();
-  await A.pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const who = (await A.pg.locator(".ow2-tile .who").innerText()).trim();
+  await A.pg.waitForSelector(".tdk", { timeout: 10000 });
+  const who = (await A.pg.locator(".tdk header i").innerText()).trim();
   const rows = await A.pg.locator(".hq-table tr.hq-row").count();
   await A.pg.keyboard.press("Escape"); await A.pg.waitForTimeout(280);
   // On the estate view the honest answer is the COUNT, and it must match the table under it.
