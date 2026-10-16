@@ -952,12 +952,19 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               A z-index puts it back in front. Inline, like the two constants at the top of this
               file, because `app/globals.css` belongs to another part of this sweep; if that rule
               ever grows a z-index of its own this becomes redundant rather than wrong. */}
+          {/* IT HAD NO NAME (sweep #10 T2, 2026-10-16 — item 4). Its only child is an icon, so a
+              screen reader announced it as "button" and nothing else — and it is the only way out of
+              a zoomed photo (the backdrop does nothing while zoomed). Same fault, same remedy, as the
+              heart in sweep #8's item 10, and as the 3D details sheet's own ✕ ("Close"). English, like
+              the heart's label (R23 — the guest translation set is parked). */}
           <button
             className="img-lightbox-close"
             style={{ zIndex: 1 }}
+            aria-label="Close photo"
+            title="Close photo"
             onClick={(e) => { e.stopPropagation(); setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); }}
           >
-            <i className="fas fa-times"></i>
+            <i className="fas fa-times" aria-hidden="true"></i>
           </button>
           {/* The zoomable image. The style applies the current zoom + pan, and
               the touch handlers below implement pinch-to-zoom and dragging. */}

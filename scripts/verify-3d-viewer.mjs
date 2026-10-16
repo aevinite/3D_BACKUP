@@ -276,6 +276,13 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
   );
 }
 
+// Sweep #10 T2, item 4: the zoomed photo's ✕ — the only way out while zoomed — had no name.
+check(
+  "the zoomed photo's close button has a name a screen reader can say",
+  /<button\s+className="img-lightbox-close"[^>]*\saria-label="[^"]+"/.test(src[ITEM_CLIENT]),
+  `${ITEM_CLIENT} → its only child is an icon, so without aria-label it is announced as "button".`
+);
+
 // The veg/non-veg mark must mean the same thing on the grid and on the dish page.
 check(
   "the dish page hides the veg/non-veg mark on a single-diet menu, exactly as the grid does",
