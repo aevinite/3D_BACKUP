@@ -8115,6 +8115,13 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
   const dish = (state.data.items || []).find((d) => d.id === dishId);
   if (!dish || !filterSlug) return;
   dish.tags = dish.tags || [];
+  // FIRST SAVE WINS ON A DISH'S TAG LIST (sweep #10 T7, item 6). This write sends the WHOLE list,
+  // built from this device's copy — and the kitchen's 🚫 Sold out is one of those tags. So ticking
+  // a dish into "spicy" moments after the kitchen marked it sold out wrote the list back WITHOUT
+  // `sold-out`, and the dish quietly went back on sale. The list we started from now travels as the
+  // expectation; lib/clashCompare.ts compares a list as a SET, so only a real change elsewhere
+  // refuses it — and the refusal says so, and the menu is re-read.
+  const tagsBefore = dish.tags.slice();
   const i = dish.tags.indexOf(filterSlug);
   const adding = i < 0;
   if (adding) dish.tags.push(filterSlug);
@@ -8126,7 +8133,7 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
     // Send ONLY id + tags, not the whole dish snapshot — posting the full (possibly stale)
     // row here reverted a price/name someone else had just edited on this dish. The server
     // upsert updates only the columns we send (onConflict=id), so this touches tags alone.
-    const _wq = await api("POST", "/items", { id: dish.id, tags: dish.tags });
+    const _wq = await api("POST", "/items", { id: dish.id, tags: dish.tags }, { expect: { table: "menu_items", id: dish.id, fields: { tags: tagsBefore }, label: "this dish's tags" } });
     okToast(_wq, `${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`);
   } catch (e) {
     // revert on failure
@@ -8135,7 +8142,10 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
     if (inputEl) inputEl.checked = !adding;
     if (row) row.classList.toggle("on", !adding);
     updateMembCount(filterSlug);
-    toast("Save failed: " + e.message, "err");
+    const clash = e && e.data && e.data.clash;
+    toast(clash ? clash.plain + (clash.todo ? " " + clash.todo : "") : "Save failed: " + errText(e), "err", undefined, clash ? 9000 : undefined);
+    // Someone else changed this dish's tags: show what they are NOW before anyone ticks again.
+    if (clash) { try { await loadAll(); renderList(); renderEditor(); } catch {} }
   }
 }
 // updateMembCount: refresh the "· N selected" counter next to a tag's dish list.
@@ -8208,7 +8218,11 @@ function buildEditExpect(kind, payload, pristineJson) {
     // compared as SETS there, which is right for allergens but wrong for an ordered list.
     const t = typeof was;
     const objectOk = t === "object" && was !== null && !Array.isArray(was);
-    if (was !== null && !objectOk && t !== "string" && t !== "number" && t !== "boolean") continue;
+    // …EXCEPT A DISH'S TAGS, which ARE a set (sweep #10 T7, item 6): the kitchen's 🚫 Sold out lives
+    // in that list, so a form saved from a stale copy could take `sold-out` off and put the dish
+    // back on sale. A set compared as a set is exactly what lib/clashCompare.ts does.
+    const setOk = k === "tags" && Array.isArray(was) && was.every((x) => typeof x === "string");
+    if (was !== null && !objectOk && !setOk && t !== "string" && t !== "number" && t !== "boolean") continue;
     fields[k] = was;
     if (Object.keys(fields).length >= 8) break;          // the server caps at 8 too
   }

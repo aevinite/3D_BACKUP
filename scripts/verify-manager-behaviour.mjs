@@ -647,7 +647,29 @@ async function courseOrderFollowsMenu() {
     : bad("a dish moved to another course stays under its old one on the bill", `got ${afterMove}`);
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu];
+// ── P · A DISH'S TAG LIST IS SAVED FIRST-SAVE-WINS (sweep #10 T7, 2026-10-16) ─────────────────────
+// The kitchen's 🚫 Sold out is a TAG. Both manager-side writes of a dish's tag list (the dish form's
+// Save and Menu → Tags → the dish ticks) sent the list from this device's copy with no expectation,
+// so a stale copy could take `sold-out` off and put the dish back on sale. buildEditExpect is lifted
+// from the shipped file and must now carry `tags` (a set), and still leave other lists out.
+async function tagsFirstSaveWins() {
+  console.log("\nP. a dish's tag list is saved first-save-wins");
+  const code = lift("public/panels/editor/app.js", "const EXPECT_TABLE = ", "\nasync function save()", "buildEditExpect").replace(/\nasync function save\(\)$/, "");
+  const buildEditExpect = new Function(`${code}\nreturn buildEditExpect;`)();
+  const e = buildEditExpect("items", { tags: ["spicy"] }, JSON.stringify({ id: "d1", tags: ["sold-out"] }));
+  e && e.table === "menu_items" && e.id === "d1" && JSON.stringify(e.fields.tags) === JSON.stringify(["sold-out"])
+    ? ok("the dish form's Save sends the tag list it started from")
+    : bad("the dish form's Save sends a tag list with no expectation", JSON.stringify(e));
+  const o = buildEditExpect("items", { options: [{ label: "Large" }] }, JSON.stringify({ id: "d1", options: [] }));
+  o === null ? ok("…and still leaves an ordered list (options) out") : bad("an ordered list is now compared as a set", JSON.stringify(o));
+  const app = src("public/panels/editor/app.js");
+  const t = app.slice(app.indexOf("async function toggleTagMembership("), app.indexOf("function updateMembCount("));
+  /const tagsBefore = dish\.tags\.slice\(\);/.test(t) && /expect: \{ table: "menu_items", id: dish\.id, fields: \{ tags: tagsBefore \}/.test(t)
+    ? ok("Menu → Tags → a dish tick sends the list it started from (taken BEFORE the tick changes it)")
+    : bad("the Tags screen's tick writes a dish's whole tag list with no expectation");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

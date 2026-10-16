@@ -33,6 +33,10 @@ const VALUE_EDIT = [
   // CHANGED fields, which stops a stale form reverting an untouched column — but that is a
   // different problem from two people typing in the SAME box. (buildEditExpect in editor/app.js.)
   /api\("POST", "\/" \+ kind, payload/,
+  // A DISH'S TAG LIST from Menu → Tags → "dishes in this tag" (sweep #10 T7, item 6). It writes the
+  // WHOLE list from this device's copy, and the kitchen's 🚫 Sold out is one of those tags — so an
+  // unprotected tick could put a sold-out dish back on sale. (toggleTagMembership in editor/app.js.)
+  /api\("POST", "\/items", \{ id: [^,]+, tags:/,
 ];
 
 // Deliberately not clash-checked, each with the reason. Reviewed when this list changes.
