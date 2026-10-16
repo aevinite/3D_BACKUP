@@ -19,7 +19,7 @@ const SETUPS = [
   ["named with CESS (6%)", { gstin: G, tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }, { label: "CESS", rate: 1 }] }, [null, 0.06]],
   ["GST inside the price", { gstin: G, tax_rate: 0.05, price_tax_mode: "incl" }, [null, 0.05]],
   ["composition scheme", { gstin: G, tax_rate: 0.05, price_tax_mode: "composition" }, [null, 0]],
-  ["no GSTIN (mig 425)", { gstin: "", tax_rate: 0.05 }, [null, 0]],
+  ["no GSTIN (mig 426)", { gstin: "", tax_rate: 0.05 }, [null, 0]],
   ["mixed 5% + 18% banquet", { gstin: G, tax_rate: 0.05, banquet_tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] }, [0.05, 0.18]],
   ["MRP lines, no GST on MRP", { gstin: G, tax_rate: 0.05, item_tax_modes_allowed: true, mrp_tax_treatment: "none" }, [null, 0.05]],
   ["MRP lines, GST inside MRP", { gstin: G, tax_rate: 0.05, item_tax_modes_allowed: true, mrp_tax_treatment: "inclusive" }, [null, 0.05]],

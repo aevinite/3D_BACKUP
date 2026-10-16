@@ -53,13 +53,13 @@ function components(raw: TaxSettings): { label: string; rate: number }[] {
  *  total into its parts. Empty when the restaurant uses a single flat rate instead. */
 export function taxComponents(raw: TaxSettings): { label: string; rate: number }[] { return components(raw); }
 
-/** IS THIS RESTAURANT REGISTERED FOR GST? (owner, 2026-10-16 — mig 425, "do c option".)
+/** IS THIS RESTAURANT REGISTERED FOR GST? (owner, 2026-10-16 — mig 426, "do c option".)
  *  A business with no GSTIN may not collect GST, so its rate is 0, exactly as a composition-scheme
  *  restaurant's is. Two ways to know: the settings row's own `gstin` (every server read selects it —
  *  it is in TAX_SETTINGS_COLUMNS), or `gst_registered`, the yes/no the guest menu is handed instead of
- *  the GSTIN itself (lfh_guest_settings, mig 425). A hand-built object carrying NEITHER key was never
+ *  the GSTIN itself (lfh_guest_settings, mig 426). A hand-built object carrying NEITHER key was never
  *  asked, so it keeps the old answer — the key's absence is not a registration being blank.
- *  Twins: SQL lfh_effective_tax_rate (mig 425) · billdoc.js gstRegistered. */
+ *  Twins: SQL lfh_effective_tax_rate (mig 426) · billdoc.js gstRegistered. */
 export function gstRegistered(raw: unknown): boolean {
   const r = raw as { gstin?: unknown; gst_registered?: unknown } | null | undefined;
   if (!r || typeof r !== "object") return true;
@@ -114,7 +114,7 @@ export type DishTaxMode = "default" | "excl" | "incl" | "mrp" | "none";
  *
  *  Guarded by `npm run verify:tax-mode`, which fails when a settings select feeds the tax
  *  helpers without this column present. */
-// …and `gstin` (mig 425): a restaurant with no GSTIN charges nothing, so the same silent trap applies to
+// …and `gstin` (mig 426): a restaurant with no GSTIN charges nothing, so the same silent trap applies to
 // a select that forgets it.
 export const TAX_SETTINGS_COLUMNS = "tax_rate, tax_components, price_tax_mode, gstin";
 

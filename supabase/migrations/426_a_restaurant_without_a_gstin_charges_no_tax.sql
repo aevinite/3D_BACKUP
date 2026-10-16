@@ -1,4 +1,4 @@
--- 425 — A RESTAURANT WITH NO GSTIN CHARGES NO TAX (owner, 2026-10-16 — sweep #10 T14 item 12, option c)
+-- 426 — A RESTAURANT WITH NO GSTIN CHARGES NO TAX (owner, 2026-10-16 — sweep #10 T14 item 12, option c)
 --
 -- The question put to him: a restaurant whose Billing card has no GSTIN printed "Bill" at the top (since
 -- sweep #7) and still ADDED and named CGST/SGST rows underneath. Three answers were offered — keep the
@@ -45,7 +45,7 @@ AS $function$
   )
   SELECT CASE
     WHEN (SELECT price_tax_mode FROM s) = 'composition' THEN 0
-    -- 425: not registered for GST → may not collect it. (No settings row at all keeps the old answer.)
+    -- 426: not registered for GST → may not collect it. (No settings row at all keeps the old answer.)
     WHEN EXISTS (SELECT 1 FROM s) AND COALESCE(TRIM((SELECT gstin FROM s)), '') = '' THEN 0
     WHEN COALESCE((SELECT pct FROM comps), 0) > 0 THEN (SELECT pct FROM comps) / 100.0
     ELSE COALESCE(NULLIF((SELECT tax_rate FROM s), 0), 0.05)
@@ -67,7 +67,7 @@ AS $function$
       AND COALESCE((c->>'rate')::numeric, 0) > 0
   )
   SELECT CASE
-    -- 425: the two rules that say "this business may not collect GST" come before the banquet's lines.
+    -- 426: the two rules that say "this business may not collect GST" come before the banquet's lines.
     WHEN (SELECT price_tax_mode FROM s) = 'composition' THEN 0
     WHEN EXISTS (SELECT 1 FROM s) AND COALESCE(TRIM((SELECT gstin FROM s)), '') = '' THEN 0
     WHEN COALESCE((SELECT pct FROM comps), 0) > 0 THEN (SELECT pct FROM comps) / 100
@@ -98,7 +98,7 @@ AS $function$
     'banquet_paper_side', 'banquet_paper_foot', 'banquet_paper_sign', 'banquet_paper_fill',
     'banquet_tax_components'
   ])
-  -- 425: whether the restaurant may charge GST at all — a yes/no, never the GSTIN itself.
+  -- 426: whether the restaurant may charge GST at all — a yes/no, never the GSTIN itself.
   || jsonb_build_object('gst_registered', COALESCE(TRIM(s.gstin), '') <> '')
   FROM settings s
   WHERE s.restaurant_id = p_restaurant_id

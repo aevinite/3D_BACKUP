@@ -479,7 +479,7 @@
     // concept this document exists to have none of. The tax LINE was suppressed and the row that
     // describes it was left behind.
     var composition = !!d.composition;
-    // …nor does a sheet with no GSTIN that ADDED no tax: since mig 425 such a restaurant charges none, so
+    // …nor does a sheet with no GSTIN that ADDED no tax: since mig 426 such a restaurant charges none, so
     // "Taxable value" would name a concept the bill does not have (the composition reasoning above). An
     // older bill from before 425, charged at its stamped rate, still carries tax rows and keeps the line.
     var restate = !inclusive && !inclOnly && !composition
@@ -1362,7 +1362,7 @@
   // priceTaxMode / taxModel: the ONE tax model. Mirrors lib/tax.ts and SQL lfh_effective_tax_rate;
   // a composition-scheme restaurant's rate genuinely IS zero (mig 272), not "5% we then hide".
   function priceTaxMode(s) { return String((s || {}).price_tax_mode || "excl"); }
-  /* gstRegistered(settings) — MAY THIS RESTAURANT COLLECT GST AT ALL? (owner, 2026-10-16, mig 425 —
+  /* gstRegistered(settings) — MAY THIS RESTAURANT COLLECT GST AT ALL? (owner, 2026-10-16, mig 426 —
      "for 12th do c option".) No GSTIN → not registered → its rate is 0, the same answer a
      composition-scheme restaurant gets. Known from the row's own `gstin`, or from `gst_registered`
      (the yes/no the guest menu gets instead of the GSTIN). An object carrying neither key was never
@@ -1409,7 +1409,7 @@
       .filter(function (c) { return c.label && c.rate > 0; }) : [];
     var composition = priceTaxMode(s) === "composition";
     if (composition) return { rate: 0, pct: 0, components: [], composition: composition };
-    if (!gstRegistered(s)) return { rate: 0, pct: 0, components: [], composition: false };   // mig 425
+    if (!gstRegistered(s)) return { rate: 0, pct: 0, components: [], composition: false };   // mig 426
     if (comps.length) {
       var pct = comps.reduce(function (a, c) { return a + c.rate; }, 0);
       return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, composition: composition };
@@ -1965,7 +1965,7 @@
   // restaurant's dine-in model when it has set none.
   function bqTaxModel(settings) {
   const s = settings || {};
-  // A business that may not collect GST charges none on a banquet either (mig 425 — the banquet's own
+  // A business that may not collect GST charges none on a banquet either (mig 426 — the banquet's own
   // lines used to win even for a composition-scheme restaurant; lfh_banquet_tax_rate now agrees).
   if (priceTaxMode(s) === "composition" || !gstRegistered(s)) return { rate: 0, pct: 0, components: [], own: false };
   const raw = Array.isArray(s.banquet_tax_components) ? s.banquet_tax_components : [];
@@ -2310,7 +2310,7 @@ function banquetDocHtml(a) {
 
   // WHAT THIS SHEET IS CALLED — the bill's own rule, now on the banquet sheet too (item 12, 2026-10-16).
   // The owner's 2026-07-31 layout ("a banquet bill ALWAYS prints as a tax invoice") is the REGISTERED
-  // restaurant's sheet and is unchanged for it. A restaurant with no GSTIN charges no tax since mig 425,
+  // restaurant's sheet and is unchanged for it. A restaurant with no GSTIN charges no tax since mig 426,
   // and a sheet headed "Tax Invoice" with no registration and no tax is not one (CGST Rule 46 — the
   // reason the thermal bill says "Bill" there since 2026-08-22); a composition-scheme restaurant may only
   // issue a Bill of Supply, with the declaration (T7 F9 for the bill). Same three names as billDocHtml.

@@ -375,7 +375,7 @@ console.log("\n── 12. NO NARROW SETTINGS SELECT — the silent way to get th
       const re = /\.from\(\s*["'`]settings["'`]\s*\)[\s\S]{0,200}?\.select\(\s*(["'`])([^"'`]*tax_rate[^"'`]*)\1\s*\)/g;
       let m;
       while ((m = re.exec(src))) {
-        // …and `gstin` since mig 425 (sweep #10 T14, 2026-10-16): a restaurant with no GSTIN charges no
+        // …and `gstin` since mig 426 (sweep #10 T14, 2026-10-16): a restaurant with no GSTIN charges no
         // tax, so a select that forgets it reads 5% for a restaurant that must charge nothing — the same
         // silent trap as price_tax_mode. (The editor route's taxSettings() had exactly that shape.)
         if (!/price_tax_mode/.test(m[2]) || !/gstin/.test(m[2])) {

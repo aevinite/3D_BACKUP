@@ -182,7 +182,7 @@ export function billIdentity(
  *  Aevidine and, when the owner controls it, enabled. Same rule as lib/tableTags.ts moduleBagLadder().
  *  For what a screen SAYS only — the server stays the authority for anything that moves points. */
 export function moduleOn(settings: Record<string, unknown> | null | undefined, key: string): boolean;
-/** May this restaurant collect GST at all? No GSTIN → no (mig 425), from `gstin` or `gst_registered`.
+/** May this restaurant collect GST at all? No GSTIN → no (mig 426), from `gstin` or `gst_registered`.
  *  An object with neither key keeps the old answer (registered). Twin of lib/tax.ts gstRegistered. */
 export function gstRegistered(settings: Record<string, unknown> | null | undefined): boolean;
 /** The restaurant's own named tax lines whose rates add up to `pct` (dine-in first, then banquet), or
@@ -312,7 +312,7 @@ export function bqPaper(settings: Record<string, unknown>): {
   foot: boolean; sign: boolean; fill: boolean;
 };
 /** The banquet's rate — its own lines when it named any, else the dine-in rate; 0 for composition or no
- *  GSTIN (mig 425). It has no `composition` field (TaxModel does), so it is typed on its own. */
+ *  GSTIN (mig 426). It has no `composition` field (TaxModel does), so it is typed on its own. */
 export function bqTaxModel(settings: Record<string, unknown>): { rate: number; pct: number; components: { label: string; rate: number }[]; own: boolean };
 export function bqOn(settings: Record<string, unknown>, k: string): boolean;
 export function bqWords(amount: number): string;

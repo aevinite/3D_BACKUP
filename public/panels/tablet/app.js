@@ -836,7 +836,7 @@ function effRate() {
   // database all said 0. The shared bill file's taxModel is the rule the manager panel already uses.
   if (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC.taxModel) return LFH_BILLDOC.taxModel(s).rate;
   if (String(s.price_tax_mode || "") === "composition") return 0;   // the same answer, before billdoc.js has loaded
-  if (Object.prototype.hasOwnProperty.call(s, "gstin") && !String(s.gstin == null ? "" : s.gstin).trim()) return 0;   // no GSTIN → no tax (mig 425)
+  if (Object.prototype.hasOwnProperty.call(s, "gstin") && !String(s.gstin == null ? "" : s.gstin).trim()) return 0;   // no GSTIN → no tax (mig 426)
   const comps = Array.isArray(s.tax_components)
     ? s.tax_components.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 })).filter((c) => c.label && c.rate > 0)
     : [];
@@ -851,7 +851,7 @@ function effRate() {
 // normal pair, so the gap was a whole extra rupee in eight).
 function banquetRate() {
   const s = state.data.settings || {};
-  // mig 425: composition or no GSTIN → this business may not collect GST, on a banquet either.
+  // mig 426: composition or no GSTIN → this business may not collect GST, on a banquet either.
   if (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC.bqTaxModel) return LFH_BILLDOC.bqTaxModel(s).rate;
   if (String(s.price_tax_mode || "") === "composition") return 0;
   if (Object.prototype.hasOwnProperty.call(s, "gstin") && !String(s.gstin == null ? "" : s.gstin).trim()) return 0;

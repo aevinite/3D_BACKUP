@@ -170,7 +170,7 @@ export function billPreviewHtml(settingsIn: Settings, mode: BillMode, restaurant
   // Split at FULL precision. Deriving the shown discount from a whole-rupee tax makes it absorb the
   // rounding (a ₹50 discount printed as ₹51 with a "Round off +₹1" beside it), so the rows below
   // round only at the last moment — the same order billdoc's billRows() uses.
-  // No tax at all where the restaurant may not collect it — composition, or no GSTIN since mig 425 (item 12).
+  // No tax at all where the restaurant may not collect it — composition, or no GSTIN since mig 426 (item 12).
   // `rateSum` comes from the named lines directly, so without this a restaurant that named CGST/SGST but
   // has no GSTIN would preview tax rows its real bill (0%, via lib/tax.ts) never charges.
   const taxPrecise = composition || pct === 0 ? 0 : (taxable * rateSum) / 100;

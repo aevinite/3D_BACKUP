@@ -10,7 +10,7 @@ const BD = (col) => `((${col}) at time zone 'Asia/Kolkata' - interval '5 hours')
 
 // A PROBE THAT CANNOT COMMIT: a DO block whose last statement is RAISE EXCEPTION, so the database rolls the
 // whole block back and hands the result out in the error text. Used once, to price a cart as if French House
-// had no GSTIN — the one way to drive mig 425 through the real pricing function without changing any row.
+// had no GSTIN — the one way to drive mig 426 through the real pricing function without changing any row.
 const env = Object.fromEntries(read(".env.local").split(/\r?\n/).map((l) => l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i)).filter(Boolean).map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")]));
 async function probe(body) {
   const { refuseUnlessDevTestDb } = await imp("scripts/sweep/devStacks.mjs");

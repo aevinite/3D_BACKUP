@@ -84,10 +84,10 @@ const P = (x) => Math.round(Number(x) * 100);
 // ── the restaurants and their tax set-ups ─────────────────────────────────────────────────────────
 const RESTS = await sql(`select r.id, r.slug, s.restaurant_id is not null as has_settings, s.tax_rate, s.tax_components, s.price_tax_mode, s.gstin, s.item_tax_modes_allowed, s.mrp_tax_treatment, lfh_effective_tax_rate(r.id)::text as db_rate
   from restaurants r left join settings s on s.restaurant_id = r.id order by r.slug, r.id`);
-// gstin rides along since mig 425 (sweep #10 T14): a restaurant with no GSTIN charges no tax.
+// gstin rides along since mig 426 (sweep #10 T14): a restaurant with no GSTIN charges no tax.
 const settingsOf = (r) => (r.has_settings ? { tax_rate: r.tax_rate == null ? null : Number(r.tax_rate), tax_components: r.tax_components, price_tax_mode: r.price_tax_mode, gstin: r.gstin, item_tax_modes_allowed: r.item_tax_modes_allowed, mrp_tax_treatment: r.mrp_tax_treatment } : null);
 // The set-up KEY leaves gstin out, so a row's permanent id (parity-ids.json) does not move because a
-// restaurant's tax column joined the read (mig 425); the rate checks above still compare WITH it.
+// restaurant's tax column joined the read (mig 426); the rate checks above still compare WITH it.
 const shapeKey = (r) => JSON.stringify({ ...settingsOf(r), gstin: undefined });
 const SHAPES = [...new Map(RESTS.map((r) => [shapeKey(r), r])).values()];
 

@@ -958,7 +958,7 @@ dateBad.length === 0
     : bad("a hole in a list throws, and a throw here is a blank window", broke.join(" · "));
 }
 
-/* ── A RESTAURANT WITH NO GSTIN CHARGES NO TAX (owner, 2026-10-16 — mig 425, "for 12th do c option") ──
+/* ── A RESTAURANT WITH NO GSTIN CHARGES NO TAX (owner, 2026-10-16 — mig 426, "for 12th do c option") ──
    The paper's half of the rule. SQL lfh_effective_tax_rate / lfh_banquet_tax_rate and lib/tax.ts carry
    the other halves (the T30 parity run compares them restaurant by restaurant on dev). */
 {
@@ -974,12 +974,12 @@ dateBad.length === 0
   if (/CGST|SGST|Taxable value/.test(un)) wrong.push("a new bill at a restaurant with no GSTIN prints tax rows or a Taxable value line");
   if (!/TOTAL<\/span><span>₹180</.test(un)) wrong.push("a ₹200 bill with ₹20 off at a restaurant with no GSTIN does not total ₹180");
   if (!/class="kind">Bill</.test(un)) wrong.push("the sheet is not headed Bill");
-  // an OLD order, stamped 5% before mig 425, keeps what it was charged — the paper never re-prices it
+  // an OLD order, stamped 5% before mig 426, keeps what it was charged — the paper never re-prices it
   const old = BILLDOC.billDocHtml(BILLDOC.billData({ orders: [{ ...ord, tax_rate: 0.05 }], settings: { gstin: "" } }));
   if (!/CGST/.test(old) || !/Taxable value/.test(old)) wrong.push("an order charged 5% before the rule lost its tax rows on a reprint");
-  const { readFileSync: rf425 } = await import("node:fs");
-  const mig = rf425(join(ROOT, "supabase/migrations/425_a_restaurant_without_a_gstin_charges_no_tax.sql"), "utf8");
-  if ((mig.match(/COALESCE\(TRIM\(\(SELECT gstin FROM s\)\), ''\) = '' THEN 0/g) || []).length !== 2) wrong.push("mig 425 no longer carries the rule in both rate functions");
+  const { readFileSync: rf426 } = await import("node:fs");
+  const mig = rf426(join(ROOT, "supabase/migrations/426_a_restaurant_without_a_gstin_charges_no_tax.sql"), "utf8");
+  if ((mig.match(/COALESCE\(TRIM\(\(SELECT gstin FROM s\)\), ''\) = '' THEN 0/g) || []).length !== 2) wrong.push("mig 426 no longer carries the rule in both rate functions");
   if (!/'gst_registered', COALESCE\(TRIM\(s\.gstin\), ''\) <> ''/.test(mig)) wrong.push("the guest menu is no longer told whether the restaurant may charge GST");
   // …and the banquet sheet is named by the same rule (registered → Tax Invoice, none → Bill, composition → Bill of Supply)
   const bq = (st) => (BILLDOC.banquetDocHtml({ bill: { subtotal: 100, tax: 0, total: 100 }, lines: [], settings: st, autoPrint: false }).match(/<div class="doct"><b>([^<]+)/) || [])[1];
