@@ -393,8 +393,15 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         {/* The veg / non-veg marker in the corner. One switch now covers the filter chips
             AND this mark (Access → Menu → Veg / non-veg): a pure-veg restaurant has nothing
             to distinguish, so marking every dish green was noise (owner, 2026-07-31). */}
+        {/* NOT aria-hidden (sweep #10 T1, item 3). The owner's item 4 of 2026-09-14 gave VegIcon
+            role="img" and its "Vegetarian" / "Non-Vegetarian" label so a screen reader would say it
+            — and this wrapper went on hiding the whole badge from the accessibility tree. Measured
+            in Chrome's own tree on French House: 59 labelled badges in the page, 0 reachable; the
+            card was read as "Espresso, 4.9 ★, ₹250" with nothing about veg. On an Indian menu that
+            is the one fact a diner may need before anything else. The badge is the only place this
+            card says it, so it is read once, with the card. */}
         {(showDiet ?? !!features.diet_filter) && (
-          <div className="diet-badge" aria-hidden="true">
+          <div className="diet-badge">
             <VegIcon isVeg={item.veg} size={18} />
           </div>
         )}

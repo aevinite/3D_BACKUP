@@ -706,6 +706,16 @@ async function live(base) {
         ({ ok: r.path === "/r/french-house/menu" && r.cards > 0, note: `${r.path}, ${r.cards} dishes` }));
       await c.close();
     }
+    // LIVE (sweep #10 T1, item 3): the badge's name is in Chrome's OWN accessibility tree, once per card —
+    // the source can carry a perfect label that no screen reader ever reaches.
+    { const { c, pg } = await open("/r/french-house/menu", 3500);
+      const badges = await pg.$$eval(".item-card .diet-badge svg[role=img]", (e) => e.length);
+      const cdp = await pg.context().newCDPSession(pg);
+      const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+      const named = nodes.filter((n) => !n.ignored && /^(Non-)?Vegetarian$/.test(n.name?.value || "")).length;
+      check("P170009", "LIVE: every veg / non-veg badge on the menu is reachable by a screen reader", () =>
+        ({ ok: badges > 0 && named === badges, note: `${badges} badges drawn, ${named} in the accessibility tree` }));
+      await c.close(); }
     for (const path of ["/r/zz-no-such-place-t1/menu", "/r/french-house/item/zz-no-such-dish", "/r/french-house%09/menu", "/q/ZZZZZZ", "/zz-stray-t1"]) {
       const { c, pg } = await open(path, 3500);
       const loops = await pg.evaluate(() => [...document.querySelectorAll(".gnf a, .nf a")]
@@ -1064,6 +1074,18 @@ check("P102059", "the veg / non-veg badge is marked as a picture, so its name is
   const svgs = c.match(/<svg[^>]*>/g) || [];
   return { ok: svgs.length === 2 && svgs.every((t) => t.includes('role="img"') && t.includes("aria-label")),
     note: `${svgs.length} <svg> tags; a bare svg has no implicit role, and several readers then drop its aria-label` };
+});
+// …AND NOTHING AROUND IT HIDES IT AGAIN (sweep #10 T1, item 3). The check above held for a month while the
+// menu card wrapped the badge in `aria-hidden="true"`, which removes it — label and all — from the
+// accessibility tree: 59 labelled badges on French House, 0 a screen reader could reach. A label is only
+// worth anything if no ancestor hides it, so the element that directly holds <VegIcon> is asked too.
+check("P170008", "no page hides the veg / non-veg badge from a screen reader by wrapping it", () => {
+  const bad = [];
+  for (const f of ["components/FoodCard.tsx", "app/item/[slug]/ItemClient.tsx"]) {
+    const c = code(f) || "";
+    for (const m of c.matchAll(/<(div|span)\b([^>]*)>\s*<VegIcon\b/g)) if (/aria-hidden/.test(m[2])) bad.push(f.split("/").pop());
+  }
+  return { ok: bad.length === 0, note: bad.length ? `aria-hidden wrapper in ${bad.join(", ")}` : "both places that draw the badge leave it readable" };
 });
 check("P102060", "…and the badge still carries no colour of its own", () =>
   ({ ok: !rx(code("components/VegIcon.tsx"), /#[0-9a-fA-F]{3,6}/),
