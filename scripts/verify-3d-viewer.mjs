@@ -276,6 +276,18 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
   );
 }
 
+// Sweep #10 T2, item 5: the six hotspot <button>s were six dead Tab stops before Add to order.
+{
+  const pmv = src[PUBLIC_MV].replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  check(
+    "the 3D callout buttons are not stops on the keyboard's way to Add to order",
+    /className="hotspot hs-anchor"\s*id=\{`hs-\$\{tag\.id\}`\}\s*tabIndex=\{-1\}\s*aria-hidden="true"/.test(pmv) &&
+      /className="hotspot hs-tag"\s*id=\{`hs-tag-\$\{tag\.id\}`\}\s*tabIndex=\{-1\}/.test(pmv),
+    `${PUBLIC_MV} → both hotspot buttons need tabIndex={-1} (the anchor also aria-hidden): they do ` +
+      "nothing when focused, and three of them have no name. Never remove or hide the cards (R57)."
+  );
+}
+
 // Sweep #10 T2, item 4: the zoomed photo's ✕ — the only way out while zoomed — had no name.
 check(
   "the zoomed photo's close button has a name a screen reader can say",
