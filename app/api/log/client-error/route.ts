@@ -72,11 +72,15 @@ function browserTag(ua: string | null): string {
   const s = String(ua || "");
   if (!s) return "";
   // Order matters: every one of these also claims to be "Safari", and Chrome-on-iOS says "CriOS".
+  // ORDER MATTERS: most browsers also carry "Chrome/" (and "Safari/"), so each one that does is
+  // tested BEFORE Chrome. Samsung Internet used to come after Chrome and so was never named — every
+  // Samsung phone or tablet was filed as Chrome; Edge on a phone (EdgA / EdgiOS) was filed as Chrome
+  // or Safari (sweep #10 T16 round 3, item 32; guard R3-M, scripts/t16r3/fm-routes2.mjs).
   const name =
-    /\bEdg\//.test(s) ? "Edge" :
+    /\bEdg(?:A|iOS)?\//.test(s) ? "Edge" :
+    /\bSamsungBrowser\//.test(s) ? "Samsung" :
     /\b(CriOS|Chrome)\//.test(s) ? "Chrome" :
     /\bFirefox|FxiOS\//.test(s) ? "Firefox" :
-    /\bSamsungBrowser\//.test(s) ? "Samsung" :
     /\bSafari\//.test(s) ? "Safari" : "";
   const platform =
     /\biPhone\b/.test(s) ? "iPhone" :
