@@ -1165,5 +1165,25 @@ console.log("\nT11-E · saying so when a read failed");
   );
 }
 
+// ── THE OWNER'S HOME DASHBOARD AND ITS DOCKET (sweep #10 T20, 2026-10-16) ─────────────────────────
+// Eight faults found driving the dashboard and the tile sheets (components/owner/TileDocket.tsx, which
+// no ledger row had ever named) plus the admin's name check in lib/ownerHome.ts. One check per item;
+// the live proofs are the T20-S10 ledger rows P189181–P189240 and P189336–P189337.
+{
+  const docket = read("components/owner/TileDocket.tsx");
+  const ownerHome = read("lib/ownerHome.ts");
+  // item 1 — a REGRESSION (rows P05802 / P05804, green 2026-09-05): the stock badge (2026-10-03) asked
+  // /api/owner/inventory on every dashboard open, and for every owner without Inventory the route
+  // refuses with a 403 — a failed request and a red console line on each open, for an answer that can
+  // only be "no". The overview already says whether ANY restaurant of his has the module.
+  check(
+    "item 1 · the stock count is only asked for when the owner's estate has Inventory at all",
+    /const invPossible = ov\?\.modules\?\.inventory !== false;/.test(dashPage) &&
+      /if \(activeRid && invPossible\) \{ setStockCounts\(null\); fetchStockCounts\(activeRid\); \}/.test(dashPage),
+    "app/owner/page.tsx — the stock-count effect must check ov.modules.inventory before it asks; " +
+      "otherwise every Inventory-less dashboard open costs a refused request and a console error.",
+  );
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }

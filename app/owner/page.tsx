@@ -80,7 +80,9 @@ type Restaurant = {
   // look dead — every money cell below says "hidden" instead (found 2026-08-04).
   reportsOff?: boolean;
 };
-type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean> };
+type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean>;
+  // Which optional modules ANY restaurant of this owner has switched on (the overview route's probe).
+  modules?: { payroll: boolean; inventory: boolean } };
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
 type TsRow = { bucket: string; restaurantId?: string; revenue: number; orders: number };
 type TsPrevRow = { bucket: string; revenue: number };
@@ -1032,7 +1034,22 @@ export default function OwnerDashboard() {
   useEffect(() => { if (activeRid) { setActs(null); setActsErr(false); fetchActs(activeRid); } }, [activeRid, fetchActs]);
   // Same trigger as the activity log: when the chosen restaurant changes, ask again. Clearing it
   // first matters — a stale count from the previous restaurant is worse than no count.
-  useEffect(() => { if (activeRid) { setStockCounts(null); fetchStockCounts(activeRid); } }, [activeRid, fetchStockCounts]);
+  //
+  // ── ONLY ASK WHERE THE ANSWER CAN BE YES (sweep #10 T20, item 1 — a regression of rows P05802 /
+  // P05804, green on 2026-09-05) ────────────────────────────────────────────────────────────────────
+  // This asked on every dashboard open, and for an owner WITHOUT Inventory & stock the route answers
+  // 403 by design (hiding is never the only guard). So every such open cost a refused request and a
+  // red "Failed to load resource" line in the console, for an answer that could only ever be "no".
+  // The overview already says whether ANY restaurant of his has the module (`modules.inventory`), so
+  // when it says no, nothing is asked. `!== false` and not `=== true`: an overview without the field
+  // (an old instant-paint snapshot) still asks, which is the old behaviour, never a missing badge.
+  // Left as it was: a mixed estate drilled into its one restaurant WITHOUT the module still asks and is
+  // still refused — the overview carries the union, not a per-restaurant answer.
+  const invPossible = ov?.modules?.inventory !== false;
+  useEffect(() => {
+    if (activeRid && invPossible) { setStockCounts(null); fetchStockCounts(activeRid); }
+    else setStockCounts(null);
+  }, [activeRid, invPossible, fetchStockCounts]);
 
   // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
   // are compute-on-view cached server-side (mig 196), so this stays cheap.
