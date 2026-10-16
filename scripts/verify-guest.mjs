@@ -557,6 +557,15 @@ check("P170014", "neither error screen paints anything in a restaurant's colour 
   const sysOnly = !/#[0-9a-f]{3,8}\b|rgba?\(/i.test(e);   // app/error.tsx uses ONLY the device's system colours
   return { ok: !!e && !!g && !gold.test(e) && !gold.test(g) && sysOnly, note: `error.tsx gold=${gold.test(e)} system-colours-only=${sysOnly} · global-error.tsx gold=${gold.test(g)}` };
 });
+// item 6 (sweep #10 T1): with the search switch OFF the box is gone, so a remembered search must stop
+// filtering too — it left a guest on 6 "coffee" dishes with no box, no ✕ and no sections.
+check("P170015", "a remembered search filters only while the search switch is on (like favourites and veg)", () => {
+  const mv = code("components/MenuView.tsx") || "";
+  const gated = /const q = features\.search !== false \? fold\(deferredQuery\.trim\(\)\) : "";/.test(mv);
+  const box = /\{features\.search && \(/.test(mv);
+  const noOther = !/fold\(deferredQuery/.test(mv.replace(/const q = features\.search !== false \? fold\(deferredQuery\.trim\(\)\) : "";/, ""));
+  return { ok: gated && box && noOther, note: `q gated=${gated} box gated=${box} no second filter on the raw text=${noOther}` };
+});
 
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a

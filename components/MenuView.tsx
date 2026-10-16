@@ -1012,7 +1012,15 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // (`deferredQuery` itself is declared beside `searchQuery` at the top: the scroll-cue effects need it
   // and they sit above this line.)
   // q = the search text, tidied up (trimmed, lowercased, accent-folded).
-  const q = fold(deferredQuery.trim());
+  //
+  // ONLY WHILE THE SEARCH SWITCH IS ON (sweep #10 T1, item 6). The box is drawn only when
+  // `features.search` is on, but the text it remembers (sessionStorage `lfh_menu_search`) kept filtering
+  // when the switch was off — measured: a French House guest who had searched "coffee" was left on 6
+  // dishes with no box, no ✕, no sections and no chips, both when the switch arrived live and after a
+  // reload. The favourites and veg filters already stop applying when their switch is off (favActive,
+  // dietShown below); search now does the same. The remembered text is kept, so it comes back WITH
+  // its box if the switch is turned on again.
+  const q = features.search !== false ? fold(deferredQuery.trim()) : "";
 
   // BACK CLOSES THE SEARCH — IT DOES NOT OFFER TO LEAVE THE SITE (owner, 2026-08-26).
   //
