@@ -9,6 +9,7 @@
 import { chromium } from "playwright";
 import { check, run, idGen, F, BASE } from "./lib.mjs";
 import { sb, FH } from "./env.mjs";
+import { restoreOnExit } from "../restore.mjs";
 const id = idGen(171451);
 const C = (file, what, how, fn) => check(id(), file, what, how, fn);
 const b = await chromium.launch();
@@ -101,7 +102,7 @@ const arProbe = (p) => p.evaluate(() => { const mv = document.querySelector("#mv
   const SLUG = "avocado-and-cream-cheese";
   const LONG = ("A sweep check note. ".repeat(40)).trim(); // 799 characters
   const cleanup = async () => { await sb.from("reviews").delete().eq("restaurant_id", FH).eq("item_slug", SLUG).eq("device_id", DEVICE); };
-  for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, async () => { await cleanup(); process.exit(130); });
+  restoreOnExit("French House · the sweep's own review row", cleanup);
   const S = {};
   C(F.item, "a diner can post a review from the dish page (P00763/P00815 have waited three sweeps for this)", "fill the form on French House with a throwaway device id, submit", async () => {
     Object.assign(S, await open(`/r/french-house/item/${SLUG}`, { init: `try{localStorage.setItem("lfh_device_id",${JSON.stringify(DEVICE)});localStorage.setItem("lfh-device-id",${JSON.stringify(DEVICE)})}catch(e){}` }));
@@ -134,7 +135,7 @@ const arProbe = (p) => p.evaluate(() => { const mv = document.querySelector("#mv
   const served = async (path) => { const h = await (await fetch(BASE + path)).text(); return /if\(!localStorage\.getItem\('lfh_theme'\)\)document\.documentElement\.setAttribute\('data-theme','dark'\)/.test(h); };
   const before = (await sb.from("settings").select("menu_default_mode").eq("restaurant_id", FH).single()).data?.menu_default_mode;
   const restore = async () => { await sb.from("settings").update({ menu_default_mode: before || "light" }).eq("restaurant_id", FH); };
-  for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, async () => { await restore(); process.exit(130); });
+  restoreOnExit("French House · settings.menu_default_mode", restore);
   const R = {};
   C(F.itemPage, "a dark-default restaurant #1: its OWN dish door (/item/<dish>) boots dark", "flip menu_default_mode to dark, wait out the 8s settings cache, read the served page", async () => {
     try { await sb.from("settings").update({ menu_default_mode: "dark" }).eq("restaurant_id", FH); await new Promise((r) => setTimeout(r, 9000)); R.legacy = await served("/item/avocado-and-cream-cheese"); R.tenant = await served("/r/french-house/item/avocado-and-cream-cheese"); R.menu = await served("/r/french-house/menu"); }
