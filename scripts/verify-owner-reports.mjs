@@ -1207,7 +1207,7 @@ console.log("\nT11-E · saying so when a read failed");
   // item 5 — Today's 'Average per order' divided PAID takings by EVERY order and printed ₹0 when none was paid.
   check(
     "item 5 · Today's average says what it divides, and never prints ₹0 for 'nothing paid yet'",
-    /"none paid yet"/.test(dashPage) && /paid or still open"/.test(dashPage) && /todayOrd && todayRev \? inr\(todayRev \/ todayOrd\) : "—"/.test(dashPage),
+    /"none paid yet"/.test(dashPage) && /"taken so far ÷ every order, paid or open"/.test(dashPage) && /todayOrd && todayRev \? inr\(todayRev \/ todayOrd\) : "—"/.test(dashPage),
     "app/owner/page.tsx — the Today sheet's average row.",
   );
   // item 6 — with exactly two days the axis index list was [0, 1, 1]: a duplicate React key and the last

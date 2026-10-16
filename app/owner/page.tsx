@@ -1859,11 +1859,13 @@ export default function OwnerDashboard() {
           // `todayRev` is PAID money and `todayOrd` is EVERY order (lfh_owner_overview counts open ones
           // too), so 79 orders with nothing paid printed "Average per order ₹0" — the very doubt the
           // tile face was reworded for on 2026-08-31 (item 26: "79 orders, none paid yet"). The same
-          // words here, and when there is a figure, the line under it says what was divided by what.
+          // words here, and when there is a figure, the line under it says what was divided by what —
+          // in ONE line at 360px: a longer wording wrapped on a phone and made this row taller than its
+          // neighbours, the uneven rhythm the docket was built to avoid (measured, T20-S10 P189116).
           ["Average per order", todayOrd && todayRev ? inr(todayRev / todayOrd) : "—",
             todayOrd === 0 ? "no orders yet today"
             : todayRev === 0 ? "none paid yet"
-            : "money taken so far ÷ every order today, paid or still open"],
+            : "taken so far ÷ every order, paid or open"],
           ["Tables open now", String(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0))],
         ],
         note: "This one does not follow the period above — it is always today.",
