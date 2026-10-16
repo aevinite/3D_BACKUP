@@ -73,6 +73,10 @@ const EXEMPT = {
   "lib/publicCap.ts": [
     ['.eq("device_id", capKey)', "a per-DEVICE cap on a public endpoint — the device is the subject, and it may have no restaurant yet"],
   ],
+  // Added by sweep #10 T11 round 2 (main had gone red on it since sweep #10 T3 round 2 item 7).
+  "lib/guestTokenRestaurant.ts": [
+    ['.eq("token", token)', "a diner's table-session token is globally unique and IS the thing that identifies the restaurant — this read is what supplies the rid, so it cannot be scoped by one"],
+  ],
   "lib/printHelpers.ts": [
     ['.eq("token_hash", hashAgentToken(t))', "a helper's token is globally unique and IS the thing that identifies its restaurant — the row read here is what supplies the rid"],
     ['.eq("id", agent.id)', "updates the agent row that the scoped read above returned, by its own primary key"],

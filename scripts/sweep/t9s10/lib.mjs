@@ -186,6 +186,17 @@ export async function world(o = {}) {
 /** Call one handler. Returns { status, json, text, headers }. */
 export async function call(verb, path, opts = {}) {
   const { route, G } = await stubRoute();
+  // AN OWNER'S SCREENS ALWAYS NAME THE RESTAURANT (sweep #10 T11 round 2, item 10). The real owner
+  // reaches this route only through Manager mode and the owner's menu editor, both of which send ?rid
+  // (the panel's ridQ) — and since item 10 an owner request that names nothing is refused. So an owner
+  // call here gets the same ?rid the real screen would send, for the restaurant the world says they own.
+  const actor = G.ACTOR && G.ACTOR.user;
+  if (actor && actor.role === "owner" && !/[?&]rid=/.test(opts.query || "") && !opts.noOwnerRid) {
+    const rid = opts.ownerRid || RID;
+    opts = { ...opts, query: (opts.query ? opts.query + "&" : "?") + "rid=" + rid };
+    G.FIX.restaurant_owners ||= [];
+    if (!G.FIX.restaurant_owners.some((x) => x.user_id === actor.id && x.restaurant_id === rid)) G.FIX.restaurant_owners.push({ user_id: actor.id, restaurant_id: rid });
+  }
   G.SCOPE_WHERE = `${verb} ${path}${opts.query || ""}`; // which request a logged query belonged to
   const { NextRequest } = require_("next/server");
   const headers = { "content-type": "application/json", cookie: "aevidine_admin_rid=" + (opts.adminRid || RID), ...(opts.headers || {}) };

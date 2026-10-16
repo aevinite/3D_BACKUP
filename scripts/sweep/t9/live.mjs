@@ -203,12 +203,18 @@ async function main() {
 
   // ── P02856–P02858 · the poll while hidden, and concurrency ──────────────────
   reads.length = 0;
-  await page.evaluate(() => Object.defineProperty(document, "hidden", { get: () => true, configurable: true }));
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  // HIDE THE PANEL'S OWN DOCUMENT, NOT THE OUTER PAGE (sweep #10 T11 round 2). This used to set
+  // `document.hidden` on the /kitchen page — but the board lives in an IFRAME with its own document,
+  // which never saw the change, so the row measured an ordinary visible board and went red whenever
+  // another terminal's writes raised breadcrumbs. Now: the panel's document is hidden, only WHOLE-board
+  // reads count (a breadcrumb naming a table answers with a ?table= slice), and the budget is what the
+  // 4-second rate guard allows in 9 seconds — no backstop read, at most one breadcrumb read per 4s.
+  await F.evaluate(() => { Object.defineProperty(document, "hidden", { get: () => true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
   await page.waitForTimeout(9000);
-  const hiddenReads = reads.length;
+  const hiddenReads = reads.filter((r) => !/[?&]table=/.test(r.u)).length;
   rec("P02856", "the board issues no whole-board read on the 60s backstop while the tab is hidden",
-    hiddenReads <= 1 ? true : `${hiddenReads} board reads in 9s while hidden`, `${hiddenReads} reads`);
+    hiddenReads <= 3 ? true : `${hiddenReads} whole-board reads in 9s while hidden`, `${hiddenReads} whole-board read(s)`);
+  await F.evaluate(() => { Object.defineProperty(document, "hidden", { get: () => false, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
 
   const pairs = reads.map((r) => r.t).sort((a, b) => a - b);
   const tooClose = pairs.filter((t, i) => i > 0 && t - pairs[i - 1] < 50).length;

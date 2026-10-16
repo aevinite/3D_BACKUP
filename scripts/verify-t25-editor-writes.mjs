@@ -75,6 +75,14 @@ function world(extra = {}) {
 }
 const ctx = (p) => ({ params: Promise.resolve({ path: p.split("/") }) });
 const call = async (verb, path, opts = {}) => {
+  // AN OWNER'S SCREENS ALWAYS NAME THE RESTAURANT (sweep #10 T11 round 2, item 10): Manager mode and the
+  // owner's menu editor send ?rid, and an owner request that names nothing is now refused. So an owner
+  // call here carries the ?rid the real screen sends, for the restaurant this world says they own.
+  if (G.ACTOR && G.ACTOR.user && G.ACTOR.user.role === "owner" && !/[?&]rid=/.test(opts.query || "")) {
+    opts = { ...opts, query: (opts.query ? opts.query + "&" : "?") + "rid=" + RID };
+    G.FIX.restaurant_owners ||= [];
+    if (!G.FIX.restaurant_owners.some((x) => x.user_id === G.ACTOR.user.id && x.restaurant_id === RID)) G.FIX.restaurant_owners.push({ user_id: G.ACTOR.user.id, restaurant_id: RID });
+  }
   const r = await route[verb](new NextRequest(`http://localhost/api/editor/${path}${opts.query || ""}`, {
     method: verb,
     // The act-as cookie is what gives the ADMIN super-user a restaurant to act on; a real staff

@@ -358,7 +358,8 @@ t6("P100317", "route postImpl() line 452: the or on `name` is still there", "R",
 t6("P100318", "route postImpl() line 452: the or on `username` is still there", "R", (x) => x.includes("username") || `the or in postImpl() is gone: username`);
 t6("P100319", "route postImpl() line 453: the or on `role` is still there", "R", (x) => x.includes("role") || `the or in postImpl() is gone: role`);
 t6("P100320", "route postImpl() line 456: the ternary on `Error` is still there", "R", (x) => x.includes("Error") || `the ternary in postImpl() is gone: Error`);
-t6("P100321", "route postImpl() line 461: the if on `a === \"orders\" && c === \"accept\"` is still there", "R", (x) => x.includes("a === \"orders\" && c === \"accept\"") || `the if in postImpl() is gone: a === \"orders\" && c === \"accept\"`);
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route.
+t6("P100321", "route postImpl(): the accept branch is GONE (item 7) and the plain 404 is what answers it", "R", (x) => (!x.includes("a === \"orders\" && c === \"accept\"") && x.includes("unknown POST endpoint")) || `the kitchen accept branch is back`);
 t6("P100322", "route postImpl() line 466: the if on `!cur` is still there", "R", (x) => x.includes("!cur") || `the if in postImpl() is gone: !cur`);
 t6("P100323", "route postImpl() line 479: the if on `a === \"orders\" && c === \"ready\"` is still there", "R", (x) => x.includes("a === \"orders\" && c === \"ready\"") || `the if in postImpl() is gone: a === \"orders\" && c === \"ready\"`);
 t6("P100324", "route postImpl() line 504: the if on `a === \"orders\" && c === \"unready\"` is still there", "R", (x) => x.includes("a === \"orders\" && c === \"unready\"") || `the if in postImpl() is gone: a === \"orders\" && c === \"unready\"`);
@@ -374,7 +375,8 @@ t6("P100333", "route postImpl() line 545: the ternary on `0` is still there", "R
 t6("P100334", "route postImpl() line 545: the ternary on `anyActive` is still there", "R", (x) => x.includes("anyActive") || `the ternary in postImpl() is gone: anyActive`);
 t6("P100335", "route postImpl() line 550: the ternary on `1` is still there", "R", (x) => x.includes("1") || `the ternary in postImpl() is gone: 1`);
 t6("P100336", "route postImpl() line 556: the if on `a === \"items\" && c === \"status\"` is still there", "R", (x) => x.includes("a === \"items\" && c === \"status\"") || `the if in postImpl() is gone: a === \"items\" && c === \"status\"`);
-t6("P100337", "route postImpl() line 558: the if on `![\"received\", \"preparing\", \"ready\", \"served\"` is still there", "R", (x) => x.includes("![\"received\", \"preparing\", \"ready\", \"served\"].includes(status") || `the if in postImpl() is gone: ![\"received\", \"preparing\", \"ready\", \"ser`);
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route.
+t6("P100337", "route postImpl(): the dish-status allow-list is the kitchen's three", "R", (x) => x.includes("![\"received\", \"preparing\", \"ready\"].includes(status") || `the allow-list changed`);
 t6("P100338", "route postImpl() line 573: the if on `!item` is still there", "R", (x) => x.includes("!item") || `the if in postImpl() is gone: !item`);
 t6("P100339", "route postImpl() line 574: the if on `item.order_id` is still there", "R", (x) => x.includes("item.order_id") || `the if in postImpl() is gone: item.order_id`);
 t6("P100340", "route postImpl() line 593: the if on `a === \"platform\" && c === \"status\"` is still there", "R", (x) => x.includes("a === \"platform\" && c === \"status\"") || `the if in postImpl() is gone: a === \"platform\" && c === \"status\"`);

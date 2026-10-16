@@ -43,6 +43,13 @@ row(next(), "every write endpoint sits behind the gate, the scope, the block lis
 });
 // D2 · each endpoint, one row: it exists, it answers, and it cannot fall through silently
 for (const [name, from, to] of ENDPOINTS) {
+  // EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route. The ids stay where they were: for accept, the three rows now assert it is GONE.
+  if (name === "orders/:id/accept") {
+    row(next(), "POST orders/:id/accept is GONE from the kitchen route (item 7)", () => !ROUTEC().includes(from) || "the kitchen accept branch is back");
+    row(next(), "…so a request for it gets the ordinary 404, never a silent success", () => /return err\("unknown POST endpoint", 404\)/.test(ROUTEC()) || "no 404 fallthrough");
+    row(next(), "…and its obituary says where accepting lives", () => /\/api\/tablet\/orders\/:id\/accept/.test(ROUTE()) || "no obituary");
+    continue;
+  }
   row(next(), `POST ${name} exists and is reached by an explicit branch`, () => (rslice(from, to).length > 0) || "the branch is gone");
   row(next(), `POST ${name} always answers — every path in it ends in ok() or err()`, () => {
     const s = rslice(from, to);
@@ -60,7 +67,8 @@ for (const [name, from, to] of ENDPOINTS) {
 }
 // D3 · the body shapes each endpoint validates
 const SHAPES = [
-  ["items/:id/status refuses a status outside its four", 'if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status")'],
+  // EXPECTATION CHANGED (sweep #10 T11 round 2, item 7 — owner: "do all the fixes"): the kitchen route's accept door is GONE and 'served' is no longer a status it takes; accepting lives on the waiter route.
+  ["items/:id/status refuses a status outside its four", 'if (!["received", "preparing", "ready"].includes(status)) return err("invalid status")'],
   ["platform/:id/status refuses a status outside its four", 'if (!["accepted", "preparing", "ready", "handed_over"].includes(status)) return err("invalid status")'],
   ["printer-events refuses a kind outside its five", 'if (!kinds.includes(kind)) return err("invalid problem kind")'],
   ["unready refuses a snapshot that is not an array", 'const raw = Array.isArray(body?.dishes) ? body.dishes : []'],

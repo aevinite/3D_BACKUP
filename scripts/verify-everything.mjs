@@ -1598,19 +1598,20 @@ phase("that table's slice contains ONLY its own party", async () => {
   const strays = (out || []).filter((o) => Number(o.table_number) !== LIVE.table);
   ok(!strays.length, `${strays.length} orders from other tables leaked into this table's view`);
 });
-phase("the kitchen can move the ticket to cooking", async () => {
-  const { ctx } = await roleCtx("kitchen");
+// THE WAITER ACCEPTS, NOT THE KITCHEN (owner, 2026-06-14). This phase used to accept through the
+// KITCHEN's route, which was the only reason that door existed; it was removed in sweep #10 T11 round 2
+// (item 7), so the ticket is moved to cooking the way the restaurant really does it — from the tablet.
+phase("the waiter accepts the ticket, moving it to cooking", async () => {
+  const { ctx } = await roleCtx("tablet");
   const p = await ctx.newPage();
-  await p.goto(BASE + "/kitchen", { waitUntil: "domcontentloaded" }).catch(() => {});
+  await p.goto(BASE + "/tablet", { waitUntil: "domcontentloaded" }).catch(() => {});
   await wait(2500);
-  // The kitchen moves a ticket with POST /api/kitchen/orders/<id>/accept — there is no
-  // status field to set (read out of the route, after two wrong guesses).
   const out = await p.evaluate(async (id) => {
-    const r = await fetch(`/api/kitchen/orders/${id}/accept`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const r = await fetch(`/api/tablet/orders/${id}/accept`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     return { s: r.status, t: (await r.text()).slice(0, 140) };
   }, LIVE.orderId);
   await p.close().catch(() => {});
-  if (out.s === 404) throw new Fail(`no such kitchen endpoint (${out.t}) — the phase is asking for the wrong path, not a product fault`);
+  if (out.s === 404) throw new Fail(`no such waiter endpoint (${out.t}) — the phase is asking for the wrong path, not a product fault`);
   ok(out.s === 200, `status ${out.s} · ${out.t}`);
   const o = (await dbGet(`orders?select=status&id=eq.${LIVE.orderId}`))[0];
   ok(["preparing", "cooking"].includes(o.status), `order status is ${o.status}`);

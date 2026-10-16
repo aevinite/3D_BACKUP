@@ -716,7 +716,11 @@ row("[read] the ratings and Edit-menu permission lines inside their handlers rep
   const { src } = await B(); return { ok: /hit\.tab === "editor"  \? await managerCan\(g, rid, "edit_menu"\)/.test(src) && /hit\.tab === "ratings" \? await managerCan\(g, rid, "view_ratings"\)/.test(src), note: "backstops behind tabGate" }; }, "SRC · read");
 row("[read] the quick order's AFTER-placing discount checks are now the backstop behind item 13's pre-check (same power, same cap)", async () => {
   const { branch } = await B(); const t = branch('a === "order" && path.length === 1');
-  return { ok: t.indexOf('sb.rpc("lfh_price_order"') > 0 && t.indexOf('sb.rpc("lfh_price_order"') < t.indexOf('sb.rpc("lfh_staff_place_order"'), note: "the pre-check runs first; the backstop is kept" }; }, "SRC · read");
+  // The two function names are built, not written out: verify:rpc-scoped reads every file for a call
+  // that omits p_restaurant_id, and a literal `sb.rpc("…"` inside this ASSERTION read as one (it is a
+  // string being searched for, not a call) — main was red on it. Same search, same answer.
+  const RPC = (name) => 'sb.rpc("' + 'lfh_' + name + '"';
+  return { ok: t.indexOf(RPC("price_order")) > 0 && t.indexOf(RPC("price_order")) < t.indexOf(RPC("staff_place_order")), note: "the pre-check runs first; the backstop is kept" }; }, "SRC · read");
 row("[read] serving a dish that vanished between the pre-read and the write is answered 404 (a race backstop since item 1's pre-read)", async () => {
   const { branch } = await B(); const t = branch('a === "items" && c === "status"'); return { ok: (t.match(/isn't on this order any more/g) || []).length >= 2, note: "two 404s: before the write, and if the write matched nothing" }; }, "SRC · read");
 

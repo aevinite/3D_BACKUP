@@ -2087,8 +2087,12 @@ check("P79121", "the card honours that ?next only inside this person's own panel
   has(LF, 'if (u.pathname !== home && !u.pathname.startsWith(home + "/")) return home;'));
 check("P79122", "…so a ?next pointing at another site is dropped, not followed",
   !rx(LF, /router\.push\(next\)/));
+// The product's OWN address is not a third party (sweep #10 T11 round 2): since 2026-10-12 /login carries
+// the aevinite.shop search-result metadata (owner: "only the home page of aevinite.shop appears in Google"),
+// whose openGraph url names the site itself. The rule this row defends — no outside script, analytics or
+// tracker on a sign-in door — is unchanged; only our own domains are allowed through.
 check("P79123", "the three doors between them import no analytics, no third-party script and no tracker",
-  ![LP, RLP, LF, CODE.staffLoginPage, CODE.staffLoginForm].some((s2) => /https?:\/\/(?!127|localhost)/.test(s2)));
+  ![LP, RLP, LF, CODE.staffLoginPage, CODE.staffLoginForm].some((s2) => /https?:\/\/(?!127|localhost|(?:www\.)?aevinite\.(?:shop|com)\/)/.test(s2)));
 check("P79124", "the two card components are client components, because they read the reply",
   has(S.loginForm, '"use client"') && has(S.staffLoginForm, '"use client"'));
 check("P79125", "…and the three PAGES are server components, so no session check runs in the browser",

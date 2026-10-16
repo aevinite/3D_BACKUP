@@ -125,6 +125,11 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .btn .bi { font-style: normal; }
 .btn .bw { font-style: normal; margin-left: 6px; }
 .btn.danger { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.5); color: #fca5a5; font-weight: 700; }
+/* THE LIGHT SKIN'S "SOLD OUT" WAS PINK ON PINK (sweep #10 T11 round 2). #fca5a5 is the DARK skin's red ink;
+   on the light board the same 15% red wash sits on white, and the word measured about 1.9:1 — the one
+   button in the 86 drawer that says a dish cannot be ordered was the faintest thing in it. Same deeper
+   red the light skin already uses for late tickets; the wash and border stay, so it still reads as a warning. */
+html[data-theme="light"] .btn.danger { color: #b91c1c; }
 
 /* the three columns — fluid, no dead gap (stack on a narrow screen) */
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; padding: 14px calc(18px + var(--sar)) 14px calc(18px + var(--sal)); align-items: start; }
@@ -399,6 +404,11 @@ html:not([data-theme="light"]) .outfilter.on { color: #fca5a5; }
 .dish-row .btn, .drawer-head .btn, .prsheet-head .btn {
   min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center;
 }
+/* A LONG DISH NAME SQUEEZED ITS TOGGLE (sweep #10 T11 round 2, seen on the A35): the button could shrink, so
+   "available" sat jammed against its own border beside a three-line name. The toggle keeps its size and
+   one line; the name is the part that wraps. */
+.dish-row .btn { flex-shrink: 0; white-space: nowrap; }
+.dish-row .dtitle { min-width: 0; overflow-wrap: anywhere; }
 .dtitle { font-size: 14.5px; font-weight: 600; }
 .dtitle small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 

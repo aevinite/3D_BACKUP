@@ -7,7 +7,7 @@
 //
 // The same three fixes are ALSO driven in memory (the real route, bundled, called against the stub
 // database) by scripts/sweep/t11s10/run.mjs — that is the proof they behave; this is the tripwire.
-import { row, APPC, ROUTEC, hasRe, src, code } from "../t9/lib.mjs";
+import { row, APPC, ROUTEC, hasRe, lacksRe, src, code } from "../t9/lib.mjs";
 const require_ = (rel) => code(src(rel));
 
 /** One POST branch of the kitchen route, from its test to the next top-level `if (a === "` test. */
@@ -27,17 +27,14 @@ row("P180001", "item 1 · /ready refuses a ticket whose every dish is already se
   const write = b.indexOf('sb.from("orders").update(');
   return (b && guard > 0 && write > guard) || "the served refusal is missing, or comes after the write";
 });
-row("P180002", "item 1 · /accept refuses a served ticket the same way", () => {
-  const b = branch('if (a === "orders" && c === "accept")');
-  const guard = b.indexOf('if (cur.status === "served") return err(SERVED_MSG, 409)');
-  const write = b.indexOf('sb.from("orders").update(');
-  return (b && guard > 0 && write > guard) || "the served refusal is missing, or comes after the write";
-});
+// EXPECTATION CHANGED (round 2, item 7): the accept door is gone and the route takes no "served" — see the rows below.
+row("P180002", "item 1 + item 7 · the kitchen route has no /accept to revive a served ticket through (the door is gone)", () =>
+  lacksRe(ROUTEC(), /if \(a === "orders" && c === "accept"\)/));
 row("P180003", "item 1 · one dish's ✓ (and its take-back) reads the dish's CURRENT status before writing", () =>
   hasRe(branch('if (a === "items" && c === "status")'), /from\("order_items"\)\.select\("order_id, status"\)\.eq\("id", b\)\.eq\("restaurant_id", rid\)/));
-row("P180004", "item 1 · …and refuses to move a SERVED dish to anything but served (409)", () => {
+row("P180004", "item 1 · …and refuses to move a SERVED dish at all (409) — the kitchen never serves (item 7)", () => {
   const b = branch('if (a === "items" && c === "status")');
-  const guard = b.indexOf('if (own && own.status === "served" && status !== "served") return err(SERVED_DISH_MSG, 409)');
+  const guard = b.indexOf('if (own && own.status === "served") return err(SERVED_DISH_MSG, 409)');
   const write = b.indexOf('sb.from("order_items").update(patch)');
   return (guard > 0 && write > guard) || "the served-dish refusal is missing, or comes after the write";
 });
@@ -49,7 +46,7 @@ row("P180005", "item 1 · the two refusals are plain sentences a cook can act on
 row("P180006", "item 1 · the refusals are 409 (someone else moved first), never 400 or 500", () => {
   const R = ROUTEC();
   const all = R.match(/err\(SERVED_(?:DISH_)?MSG, (\d+)\)/g) || [];
-  return (all.length === 3 && all.every((x) => /, 409\)$/.test(x))) || `${all.length} refusals: ${all.join(" ")}`;
+  return (all.length === 2 && all.every((x) => /, 409\)$/.test(x))) || `${all.length} refusals: ${all.join(" ")}`;   // two since item 7 removed /accept
 });
 row("P180007", "item 1 · /unready still leaves a served dish alone (the rule item 1 copied)", () =>
   hasRe(branch('if (a === "orders" && c === "unready")'), /if \(wasNow === "served"\) continue;/));
@@ -57,8 +54,8 @@ row("P180008", "item 1 · the panel's refused ✓ still drops its optimistic ove
   hasRe(APPC(), /pendingReady\.delete\(id\);\s*if \(it\.status !== "served"\) it\.status = prev;/));
 row("P180009", "item 1 · the panel's refused ALL READY still drops both overlays", () =>
   hasRe(APPC(), /pendingReadyOrders\.delete\(orderId\);\s*snap\.forEach\(\(s\) => pendingReady\.delete\(s\.id\)\);\s*toast\("Failed: " \+ e\.message\);/));
-row("P180010", "item 1 · a served dish's own write (the waiter path) is still allowed on this route", () =>
-  hasRe(branch('if (a === "items" && c === "status")'), /\["received", "preparing", "ready", "served"\]\.includes\(status\)/));
+row("P180010", "item 7 · the kitchen route takes only the kitchen's three dish statuses — 'served' is the waiter's", () =>
+  hasRe(branch('if (a === "items" && c === "status")'), /if \(!\["received", "preparing", "ready"\]\.includes\(status\)\) return err\("invalid status"\);/));
 
 // ══ ITEM 2 · the kitchen route answers the kitchen login and the admin, nobody else — P180011–P180020 ══
 /** The gate() helper of the kitchen route, comments stripped. */
@@ -179,3 +176,43 @@ row("P180565", "item 6 · a tap ON the nudge still folds it promptly (that tap i
   hasRe(APPC(), /soundNudgeEl\.onclick = \(\) => \{ primeAudio\(\); setTimeout\(updateSoundNudge, 250\); \};/));
 row("P180566", "item 6 · the nudge still sits IN the flow under the bar (the reason the fold moves the board)", () =>
   hasRe(APPC(), /bar\.parentNode\.insertBefore\(soundNudgeEl, bar\.nextSibling\)/));
+
+// ══ ROUND 2 · ITEM 7 · the kitchen's server makes only the moves its screen makes — P180567–P180570 ══
+row("P180567", "item 7 · the kitchen route has no accept branch, and its obituary says where accepting lives", () =>
+  (!/if \(a === "orders" && c === "accept"\)/.test(ROUTEC()) && /\/api\/tablet\/orders\/:id\/accept/.test(src("app/api/kitchen/[...path]/route.ts"))) || "the door is back or the obituary is gone");
+row("P180568", "item 7 · no script still accepts or serves through the KITCHEN route", () => {
+  const bad = ["scripts/stress-tenant.mjs", "scripts/verify-everything.mjs"].filter((f) => /\/api\/kitchen\/orders\/\$\{[^}]+\}\/accept|\/api\/kitchen\/items\/\$\{[^}]+\}\/status`, \{ status: "served" \}/.test(code(src(f))));
+  return !bad.length || `still using the kitchen doors: ${bad.join(", ")}`;
+});
+row("P180569", "item 7 · the load script accepts and serves through the waiter's route instead", () =>
+  hasRe(code(src("scripts/stress-tenant.mjs")), /\/api\/tablet\/orders\/\$\{o\.id\}\/accept[\s\S]*\/api\/tablet\/items\/\$\{it\.id\}\/status`, \{ status: "served" \}/));
+row("P180570", "item 7 · the kitchen panel itself never sends 'served' or calls accept", () =>
+  (!/status: "served"/.test(APPC()) && !/\/orders\/\$\{[^}]+\}\/accept/.test(APPC())) || "the panel sends a move its server no longer takes");
+
+// ══ ROUND 2 · ITEM 8 · MY CALL: a cook's own 🖨 still prints while printing is stopped — P180571 ══
+row("P180571", "item 8 · the manual 🖨 path has no stop check (MY CALL, written down at reprintOrder)", () => {
+  const a = APPC(); const i = a.indexOf("async function reprintOrder("), j = a.indexOf("async function reprintPlatform(");
+  const body = a.slice(i, j);
+  return (i > 0 && !/paused/.test(body) && /MY CALL \(owner handed this back/.test(src("public/panels/kitchen/app.js"))) || "the hand-print path changed, or the decision note is gone";
+});
+
+// ══ ROUND 2 · ITEM 9 · the waiter's server answers the waiter login and the admin — P180572–P180573 ══
+const TABGATE = () => { const t = code(src("app/api/tablet/[...path]/route.ts")); const i = t.indexOf("async function gate("); const j = t.indexOf("\n}", i); return i < 0 || j < 0 ? "" : t.slice(i, j + 2); };
+row("P180572", "item 9 · the waiter route refuses any signed-in role other than tablet (403, plain sentence)", () =>
+  hasRe(TABGATE(), /if \(g\.user && g\.user\.role !== "tablet"\) \{\s*return NextResponse\.json\(\{ error: "[^"]*waiter login[^"]*" \}, \{ status: 403 \}\);/));
+row("P180573", "item 9 · …after the sign-in check, so a missing login is still the 401 bounce and the admin still passes", () => {
+  const g = TABGATE(); const a = g.indexOf("if (!g.ok)"), b = g.indexOf('g.user.role !== "tablet"');
+  return (a > 0 && b > a && /const g = await requireRole\(req, "tablet"\);/.test(g)) || "order changed";
+});
+// ══ ROUND 2 · ITEM 10 · an owner on the manager route must name the restaurant — P180574 ══
+row("P180574", "item 10 · an owner request with no ?rid is refused before the staff-row fallback is reached", () => {
+  const e = code(src("app/api/editor/[...path]/route.ts")); const i = e.indexOf("async function editorScope("); const blk = e.slice(i, i + 1600);
+  const refuse = blk.indexOf('return err("Open this from the owner panel'), fall = blk.indexOf("const rid = panelRestaurantId(req, g);");
+  return (i > 0 && refuse > 0 && fall > refuse) || "the refusal is missing or comes after the fallback";
+});
+// ══ ROUND 2 · ITEM 11 · the 86 drawer reads in the light skin and keeps its toggles whole — P180575–P180576 ══
+const CSSC_ = () => src("public/panels/kitchen/style.css").replace(/\/\*[\s\S]*?\*\//g, "");
+row("P180575", "item 11 · the light skin's SOLD OUT word uses the deep red, not the dark skin's pink", () =>
+  hasRe(CSSC_(), /html\[data-theme="light"\] \.btn\.danger \{ color: #b91c1c; \}/));
+row("P180576", "item 11 · a dish's toggle never shrinks beside a long name; the name wraps instead", () =>
+  hasRe(CSSC_(), /\.dish-row \.btn \{ flex-shrink: 0; white-space: nowrap; \}/) && hasRe(CSSC_(), /\.dish-row \.dtitle \{ min-width: 0;/));
