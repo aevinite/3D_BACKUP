@@ -96,25 +96,44 @@ function migrateLegacyOnce() {
                legacy keys, which still work */ }
 }
 
+// ── A REFUSED WRITE IS KEPT IN THE PAGE'S MEMORY (sweep #10 T3 round 4, item 47) ──────────────
+// These helpers used to drop a write the phone refused — "a phone with storage full or switched off
+// loses the preference, never the page". But the BASKET lives here too, and it is not a preference:
+// measured on 2026-10-16 with localStorage full (QuotaExceededError) or blocked (SecurityError — some
+// private modes, "block site data"), tapping Add said "Caffè Latte added · tap to view your bill" and
+// the bill said "Your cart is empty". That diner could not order anything at all.
+// So a write the phone refuses is kept in `mem` for as long as the page is open, and every read looks
+// there first. On a normal phone nothing changes: a write that succeeds clears its memory copy.
+const mem = new Map<string, string | null>();   // null = removed while storage was refusing
+function memGet(key: string): string | null | undefined { return mem.has(key) ? mem.get(key) ?? null : undefined; }
+function rawGet(key: string): string | null {
+  const m = memGet(key); if (m !== undefined) return m;
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function rawSet(key: string, value: string): void {
+  try { localStorage.setItem(key, value); mem.delete(key); } catch { mem.set(key, value); }
+}
+function rawRemove(key: string): void {
+  try { localStorage.removeItem(key); mem.delete(key); } catch { mem.set(key, null); }
+}
+
 // ── get / set / remove, scoped to the current restaurant ────────────────────
 // Same try/catch manners as everywhere else: storage can throw (private mode,
-// full quota) and we'd rather quietly no-op than crash the menu.
+// full quota) and we'd rather keep the value in memory than crash the menu or lose an order.
 export function tget(base: string): string | null {
   if (typeof window === "undefined") return null;
   migrateLegacyOnce();
-  try { return localStorage.getItem(tkey(base)); } catch { return null; }
+  return rawGet(tkey(base));
 }
 export function tset(base: string, value: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
-  // best-effort: a phone with storage full or switched off loses the preference, never the page
-  try { localStorage.setItem(tkey(base), value); } catch {}
+  rawSet(tkey(base), value);
 }
 export function tremove(base: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
-  // best-effort, same as tset: nothing downstream depends on the removal having happened
-  try { localStorage.removeItem(tkey(base)); } catch {}
+  rawRemove(tkey(base));
 }
 
 // Explicit-slug variants: read/write a scoped key for a SPECIFIC restaurant,
@@ -127,13 +146,13 @@ const fold = (slug: string) => (slug || DEFAULT_RESTAURANT_SLUG).trim().toLowerC
 export function tgetFor(base: string, slug: string): string | null {
   if (typeof window === "undefined") return null;
   migrateLegacyOnce();
-  try { return localStorage.getItem(`${base}:${fold(slug)}`); } catch { return null; }
+  return rawGet(`${base}:${fold(slug)}`);
 }
 export function tsetFor(base: string, slug: string, value: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
-  // best-effort, same as tset — a refused write costs a preference, not the screen
-  try { localStorage.setItem(`${base}:${fold(slug)}`, value); } catch {}
+  // same as tset — a refused write is kept in memory while the page is open (item 47)
+  rawSet(`${base}:${fold(slug)}`, value);
 }
 
 // For cross-tab "storage" event listeners: does this event belong to the given

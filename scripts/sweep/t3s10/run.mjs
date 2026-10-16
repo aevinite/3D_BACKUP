@@ -30,6 +30,8 @@ const a = process.argv;
 const onlyArg = a.find((x) => x.startsWith("--only"));
 const only = onlyArg ? (onlyArg.split("=")[1] || a[a.indexOf(onlyArg) + 1]).split(",") : null;
 const quietLog = console.error; if (!a.includes("--noisy")) { console.error = () => {}; console.warn = () => {}; }
-await runAll({ ledger: a.includes("--ledger"), quiet: !a.includes("--all"), only });
+const rows = await runAll({ ledger: a.includes("--ledger"), quiet: !a.includes("--all"), only });
 console.error = quietLog;
-process.stdout.write("", () => process.exit(0));
+// a red row makes the run red (sweep #10 T3 round 4: this used to exit 0 whatever happened, so a script
+// or a person reading only the exit code saw green with a failure printed above it)
+process.stdout.write("", () => process.exit((rows || []).some((r) => r.mark === "❌") ? 1 : 0));

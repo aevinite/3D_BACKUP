@@ -1157,7 +1157,7 @@ flush();
     const def = migs.filter((f) => /FUNCTION[^(]*lfh_call_waiter_table/.test(read(`supabase/migrations/${f}`))).pop() || "";
     const body = def ? read(`supabase/migrations/${def}`) : "";
     check(`item 29 — the newest definition of the waiter call refuses a table that is not a whole number (${def || "no migration"})`,
-      /IF v_t !~ '\^\\d\{1,9\}\$' THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF v_t::int < 1 THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && !/!~ '\^\\d\{1,9\}\$' OR /.test(body));
+      /IF v_t !~ '\^\[0-9\]\{1,9\}\$' THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF v_t::int < 1 THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && !/!~ '\^(\\d|\[0-9\])\{1,9\}\$' OR /.test(body));
     check("item 29 — …and a table above the floor plan, with the same sentence an order gets",
       /IF COALESCE\(v_max, 0\) > 0 AND v_t::int > v_max THEN[\s\S]{0,140}'unknown_table'[\s\S]{0,80}Table %s doesn''t exist — tables are 1–%s\./.test(body));
     check("item 29 — …and stores the table canonically (\"007\" is table 7)", /v_t := \(v_t::int\)::text;/.test(body));
@@ -1211,7 +1211,7 @@ flush();
     const def = migs.filter((f) => /FUNCTION[^(]*lfh_place_order_public/.test(read(`supabase/migrations/${f}`))).pop() || "";
     const body = def ? read(`supabase/migrations/${def}`) : "";
     check(`item 36 — the newest guest-order function refuses a missing or non-number table, before the rate limit (${def || "none"})`,
-      /IF v_tbl IS NULL THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF btrim\(v_tbl\) !~ '\^\\d\{1,9\}\$' THEN/.test(body) && body.indexOf("IF v_tbl IS NULL THEN") < body.indexOf("lfh_rate_check(v_rid, 'guest_order'"));
+      /IF v_tbl IS NULL THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_table'/.test(body) && /IF btrim\(v_tbl\) !~ '\^\[0-9\]\{1,9\}\$' THEN/.test(body) && body.indexOf("IF v_tbl IS NULL THEN") < body.indexOf("lfh_rate_check(v_rid, 'guest_order'"));
     check("item 36 — …and stores the table canonically", /v_tbl := \(btrim\(v_tbl\)::int\)::text;/.test(body));
     const plan = r3("lib/planTable.ts"), po = r3("app/api/guest/place-order/route.ts"), cw = r3("app/api/guest/call-waiter/route.ts");
     check("item 36 — one helper names a guest's table the way the floor does (a whole number, \"007\" → \"7\")", /export function guestTable\(v: unknown\): string \| null \{/.test(plan));
@@ -1233,6 +1233,47 @@ flush();
   { const gone = ["ot-sheet", "ot-hide-link", "ot-cancelled-note", "ot-table-row", "ot-save", "order-confirm-done", "allergy-banner", "allergy-popup", "cart-item-warn"];
     const left = gone.filter((c) => new RegExp(`\\.${c}\\b`).test(css));
     check(`item 39 — the retired detail sheet, success step, allergy banner and warn line have no styles left (${left.join(", ") || "none"})`, !left.length); }
+  // item 41 (owner, 2026-10-16) — on a phone the bill's bin kept only 25 of its 44 px: its row was too narrow
+  { const bin = (css.match(/\.cart-item-controls \.remove-item \{[^}]*\}/) || [""])[0];
+    check("item 41 — the bill's bin can never be squeezed by its row", /flex: none;/.test(bin) && /width: 44px; height: 44px;/.test(bin));
+    check("item 41 — under 380 px the bill's −, +, Edit and bin start under the photo, where they fit", /@media \(max-width: 379px\) \{ \.cart-item-controls \{ grid-column: 1 \/ 4; \} \}/.test(css));
+    check("item 41 — under 340 px their gaps go to 5 px, the only way a 320 px phone fits them", /@media \(max-width: 339px\) \{ \.cart-item-controls \{ gap: 5px; \} \}/.test(css)); }
+  // items 42–46 (sweep #10 T3 round 4, 2026-10-16) — the full re-test
+  { const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+    const newest = (fn) => { const f = migs.filter((m) => new RegExp(`FUNCTION[^(]*${fn}\\b`).test(read(`supabase/migrations/${m}`))).pop() || ""; const t = f ? read(`supabase/migrations/${f}`) : ""; const i = t.indexOf(`FUNCTION public.${fn}(`); return i < 0 ? "" : t.slice(i, t.indexOf("$function$;", i)); };
+    const callFn = newest("lfh_call_waiter_table"), orderFn = newest("lfh_place_order_public");
+    // item 42 — Postgres's \d matches ٤ ४ ４ on this database and ::int cannot read them: a database ERROR
+    check("item 42 — neither guest function tests a table with \\d (it matches other scripts' digits that ::int cannot read)",
+      !!callFn && !!orderFn && !/~ '\^\\d/.test(callFn) && !/~ '\^\\d/.test(orderFn));
+    // item 45 — a waiter call for a restaurant that does not exist answered with a foreign-key ERROR (→ "busy")
+    check("item 45 — the waiter call answers unknown_restaurant for a restaurant that does not exist, before anything is written",
+      /IF NOT EXISTS \(SELECT 1 FROM restaurants WHERE id = v_rid\) THEN\s*RETURN json_build_object\('ok', false, 'reason', 'unknown_restaurant'\)/.test(callFn)
+      && callFn.indexOf("'unknown_restaurant'") < callFn.indexOf("INSERT INTO waiter_calls"));
+    // item 43 — a phone whose number pad types ٤ / ४ / ４ could not enter a table at all
+    const dg = r3("lib/digits.ts"), chef = r3("components/ChefPopup.tsx"), cart4 = r3("components/CartPanel.tsx"), plan4 = r3("lib/planTable.ts");
+    check("item 43 — one helper turns any script's digits into 0–9 (lib/digits.ts)", /export function toAsciiDigits\(s: string\): string/.test(dg) && /\\p\{Nd\}/.test(dg));
+    check("item 43 — the bell's table box and both of the bill's table boxes keep digits through it, never by dropping non-0–9",
+      /keepDigits\(e\.target\.value\)/.test(chef) && (cart4.match(/keepDigits\(e\.target\.value\)/g) || []).length === 2
+      && !/e\.target\.value\.replace\(\/\\D\/g/.test(chef + cart4));
+    check("item 43 — the guest doors read a table the same way (guestTable runs toAsciiDigits)", /toAsciiDigits\(v\.trim\(\)\)/.test(plan4));
+    // item 44 — a dish quantity of 1.5 / "2.0" / "1e3" made the database raise and the door answer "busy"
+    const po4 = r3("app/api/guest/place-order/route.ts");
+    check("item 44 — the order door accepts only a whole-number quantity the database can read (else bad_body, not 'busy')",
+      /const wholeQty = /.test(po4) && /&& wholeQty\(\(x as \{ qty\?: unknown \}\)\.qty\)/.test(po4) && !/Number\.isFinite\(Number\(\(x as \{ qty\?: unknown \}\)\.qty \?\? 1\)\)/.test(po4));
+    // item 46 — the three popups left the keyboard focus on the page behind them
+    const df = r3("lib/dialogFocus.ts"), oc = r3("components/OrderConfirmModal.tsx");
+    check("item 46 — one helper takes the focus into a popup, keeps Tab inside it and hands it back on close", /export function useDialogFocus\(/.test(df) && /opener\.focus\(/.test(df) && /e\.key !== "Tab"/.test(df));
+    check("item 46 — the bell popup, the dish popup and the bill all use it, each a labelled dialog",
+      /useDialogFocus\(boxRef, open\)/.test(chef) && /id="chef-popup"[^>]*role="dialog" aria-modal="true"/.test(chef)
+      && /useDialogFocus\(boxRef, open && !!item\)/.test(oc) && /className="order-confirm" ref=\{boxRef\}/.test(oc)
+      && /useDialogFocus\(panelRef, open\)/.test(cart4) && /id="cart-panel"[^>]*role="dialog" aria-modal="true" aria-label="Your bill"/.test(cart4));
+    // item 47 — localStorage full or blocked: "Caffè Latte added" while the bill stayed empty; no order possible
+    const ts = r3("lib/tenantStorage.ts");
+    check("item 47 — a write the phone refuses is kept in the page's memory and every read looks there first (the basket survives a full or blocked storage)",
+      /try \{ localStorage\.setItem\(key, value\); mem\.delete\(key\); \} catch \{ mem\.set\(key, value\); \}/.test(ts)
+      && /const m = memGet\(key\); if \(m !== undefined\) return m;/.test(ts)
+      && (ts.match(/return rawGet\(/g) || []).length === 2 && (ts.match(/rawSet\(/g) || []).length >= 3
+      && !/try \{ localStorage\.setItem\([^)]*\); \} catch \{\}/.test(ts)); }
 }
 // ── 18. A SLUG NOBODY OWNS IS "NO RESTAURANT", NEVER RESTAURANT #1 (sweep #10 T4 round 2, 2026-10-15) ──
 // The not-found page for /r/<a slug nobody owns>/… still mounts every guest widget (GuestChrome sits in

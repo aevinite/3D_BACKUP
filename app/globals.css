@@ -1975,7 +1975,18 @@ body.menu-frost .nav {
      so a round box would have been a 44px circle, not a 44px square. It only shows as the focus ring. */
   border-radius: 12px;
   -webkit-tap-highlight-color: transparent;
+  /* NEVER SQUEEZED (owner, 2026-10-16 — "do 41"). Beside the photo, the row needs 221 px (− 32 · qty 26
+     · + 32 · Edit 67 · bin 44, four 7 px gaps, less the bin's 8 px right margin) and a 360 px phone gives
+     it 208, so the flex row shrank the bin's box to 25 px and a finger reached only ~26 px of it. The row
+     was never too SHORT (the box is 44 tall at every width) — it was too NARROW. */
+  flex: none;
 }
+/* Under 380 px the controls start under the photo instead of beside it (+52 px: 260 at 360, 220 at 320),
+   so −, +, Edit and a whole 44×44 bin fit on one line. Tighter gaps were tried first and still spilled
+   11 px at 360. From 380 px up the row fits beside the photo, exactly as before. */
+@media (max-width: 379px) { .cart-item-controls { grid-column: 1 / 4; } }
+/* Under 340 px (a 320 px phone: 220 px under the photo against 221 needed) the gaps also go 7 → 5 px. */
+@media (max-width: 339px) { .cart-item-controls { gap: 5px; } }
 .cart-item-name { font-weight: 700; color: var(--text); font-size: 14.5px; line-height: 1.25; }
 .cart-item-price {
   /* grid-row 1 = the SAME row as the dish name. This is the whole fix: the price can no longer
@@ -3992,9 +4003,9 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
    The same for the controls a diner taps again and again: the bill's − and + (32×32), its two tabs and
    "Wrong table? Fix it" (35 and 30 px tall), a line's Edit (26 px tall) and bin (25 px wide), the
    suggestion's "+ Add" (33 px tall), and the allergy chips and the dish popup's option chips (35–36 px
-   tall — 8 px apart, so their 44 px areas meet and never overlap). The bin sits at the very edge of its
-   line, which hides what spills past it, so a finger reaches about 26×44 of it: above WCAG's 24 px
-   minimum; making it wider means moving it, which is a layout decision, not a hit-area one. */
+   tall — 8 px apart, so their 44 px areas meet and never overlap). The bin's own box is already
+   44×44; on a phone under 380 px its row was too narrow and squeezed it to 25 px — item 41 (owner,
+   2026-10-16) fixed that in the row's layout, see `.cart-item-controls .remove-item`. */
 .gob-x, .cart-back, #cart-panel .nav-btn, .cart-qty-btn, .live-order-fixlink, .oc-choice,
 .cart-edit-btn, .remove-item, .pairing-add, .allergy-toggle { position: relative; }
 .gob-x::after, .cart-back::after, .order-confirm-close::after, #cart-panel .nav-btn::after,
@@ -5903,3 +5914,8 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
     select { font-size: 16px; }
   }
 }
+
+/* The three ordering popups take the keyboard focus on their own BOX when they open (lib/dialogFocus.ts, sweep
+   #10 T3 round 4 item 46) — so a screen reader starts inside them and the next Tab lands on their first control.
+   The box itself shows no ring: it is a starting point, not a control; every control inside keeps its own. */
+#chef-popup:focus, #cart-panel:focus, .order-confirm:focus { outline: none; }

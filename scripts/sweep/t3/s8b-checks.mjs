@@ -109,7 +109,8 @@ P("P57240", "the correction opens an inline editor, not a second popup", renders
 P("P57241", "…on the order it was tapped for, never on all of them at once", /editingTable === o\.id \? \(/.test(liveTab));
 P("P57242", "…pre-filled with the table the order already has", /setTableDraft\(o\.tableNumber \|\| ""\)/.test(C));
 P("P57243", "…numeric-only on a phone keyboard", /inputMode="numeric" pattern="\[0-9\]\*" maxLength=\{4\}/.test(liveTab));
-P("P57244", "…digits only, whatever is pasted", /setTableDraft\(e\.target\.value\.replace\(\/\\D\/g, ""\)\)/.test(liveTab));
+// re-pointed (sweep #10 T3 round 4): keepDigits keeps ٤ / ४ as 4 instead of dropping them (item 43)
+P("P57244", "…digits only, whatever is pasted", /setTableDraft\(keepDigits\(e\.target\.value\)\)/.test(liveTab));
 P("P57245", "…with an accessible label, since it has no visible one", /aria-label="Correct table number"/.test(liveTab));
 P("P57246", "…focused on open, so a diner can just type", /autoFocus/.test(liveTab));
 P("P57247", "…Enter saves it, like every other single-field form", /if \(e\.key === "Enter"\) saveOrderTable\(o\)/.test(liveTab));

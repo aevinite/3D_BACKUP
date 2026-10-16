@@ -313,7 +313,8 @@ P("P56905", "a remembered table is only ever pre-filled into an EMPTY field", /s
 P("P56906", "…and let go of when the guest wipes it", /setTableNumber\(\(cur\) => \(cur === previous \? "" : cur\)\)/.test(C));
 P("P56907", "a seated diner's table is locked to their session", /setLockedTable\(ss\?\.table \|\| null\)/.test(C));
 P("P56908", "…and the field is genuinely read-only, not just styled that way", /disabled=\{!!lockedTable\} readOnly=\{!!lockedTable\}/.test(C));
-P("P56909", "only digits can reach the table field", /e\.target\.value\.replace\(\/\\D\/g, ""\)/.test(C));
+// re-pointed (sweep #10 T3 round 4): digits in any script are KEPT as 0–9 now, not dropped (lib/digits.ts, item 43)
+P("P56909", "only digits can reach the table field", /keepDigits\(e\.target\.value\)/.test(C));
 P("P56910", "the order-wide allergy list is restored only while the feature is ON", /if \(features\.allergies\) \{/.test(C));
 P("P56911", "…and emptied when it is off, so a stale list cannot ride along invisibly", /\} else \{\s*\n\s*setDeclared\(\[\]\);/.test(C));
 P("P56912", "the first persist is skipped, so the restore cannot be clobbered by the default", /if \(!declaredHydrated\.current\) \{ declaredHydrated\.current = true; return; \}/.test(C));

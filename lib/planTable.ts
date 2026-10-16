@@ -10,6 +10,7 @@
 // numbering ABOVE the floor plan on purpose, so anything within a wide margin is fine. Only the
 // absurd is refused — the same line the suite's own check draws (+500).
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { toAsciiDigits } from "@/lib/digits";
 
 /**
  * A GUEST'S table, as the floor names it — or null when it is not one (sweep #10 T3 round 3, the owner's
@@ -22,7 +23,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
  * label, because STAFF counters may have one); migrations 423 and 424 draw the same line in the database.
  */
 export function guestTable(v: unknown): string | null {
-  const raw = typeof v === "number" ? (Number.isInteger(v) ? String(v) : "") : typeof v === "string" ? v.trim() : "";
+  // toAsciiDigits: "٤" is table 4 — the same reading the phone's table box gives it (lib/digits.ts, item 43)
+  const raw = typeof v === "number" ? (Number.isInteger(v) ? String(v) : "") : typeof v === "string" ? toAsciiDigits(v.trim()) : "";
   if (!/^\d{1,9}$/.test(raw)) return null;
   const n = Number(raw);
   return n >= 1 ? String(n) : null;

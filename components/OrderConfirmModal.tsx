@@ -1,7 +1,8 @@
 // Runs in the browser so it can pop open, take taps, and save to the cart.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { prettyUsd, unitDisplay, minorDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import { allergenIcon, allergenLabel, ALLERGENS } from "@/lib/allergens";
@@ -64,6 +65,9 @@ export default function OrderConfirmModal() {
   // Phone back button closes this popup instead of leaving the site (or, when
   // editing from the bill, returns to the bill underneath).
   useBackClose("order-confirm", open, () => setOpen(false));
+  // a keyboard / screen-reader diner is taken INTO the popup and brought back to Customize (item 46)
+  const boxRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(boxRef, open && !!item);
 
   // This useEffect runs once on mount: load the currency and start listening
   // for the "please open me" message (and the messages to close/refresh).
@@ -280,7 +284,7 @@ export default function OrderConfirmModal() {
       {/* The dark backdrop behind the popup. Tapping it closes the popup. */}
       <div className="overlay active" onClick={() => setOpen(false)} />
       {/* The popup box itself. role/aria attributes help screen readers. */}
-      <div role="dialog" aria-modal="true" aria-label="Confirm order" className="order-confirm">
+      <div role="dialog" aria-modal="true" aria-label="Confirm order" className="order-confirm" ref={boxRef}>
         {/* The little X close button in the corner. */}
         <button type="button" className="order-confirm-close" aria-label="Close" onClick={() => setOpen(false)}>
           <i className="fas fa-times"></i>
