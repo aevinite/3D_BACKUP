@@ -1620,6 +1620,17 @@ check(
   );
 }
 
+// ── BANQUET "CREATE THE BILL" IS DIMMED, NEVER DISABLED (sweep #10 T12 round 3, item 8) ──────────────
+{
+  const i = src.indexOf("function renderBanquetBody("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: banquet 'Create the bill' with no plates stays tappable and says 'Set a plate count first.'",
+    !/id="bqCreate"[^>]*\sdisabled[\s>]/.test(body) && !/#bqCreate"\)\.disabled = sub <= 0/.test(body)
+      && /cb\.setAttribute\("aria-disabled", sub <= 0 \? "true" : "false"\)/.test(body) && /toast\("Set a plate count first\.", false\)/.test(body),
+    `${TABLET} renderBanquetBody: a disabled button swallows the tap on a touch panel — dim it and let the refusal speak.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

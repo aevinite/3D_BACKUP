@@ -6650,7 +6650,7 @@ function renderBanquetBody() {
         <div style="font-size:15px;margin-top:2px">Total <b id="bqTotal">₹0</b></div>
       </div>
     </div>
-    <button class="btn primary" id="bqCreate" type="button" disabled style="width:100%;margin-top:14px;padding:13px">🧾 Create the bill</button>`;
+    <button class="btn primary" id="bqCreate" type="button" aria-disabled="true" style="width:100%;margin-top:14px;padding:13px;opacity:.55">🧾 Create the bill</button>`;
   const totals = () => {
     let sub = 0;
     for (const it of bqItems) {
@@ -6666,7 +6666,13 @@ function renderBanquetBody() {
     body.querySelector("#bqSub").textContent = inr(sub);
     body.querySelector("#bqTax").textContent = inr(tax);
     body.querySelector("#bqTotal").textContent = inr(sub + tax);
-    body.querySelector("#bqCreate").disabled = sub <= 0;
+    // DIMMED, NEVER DISABLED (sweep #10 T12 round 3, item 8). A disabled button on a touch panel
+    // swallows the tap — the reason 💳 Mark bill paid was changed (T7, 2026-08-17) and the reason the
+    // refusal below ("Set a plate count first.") exists at all: with `disabled` it could never be
+    // reached, and a waiter tapping Create with no plates got nothing. Same rule as the rest of the panel.
+    const cb = body.querySelector("#bqCreate");
+    cb.style.opacity = sub <= 0 ? ".55" : "";
+    cb.setAttribute("aria-disabled", sub <= 0 ? "true" : "false");
   };
   body.querySelectorAll("[data-bq-step]").forEach((b) => {
     b.onclick = () => {
