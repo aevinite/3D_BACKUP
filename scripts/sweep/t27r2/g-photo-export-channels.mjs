@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { PLATFORM_CHANNELS_DOOR } from "../retiredAdminDoors.mjs";
 /**
  * G · three read-thin routes: a person's PHOTO, the recovery BACKUP, and the delivery CHANNELS.
  *
@@ -144,7 +145,7 @@ export default function section(c) {
     async () => { const b = await backup(AANGAN); for (const [k, v] of Object.entries(b)) { if (k === "_meta" || k === "restaurant" || !Array.isArray(v)) continue; if (v.some((r) => r && r.restaurant_id && r.restaurant_id !== AANGAN)) return false; } return b.restaurant.id === AANGAN; });
 
   // ── platform-channels ────────────────────────────────────────────────────────────────────────
-  const FC = "app/api/admin/restaurants/platform-channels/route.ts";
+  const FC = PLATFORM_CHANNELS_DOOR;
   const PC = "/api/admin/restaurants/platform-channels";
   // ── RETIRED 2026-10-12 (owner: "do all this rest of the things" — T29 round 2, item 13). Nothing on
   // any screen called this route any more: Access & permissions does its job, and the owner's standing

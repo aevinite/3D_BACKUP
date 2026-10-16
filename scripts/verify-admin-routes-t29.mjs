@@ -36,6 +36,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { requireUp } from "./sweep/appUp.mjs";
 import { adminHeaders, adminCookie } from "./sweep/login.mjs";
+import { GOOGLE_REVIEW_DOOR, PLATFORM_CHANNELS_DOOR, STAFF_FEATURES_DOOR } from "./sweep/retiredAdminDoors.mjs";
 
 const arg = (k, d = null) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4000").replace(/\/$/, "");
@@ -114,9 +115,9 @@ function handlers(rel) {
 // ids — every id in LEDGER/T29-S10.md stays where it was — and answer ⏭ with the reason; the live
 // questions are asked of every route that still exists.
 const RETIRED = {
-  "app/api/admin/restaurants/google-review/route.ts": ["GET", "POST"],
-  "app/api/admin/restaurants/platform-channels/route.ts": ["GET", "POST"],
-  "app/api/admin/restaurants/staff-features/route.ts": ["GET", "POST"],
+  [GOOGLE_REVIEW_DOOR]: ["GET", "POST"],
+  [PLATFORM_CHANNELS_DOOR]: ["GET", "POST"],
+  [STAFF_FEATURES_DOOR]: ["GET", "POST"],
 };
 const GONE = "skip:route retired 2026-10-12 — Access & permissions does this job (a new way replaces the old one)";
 const FILED = [...new Set([...ROUTES, ...Object.keys(RETIRED)])].sort();

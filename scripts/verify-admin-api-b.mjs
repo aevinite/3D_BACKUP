@@ -69,6 +69,7 @@ import { requireUp } from "./sweep/appUp.mjs";
 // two steps later. verify:test-safety rule 11 requires every script that flips a real setting to use
 // this or wire its own — and it caught this suite's section file doing neither.
 import { restoreOnExit } from "./sweep/restore.mjs";
+import { GOOGLE_REVIEW_DOOR, PLATFORM_CHANNELS_DOOR, STAFF_FEATURES_DOOR } from "./sweep/retiredAdminDoors.mjs";
 
 const arg = (k, d = null) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4427").replace(/\/$/, "");
@@ -416,11 +417,11 @@ const ctx = {
     "app/api/admin/resolve-error/route.ts", "app/api/admin/restaurants/access-tree/route.ts",
     "app/api/admin/restaurants/bill-preview/route.ts", "app/api/admin/restaurants/branding/route.ts",
     "app/api/admin/restaurants/create-defaults/route.ts", "app/api/admin/restaurants/credentials/route.ts",
-    "app/api/admin/restaurants/export/route.ts", "app/api/admin/restaurants/google-review/route.ts",
+    "app/api/admin/restaurants/export/route.ts", GOOGLE_REVIEW_DOOR,
     "app/api/admin/restaurants/health/route.ts", "app/api/admin/restaurants/logo/route.ts",
-    "app/api/admin/restaurants/platform-channels/route.ts", "app/api/admin/restaurants/quick-features/route.ts",
+    PLATFORM_CHANNELS_DOOR, "app/api/admin/restaurants/quick-features/route.ts",
     "app/api/admin/restaurants/report/route.ts", "app/api/admin/restaurants/route.ts",
-    "app/api/admin/restaurants/settings/route.ts", "app/api/admin/restaurants/staff-features/route.ts",
+    "app/api/admin/restaurants/settings/route.ts", STAFF_FEATURES_DOOR,
     "app/api/admin/reveal/password/route.ts", "app/api/admin/reveal/route.ts",
     "app/api/admin/revenue/route.ts", "app/api/admin/settings/route.ts",
     "app/api/admin/staff-online/route.ts", "app/api/admin/usage/route.ts",

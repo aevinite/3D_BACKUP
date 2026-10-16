@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { GOOGLE_REVIEW_DOOR, STAFF_FEATURES_DOOR } from "../retiredAdminDoors.mjs";
 /**
  * H · four small per-restaurant switch routes: the LOGO image, the GOOGLE review link and mode, the
  * QUICK feature toggles, and the STAFF-feature entitlements.
@@ -41,7 +42,7 @@ export default function section(c) {
     async () => { const fd = new FormData(); fd.append("restaurant_id", FH); fd.append("file", new File(["x"], "x.txt", { type: "text/plain" })); return (await req(PL, { method: "POST", raw: fd })).status === 400; });
 
   // ── google review ────────────────────────────────────────────────────────────────────────────
-  const FG = "app/api/admin/restaurants/google-review/route.ts", PG = "/api/admin/restaurants/google-review";
+  const FG = GOOGLE_REVIEW_DOOR, PG = "/api/admin/restaurants/google-review";
   // ── RETIRED 2026-10-12 (owner: "do all this rest of the things" — T29 round 2, item 13). Nothing on
   // any screen called this route any more: Access & permissions does its job, and the owner's standing
   // rule is that a new way replaces the old one. Its phases keep their ids and answer ⏭ with the reason
@@ -101,7 +102,7 @@ export default function section(c) {
     async () => (await req(PQ, { method: "POST", body: { restaurant_id: NOSUCH, feature: "banquet", on: true } })).status === 404);
 
   // ── staff features ───────────────────────────────────────────────────────────────────────────
-  const FS = "app/api/admin/restaurants/staff-features/route.ts", PS = "/api/admin/restaurants/staff-features";
+  const FS = STAFF_FEATURES_DOOR, PS = "/api/admin/restaurants/staff-features";
   // ── RETIRED 2026-10-12 (owner: "do all this rest of the things" — T29 round 2, item 13). Nothing on
   // any screen called this route any more: Access & permissions does its job, and the owner's standing
   // rule is that a new way replaces the old one. Its phases keep their ids and answer ⏭ with the reason
