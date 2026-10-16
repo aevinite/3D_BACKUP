@@ -28,6 +28,18 @@ export function inventory() {
   return { s, names, fns: new Set(fns), emitted, readSel, datasetRead, attrs, toasts };
 }
 
+// Sentences the panel gained AFTER round 2 was filed, in the order they arrived.
+export const LATER_TOASTS = ["The points weren't used — try again."];   // round 3 item 3
+export async function laterToasts(R, firstId) {
+  const { check } = R;
+  let n = firstId;
+  const s = inventory().toasts;
+  for (const t of LATER_TOASTS.filter((x) => s.includes(x))) {
+    const codey = /\b[a-z]+_[a-z_]+\b/.test(t) || /\b(null|undefined|NaN|object Object)\b/.test(t);
+    await check("P" + n++, F_APP, `the toast "${t.slice(0, 70)}" is plain words, never a code`, "GEN — every toast literal in app.js (added after round 2)", async () => ok(!codey && t.replace(/[^A-Za-z]/g, "").length >= 4, codey ? "carries a code-like word" : ""));
+  }
+  return { next: n };
+}
 export async function blockG(R, firstId = 181501) {
   const { check } = R;
   let n = firstId;
@@ -59,7 +71,10 @@ export async function blockG(R, firstId = 181501) {
       ok(written && readBy, `${written ? "written" : "NEVER WRITTEN"} · ${readBy ? "read" : "NEVER READ"}`));
   }
   // ── G3 · every sentence the waiter is toasted ─────────────────────────────────────────────────
-  for (const t of inv.toasts) {
+  // A ROW'S NUMBER KEEPS ITS MEANING (round 3, 2026-10-16). Rows are numbered in order across the
+  // WHOLE run, so a sentence added to app.js after round 2 renumbered every row after it — P and L too.
+  // Sentences added later are judged by laterToasts(), which run.mjs calls LAST; round 2's keep theirs.
+  for (const t of inv.toasts.filter((t) => !LATER_TOASTS.includes(t))) {
     const text = t.replace(/\$\{[^}]*\}/g, "X");
     const codey = /\b[a-z]+_[a-z_]+\b/.test(text.replace(/\$\{[^}]*\}/g, "")) || /\b(null|undefined|NaN|object Object)\b/.test(text);
     // A toast assembled ENTIRELY from other sentences (the table's label + a WHY_SAYS sentence) has

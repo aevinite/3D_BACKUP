@@ -158,15 +158,20 @@ export async function blockE(R = makeRunner("T12 · block E · across panels, tw
   await check("P181193", F_APP, "after this sweep a tip is recorded only once the bill really settled (item 5)", J, () => ok(/const paid = await payBill\(t, picked\.method, picked\.note\);\n  if \(paid\) await recordTip\(t, picked\.tip, paid\.pin\);/.test(app)));
   await check("P181194", F_APP, "after this sweep a print, a question or a banquet bill made with no internet says what really happened (items 2–4)", J, () =>
     ok(/if \(queueAnswered\(r\)\) \{/.test(app) && /The banquet bill is made the moment it goes through/.test(app)));
-  await check("P181195", F_APP, "the phone's 4-per-row floor drops the seat count and the word 'Free' on a free tile (CSS density) — judged", J + " + block C screenshots", () =>
-    ({ ok: true, skip: true, note: "at 360px each tile is ~70px wide, so style.css's container rules hide the seats and the state word; a free tile reads as a bare number. Deliberate density rules in T37's stylesheet; whether a phone should show 'Free' is the owner's call — Part 4" }));
-  await check("P181196", F_APP, "'Your tables 1–500 · 500 tables' on a 30-table floor (diagt1's rota) — judged", J + " + block C screenshots", () =>
-    ({ ok: true, skip: true, note: "the strip counts the rota, not the floor; only a rota wider than the floor shows it. R2 refuses hiding the strip, not clamping its count — Part 4" }));
-  await check("P181197", F_APP, "the app.js note about phone bands ('a phone draws 2 per row') matches today's stylesheet (4 per row)", J, () =>
-    ({ ok: true, skip: true, note: "app.js floorPerRow's comment says 2 per row on a phone; style.css sets --per-row: 4 below 600px. Wording only — Part 4" }));
+  // Re-judged 2026-10-16 (round 3): the owner said yes to item 12 on 2026-10-15, so this is no longer a
+  // question — the plain state line ("Free", "Wants in") is kept back on a phone tile. Was ⏭ (judged).
+  await check("P181195", "public/panels/tablet/style.css", "the phone's 4-per-row floor still says 'Free' on a free tile (item 12, owner's yes 2026-10-15)", "read today's style.css", () =>
+    ok(/@container \(max-width: 56px\) \{ \.t-line-plain \.t-linenum \{ display: block;/.test(read("public/panels/tablet/style.css"))));
+  // Re-judged 2026-10-16 (round 3): fixed as item 7 (2026-10-15) — the strip counts the rota's tables
+  // that are ON the floor. Was ⏭ (judged).
+  await check("P181196", F_APP, "'Your tables' counts only the rota's tables that are on the floor (item 7) — a 500-table rota on a 30-table floor reads 30", "read today's app.js", () =>
+    ok(/const onFloor = new Set\(floorTableList\(\)\.map\(String\)\);\s*\n\s*const real = my\.filter\(\(n\) => onFloor\.has\(String\(n\)\)\);/.test(app)));
+  // Re-judged 2026-10-16 (round 3): the note was corrected as item 6 (2026-10-15). Was ⏭ (judged).
+  await check("P181197", F_APP, "the app.js note about phone bands matches today's stylesheet (four per row under 1150px on a touch screen — item 6)", "read today's app.js", () =>
+    ok(/two edges are both under 1150px — a phone either way up, an iPad held upright — draws FOUR per row/.test(read(F_APP))));
   await check("P181198", F_APP, "the waiter's ⚡ and the manager's Quick order are the same two-step shape (build first, table last)", J, () => ok(/build the order FIRST,\s*\n?\s*\/\/ pick the table LAST/.test(app)));
   await check("P181199", F_HTML, "the shell's loading block is announced to a screen reader (role=status, aria-live)", J, () => ok(/role="status" aria-live="polite"/.test(read(F_HTML))));
-  await check("P181200", F_APP, "a waiter's own notification bell reads only their own section's tables", J, () => ok(/const mine = new Set\(floorTableList\(\)\.map\(String\)\);/.test(app) && /if \(!mine\.has\(t\)\) continue;/.test(app)));
+  await check("P181200", F_APP, "a waiter's own notification bell reads only their own section's tables", J, () => ok(/const mine = new Set\(floorTableList\(\)\.filter\(\(t\) => inMySection\(t\)\)\.map\(String\)\);/.test(app) && /if \(!mine\.has\(t\)\) continue;/.test(app)));   // round 3: the section filter (item 9); P213939 drives it
   return R;
 }
 

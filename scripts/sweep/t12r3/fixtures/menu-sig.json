@@ -1,0 +1,8 @@
+{
+ "url": "/api/tablet/menu-sig",
+ "status": 200,
+ "body": {
+  "sig": "22384d3c7c151baf",
+  "dishes": 59
+ }
+}

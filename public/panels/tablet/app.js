@@ -1614,7 +1614,11 @@ function syncGuestBell() {
     // Guest menu off for this restaurant → no bell at all. Not a zero, not a greyed button.
     if (s.menu_enabled === false) { window.LFH_BELL.sync({ menuOn: false, rows: [], onOpen: null }); return; }
     const at = (v) => { const t = v ? new Date(v).getTime() : 0; return Number.isFinite(t) ? t : 0; };
-    const mine = new Set(floorTableList().map(String));
+    // …THROUGH THE SECTION, LIKE THE FLOOR (sweep #10 T12 round 3, item 9). floorTableList() is every
+    // table the restaurant draws; the floor shows a sectioned waiter only `passesFilter` → inMySection.
+    // Read alone, the bell listed — and buzzed for — calls at other waiters' tables, the very thing
+    // the note above says it must not. Round 1's check matched this line's TEXT and passed over it.
+    const mine = new Set(floorTableList().filter((t) => inMySection(t)).map(String));
     const rows = [];
     for (const c of (state.summary.calls || [])) {
       if (!c || c.resolved) continue;
@@ -1932,16 +1936,22 @@ function openDishEditModal(itemId) {
       // Each save carries the value this modal OPENED with. If another device changed the
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one waiter's "more spicy" silently wiping another's "less spicy".
+      // SAVED IS NOT UPDATED (sweep #10 T12 round 3, item 7). With no internet each write below is kept
+      // by the device's queue, and this said "Dish updated" about a change the kitchen had not got —
+      // the note or the allergy a cook needs. Remember whether the queue answered any of them.
+      let saved = null;
+      const keep = (r) => { if (isQueued(r) && !saved) saved = r; };
       if (note !== String(item.note || "").trim()) {
-        await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
+        keep(await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } }));
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved, ...algWhy }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
+        keep(await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved, ...algWhy }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } }));
       }
       if (order.id && !same(newOrderAllergies, orderAllergies)) {
-        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies, ...algWhy }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+        keep(await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies, ...algWhy }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } }));
       }
       close();
+      if (saved) { toast(savedMsg(saved)); return; }   // load() would only no-op offline
       await load(); if (!state.ordering) renderPanel();
       toast("Dish updated");
     } catch (e) {
@@ -2563,7 +2573,12 @@ async function closeTableAndFree(t) {
   const readOk = await ensurePartySlices(t);
   const s = sessionOf(t);
   if (!s) {
-    toast(readOk && sliceLoaded(t)
+    // A READ THAT LANDED AND FOUND NOTHING IS THE ANSWER "FREE" (sweep #10 T12 round 3, item 1). This
+    // also asked sliceLoaded(t) — but sliceLoaded means "the slice holds a session or an order", and
+    // a free table's slice holds neither, so a successful read of a free table ALWAYS fell through to
+    // "Couldn't check T5 just now — try again", which stays true however often you try. Reached from
+    // a finished tile's ⏻ after another device closed the table. readOk alone is the honest test.
+    toast(readOk
       ? `${tableLabel(t)} is already free.`
       : `Couldn't check ${tableLabel(t)} just now — try again in a moment.`, false);
     await load().catch(() => {}); renderFloor();
@@ -4138,7 +4153,11 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // "Other" goes straight to its text box above.
     // The small line at the bottom resolves the SAME marker the old tile did, so the caller's
     // handling is unchanged — it just opens the one split screen instead of a panel in here.
-    { const so = ov.querySelector(".pay-split-open"); if (so) so.onclick = () => { resolved = true; close(); resolve({ special: "split" }); }; }
+    // …WITH THE TIP (sweep #10 T12 round 3, item 6). Round 2's item 5 taught the split screen to take
+    // the tip this sheet hands over (opts.tip) — and this line still handed over nothing, so a tip
+    // typed here vanished the moment the waiter tapped "Split this bill →". Round 2 checked the split
+    // screen's half and never tapped this one; the fixture world tapped it.
+    { const so = ov.querySelector(".pay-split-open"); if (so) so.onclick = () => { resolved = true; close(); resolve({ special: "split", tip }); }; }
     const otherInput = ov.querySelector(".pay-other-input");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     ov.querySelector(".pay-other-confirm").onclick = confirmOther;
@@ -4243,7 +4262,11 @@ async function renderLoyalty(ov, t, phone) {
   const min = Number(st.min_redeem) || 0;
   const per = (Number(st.point_value_paise) || 100) / 100;
   const worth = Math.round(bal * per);
-  const canSpend = bal >= min && min > 0 ? true : bal > 0;
+  // THE MINIMUM IS A MINIMUM (sweep #10 T12 round 3, item 2). This read `bal >= min && min > 0 ? true
+  // : bal > 0`, which is true for ANY balance above zero — so a guest with 30 points under a 100-point
+  // minimum was offered "Use ₹15 off" (a spend the rules forbid), and the "N more to use them" line
+  // below could never show. The manager panel's copy of this sheet has the right rule; this is it.
+  const canSpend = min > 0 ? bal >= min : bal > 0;
   el.style.display = "";
   el.innerHTML = `<span style="font-weight:700;color:#b45309">⭐ ${bal} point${bal === 1 ? "" : "s"}</span>`
     + `<span style="color:var(--muted)"> · worth ₹${worth}</span>`
@@ -4257,13 +4280,22 @@ async function renderLoyalty(ov, t, phone) {
       // ONE request: the server spends the points AND takes the money off, so a failure can never
       // leave the guest short of points with no discount to show for it.
       const r = await api("POST", `/tables/${t}/loyalty-redeem`, { phone, points: bal });
+      // SAVED ON THE DEVICE IS NOT SPENT (sweep #10 T12 round 3, item 3). Offline, api() keeps this and
+      // answers { ok: true, queued: true } with no `rupees` or `spent`, so this said "⭐ ₹0 off —
+      // undefined points used" and redrew the strip as if the points had gone. The manager panel was
+      // fixed for the same line (T39 item 16): say it is saved, and let the strip wait for the server.
+      // A replay cannot double-spend — the ledger allows ONE redeem per bill (mig 401).
+      if (isQueued(r)) { toast(savedMsg(r)); btn.textContent = "Saved — sends when back online"; return; }
       if (r && r.ok) {
         toast(`⭐ ₹${Math.round(Number(r.rupees) || 0)} off — ${r.spent} points used`);
         renderLoyalty(ov, t, phone);
-      } else { btn.disabled = false; btn.textContent = `Use ₹${worth} off`; }
+      } else { btn.disabled = false; btn.textContent = `Use ₹${worth} off`; toast("The points weren't used — try again.", false); }
     } catch (e) {
-      // The route already sends a sentence a cashier can read out loud; api() surfaces it.
+      // …AND A REFUSAL IS SAID (same item). The comment here promised "api() surfaces" the route's
+      // sentence — the MANAGER's api() does, this panel's does not; it throws and shows nothing. So
+      // the button quietly reset and a guest's points tap vanished. The route's own sentence, out loud.
       btn.disabled = false; btn.textContent = `Use ₹${worth} off`;
+      toast(errText(e), false);
     }
   };
 }
@@ -4364,7 +4396,10 @@ async function recordTip(t, tip, pin, opts = {}) {
   } catch (e) {
     // false = the error styling on this panel (toast(msg, ok)) — a failure dressed as a success is
     // the same fault in a different coat.
-    toast(`Bill is paid, but the ${inr(amt)} tip was not recorded — ${(e && e.message) || "the system refused it"}. Add it from the manager panel.`, false);
+    // ONE FULL STOP (sweep #10 T12 round 3, item 5). The server's sentences end with their own, so
+    // this read "Tips are switched off here.. Add it from the manager panel." on every refused tip.
+    const why = String((e && e.message) || "the system refused it").trim().replace(/[.\s]+$/, "");
+    toast(`Bill is paid, but the ${inr(amt)} tip was not recorded — ${why}. Add it from the manager panel.`, false);
   }
 }
 
@@ -4490,16 +4525,17 @@ function openTagSheet(t) {
     const done = tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed";
     const revert = () => { if (tile) { tile.tag = prev || ""; renderFloor(); renderPanel(); } };
     (async () => {
+      let r = null;
       try {
         try {
-          await api("POST", `/tables/${t}/tag`, { tag });
+          r = await api("POST", `/tables/${t}/tag`, { tag });
         } catch (e) {
           // 'pin' mode: the server asks for a manager PIN — same round-trip as actGated.
           if (!wantsPin(e)) throw e;
           let pin = await pinPrompt("Enter a manager PIN to mark this table.");
           let okd = false;
           while (pin) {
-            try { await api("POST", `/tables/${t}/tag`, { tag, managerPin: pin }); okd = true; break; }
+            try { r = await api("POST", `/tables/${t}/tag`, { tag, managerPin: pin }); okd = true; break; }
             catch (e2) {
               if (wantsPin(e2)) { pin = await pinPrompt("Enter a manager PIN to mark this table.", "That PIN didn't match — try again."); continue; }
               throw e2;
@@ -4507,7 +4543,11 @@ function openTagSheet(t) {
           }
           if (!okd) { revert(); return; } // PIN cancelled
         }
-        toast(done);
+        // SAVED IS NOT MARKED (sweep #10 T12 round 3, item 4). With no internet the device's queue
+        // answers, and this said "Marked 👑 VIP" about a mark the server had not got — the same family
+        // as round 1's print and banquet items. The tile keeps the mark it already shows; the words say
+        // it is waiting to send.
+        toast(isQueued(r) ? savedMsg(r) : done);
       } catch (e) { revert(); toast("Failed: " + errText(e), false); }
     })();
   }));
@@ -5920,7 +5960,11 @@ const tickClock = () => {
   if (!dc) return;
   const drawer = dc.closest(".tbl-drawer");
   if (drawer && !drawer.classList.contains("open")) return;
-  dc.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // THE RESTAURANT'S CLOCK, NOT THE TABLET'S (sweep #10 T12 round 3, item 10). `[]` with no zone is
+  // whatever this device is set to — a tablet left on its factory zone showed a time hours out, in the
+  // same drawer as KOT and bill times pinned to Asia/Kolkata. The order card was fixed for exactly this
+  // on 2026-09-13 (T11 time-zone family); this clock was the one left behind.
+  dc.textContent = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 };
 tickClock(); setInterval(tickClock, 1000);
 
@@ -6614,7 +6658,7 @@ function renderBanquetBody() {
         <div style="font-size:15px;margin-top:2px">Total <b id="bqTotal">₹0</b></div>
       </div>
     </div>
-    <button class="btn primary" id="bqCreate" type="button" disabled style="width:100%;margin-top:14px;padding:13px">🧾 Create the bill</button>`;
+    <button class="btn primary" id="bqCreate" type="button" aria-disabled="true" style="width:100%;margin-top:14px;padding:13px;opacity:.55">🧾 Create the bill</button>`;
   const totals = () => {
     let sub = 0;
     for (const it of bqItems) {
@@ -6630,7 +6674,13 @@ function renderBanquetBody() {
     body.querySelector("#bqSub").textContent = inr(sub);
     body.querySelector("#bqTax").textContent = inr(tax);
     body.querySelector("#bqTotal").textContent = inr(sub + tax);
-    body.querySelector("#bqCreate").disabled = sub <= 0;
+    // DIMMED, NEVER DISABLED (sweep #10 T12 round 3, item 8). A disabled button on a touch panel
+    // swallows the tap — the reason 💳 Mark bill paid was changed (T7, 2026-08-17) and the reason the
+    // refusal below ("Set a plate count first.") exists at all: with `disabled` it could never be
+    // reached, and a waiter tapping Create with no plates got nothing. Same rule as the rest of the panel.
+    const cb = body.querySelector("#bqCreate");
+    cb.style.opacity = sub <= 0 ? ".55" : "";
+    cb.setAttribute("aria-disabled", sub <= 0 ? "true" : "false");
   };
   body.querySelectorAll("[data-bq-step]").forEach((b) => {
     b.onclick = () => {

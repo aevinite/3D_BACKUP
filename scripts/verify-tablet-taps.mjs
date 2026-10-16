@@ -403,7 +403,17 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     const text = owner ? fs.readFileSync(path.join(migDir, owner), "utf8") : "";
     // Only the block for THIS function — a migration may define several.
     const start = text.search(new RegExp(`FUNCTION (public\\.)?${fn}\\s*\\(`));
-    const block = start < 0 ? "" : text.slice(start, start + 4000);
+    // To the function's OWN closing tag ($$, $function$, …), not a fixed 4,000 characters: migration 425's
+    // version of lfh_call_waiter_table is longer, its merge-parent hop sat past the cut, and this check
+    // went red on a function that does the right thing (sweep #10 T12 round 3, 2026-10-16).
+    const block = (() => {
+      if (start < 0) return "";
+      const rest = text.slice(start);
+      const tag = (rest.match(/\bAS\s+(\$[A-Za-z_]*\$)/) || [])[1];
+      if (!tag) return rest.slice(0, 12000);
+      const open = rest.indexOf(tag), close = rest.indexOf(tag, open + tag.length);
+      return close > open ? rest.slice(0, close + tag.length) : rest.slice(0, 12000);
+    })();
     check(
       `guest: ${fn} resolves through the merge parent (${why})`,
       /lfh_merge_parent_table/.test(block),
@@ -1546,6 +1556,108 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
     "tablet: every box the panel builds is marked as a dialog (role + aria-modal), the are-you-sure box as an alertdialog",
     built >= 5 && inline >= 8 && /class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmText"/.test(html) && /bqEl\.setAttribute\("role", "dialog"\)/.test(src),
     `${TABLET}: ${built} built + ${inline} inline dialog marks; ${HTML} confirm-box ${/role="alertdialog"/.test(html) ? "ok" : "unmarked"}.`,
+  );
+}
+
+// ── A FREE TABLE IS "ALREADY FREE", NOT "COULDN'T CHECK" (sweep #10 T12 round 3, item 1) ─────────────
+// closeTableAndFree also demanded sliceLoaded(t) — a session or an order in the slice — which a free
+// table never has, so a read that landed told the waiter "Couldn't check T5 just now — try again".
+{
+  const i = src.indexOf("async function closeTableAndFree("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: closing a table that a successful read found free says 'already free'",
+    /toast\(readOk\s*\n\s*\? `\$\{tableLabel\(t\)\} is already free\.`/.test(body) && !/readOk && sliceLoaded\(t\)/.test(body),
+    `${TABLET} closeTableAndFree: the read's own success decides 'already free'; sliceLoaded() is never true for a free table.`,
+  );
+}
+
+// ── LOYALTY POINTS UNDER THE MINIMUM ARE NOT OFFERED (sweep #10 T12 round 3, item 2) ─────────────────
+{
+  const i = src.indexOf("async function renderLoyalty("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: the pay sheet offers 'Use ₹X off' only once the guest has the restaurant's minimum points",
+    /const canSpend = min > 0 \? bal >= min : bal > 0;/.test(body),
+    `${TABLET} renderLoyalty: the same rule as the manager panel — below the minimum it says how many more are needed.`,
+  );
+}
+
+// ── THE POINTS BUTTON SAYS WHAT HAPPENED (sweep #10 T12 round 3, item 3) ────────────────────────────
+{
+  const i = src.indexOf("async function renderLoyalty("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: 'Use points' saved offline says Saved (never 'undefined points used'), and a refusal is said out loud",
+    /if \(isQueued\(r\)\) \{ toast\(savedMsg\(r\)\); btn\.textContent = "Saved — sends when back online"; return; \}/.test(body)
+      && /\} catch \(e\) \{[\s\S]*?toast\(errText\(e\), false\);/.test(body),
+    `${TABLET} renderLoyalty: the queue's { ok:true, queued:true } is not the server's answer, and this panel's api() shows nothing by itself.`,
+  );
+}
+
+// ── A TABLE TYPE SAVED OFFLINE IS NOT "MARKED" (sweep #10 T12 round 3, item 4) ────────────────────────
+{
+  const i = src.indexOf("function openTagSheet("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: a table type picked with no internet says it is saved, not 'Marked 👑 VIP'",
+    /r = await api\("POST", `\/tables\/\$\{t\}\/tag`, \{ tag \}\);/.test(body) && /toast\(isQueued\(r\) \? savedMsg\(r\) : done\);/.test(body),
+    `${TABLET} openTagSheet: the device queue's answer is not the server's.`,
+  );
+}
+
+// ── A REFUSED TIP'S SENTENCE HAS ONE FULL STOP (sweep #10 T12 round 3, item 5) ───────────────────────
+{
+  const i = src.indexOf("async function recordTip("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: a refused tip quotes the server's sentence without doubling its full stop",
+    /const why = String\(\(e && e\.message\) \|\| "the system refused it"\)\.trim\(\)\.replace\(\/\[\.\\s\]\+\$\/, ""\);/.test(body),
+    `${TABLET} recordTip: "…switched off here.. Add it" — strip the server's own stop before adding ours.`,
+  );
+}
+
+// ── THE PAY SHEET'S "SPLIT THIS BILL →" CARRIES THE TIP (sweep #10 T12 round 3, item 6) ───────────────
+check(
+  "tablet: a tip typed on the pay sheet goes across to the split screen with 'Split this bill →'",
+  /so\.onclick = \(\) => \{ resolved = true; close\(\); resolve\(\{ special: "split", tip \}\); \}/.test(src)
+    && /renderSplitBill\(t, \{ onBack: renderPanel, tip: picked\.tip \}\)/.test(src),
+  `${TABLET} openPaymentMethodModal: resolve the tip with the split marker — the split screen seeds from opts.tip.`,
+);
+
+// ── A DISH EDIT SAVED OFFLINE IS NOT "UPDATED" (sweep #10 T12 round 3, item 7) ───────────────────────
+{
+  const i = src.indexOf("function openDishEditModal("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: a dish edit kept by the device queue says it is saved, never 'Dish updated'",
+    (body.match(/keep\(await api\("POST"/g) || []).length === 3 && /if \(saved\) \{ toast\(savedMsg\(saved\)\); return; \}/.test(body),
+    `${TABLET} openDishEditModal: every write's answer is read — the queue's { queued:true } is not the kitchen having it.`,
+  );
+}
+
+// ── BANQUET "CREATE THE BILL" IS DIMMED, NEVER DISABLED (sweep #10 T12 round 3, item 8) ──────────────
+{
+  const i = src.indexOf("function renderBanquetBody("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: banquet 'Create the bill' with no plates stays tappable and says 'Set a plate count first.'",
+    !/id="bqCreate"[^>]*\sdisabled[\s>]/.test(body) && !/#bqCreate"\)\.disabled = sub <= 0/.test(body)
+      && /cb\.setAttribute\("aria-disabled", sub <= 0 \? "true" : "false"\)/.test(body) && /toast\("Set a plate count first\.", false\)/.test(body),
+    `${TABLET} renderBanquetBody: a disabled button swallows the tap on a touch panel — dim it and let the refusal speak.`,
+  );
+}
+
+// ── THE GUEST BELL KEEPS TO THE WAITER'S SECTION (sweep #10 T12 round 3, item 9) ─────────────────────
+{
+  const i = src.indexOf("function syncGuestBell("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: the guest bell lists calls from the waiter's own section only (the floor's rule)",
+    /const mine = new Set\(floorTableList\(\)\.filter\(\(t\) => inMySection\(t\)\)\.map\(String\)\);/.test(body),
+    `${TABLET} syncGuestBell: floorTableList() is the whole restaurant — filter it through inMySection like passesFilter does.`,
+  );
+}
+
+// ── THE DRAWER'S CLOCK IS THE RESTAURANT'S (sweep #10 T12 round 3, item 10) ───────────────────────────
+{
+  const i = src.indexOf("const tickClock = () => {"), body = src.slice(i, src.indexOf("\n};", i));
+  check(
+    "tablet: the drawer's clock is pinned to the restaurant's zone (Asia/Kolkata), never the device's",
+    /toLocaleTimeString\("en-IN", \{ hour: "2-digit", minute: "2-digit", timeZone: "Asia\/Kolkata" \}\)/.test(body) && !/toLocaleTimeString\(\[\]/.test(body),
+    `${TABLET} tickClock: \`[]\` with no timeZone is the tablet's own zone — a factory-default tablet shows the wrong hour.`,
   );
 }
 

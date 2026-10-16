@@ -1,0 +1,28 @@
+{
+ "url": "/api/tablet/state?table=6",
+ "status": 200,
+ "body": {
+  "sessions": [
+   {
+    "id": "302d2a44-a2f4-4742-9337-b2930c1a4909",
+    "table_number": "6",
+    "status": "open",
+    "opened_at": "2026-10-15T23:01:35.81+00:00",
+    "closed_at": null,
+    "bill_no": 52,
+    "invoice_no": null,
+    "invoice_at": null,
+    "invoice_voided": false,
+    "discount": 0,
+    "discount_note": null,
+    "cust_name": null,
+    "cust_phone": null
+   }
+  ],
+  "members": [],
+  "calls": [],
+  "orders": [],
+  "items": [],
+  "requests": []
+ }
+}

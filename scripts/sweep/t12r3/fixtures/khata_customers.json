@@ -1,0 +1,32 @@
+{
+ "url": "/api/tablet/khata/customers",
+ "status": 200,
+ "body": {
+  "customers": [
+   {
+    "id": "6c64cd44-e2e1-4aaa-be9c-c0bacf8fd2ec",
+    "name": "Split Test 37576",
+    "phone": "9876500077",
+    "note": null
+   },
+   {
+    "id": "d4dd329c-b91c-4f87-95cf-2d4e8ce5f674",
+    "name": "Split500 Tester",
+    "phone": null,
+    "note": null
+   },
+   {
+    "id": "dc8a97fd-be25-46e1-9f01-d63ac94396fc",
+    "name": "Split500 Tester",
+    "phone": null,
+    "note": null
+   },
+   {
+    "id": "1df20da4-ac82-4775-89cf-74f43127b697",
+    "name": "Merge Khata Test",
+    "phone": "9000000031",
+    "note": null
+   }
+  ]
+ }
+}

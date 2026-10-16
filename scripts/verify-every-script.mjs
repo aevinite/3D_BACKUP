@@ -85,6 +85,10 @@ const TOOL = "a tool whose job IS to change data, run by hand on purpose — und
 const ASKS = "its POSTs go to the database's query endpoint and only read (no INSERT/UPDATE/DELETE in its SQL)";
 const EXPLAINED_WRITES = {
   "scripts/agent-run-record.mjs": TOOL,
+  // sweep #10 T12 round 3's fixture world: every request the panel makes is answered by the TEST's own
+  // route (scripts/sweep/t12r3/f-world.mjs), so its one POST (an order queued in the browser to prove the
+  // "waiting to send" box) never leaves the page — nothing reaches a server or a database. Read 2026-10-16.
+  "scripts/sweep/t12r3/fk-mut.mjs": "a CHECK whose writes go to a local fake server (the fixture world) — nothing reaches a database",
   // classifies older parcels' tax once (mig 421) — writes only the new, empty columns, only on rows not yet
   // classified, never `total`; a second run is a no-op. Read 2026-10-11.
   "scripts/backfill-parcel-tax.mjs": TOOL,

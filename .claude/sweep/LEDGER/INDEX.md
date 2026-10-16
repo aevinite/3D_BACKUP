@@ -64,7 +64,7 @@ terminals' rows — keep both sides.
 | T9 | `P178001`–`P179000` | The manager panel's server route, part 1 of 2 | `T9-S10.md` | 840 | 838 | 12 | 12 |
 | T10 | `P179001`–`P180000` + `P211001`–`P211999` (round 3, claimed on `main` before a row was written — above every claim in this table) | The manager panel's server route, part 2 of 2 | `T10-S10.md` | 1084 | 1084 | 19 | 19 |
 | T11 | `P180001`–`P181000` | The kitchen screen | `T11-S10.md` | 998 | 998 | 19 | 19 |
-| T12 | `P181001`–`P182000` + `P213001`–`P213999` (round 3, claimed on `main` before a row was written, owner's yes 2026-10-16 — above every claim in this table) | The waiter tablet screen | `T12-S10.md` | 952 | 948 | 9 | 9 |
+| T12 | `P181001`–`P182000` + `P213001`–`P213999` (round 3, claimed on `main` before a row was written, owner's yes 2026-10-16 — above every claim in this table) | The waiter tablet screen | `T12-S10.md` | 1482 | 1482 | 19 | 19 |
 | T13 | `P182001`–`P183000` + `P169001`–`P169999` (round 2, the last unclaimed block of the planning gap — claimed on `main` before a row was written; owner asked 2026-10-11 for 500–1000 more, "every single bit") | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 1121 | 1119 | 32 | 32 |
 | T14 | `P183001`–`P184000` + `P214001`–`P214999` (round 2 — the owner's fresh full re-test, 2026-10-16: "do five hundred or thousand phases … replan whole test"; claimed on `main` before a row was written — above every claim in this table) | The bill and KOT document | `T14-S10.md` | 1037 | 1025 | 15 | 15 |
 | T15 | `P184001`–`P185000` | The print queue and the print helper | `T15-S10.md` | 504 | 504 | 9 | 9 |

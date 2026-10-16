@@ -139,3 +139,5 @@ test-results/
 
 # sweep #10 T9 mutation runner: temporary mutated copies of route.ts (scripts/sweep/t9s10/mutate.mjs deletes them)
 /.t9mut/
+# sweep #10 T12 round 3 mutation runner: temporary mutated copies of the tablet app.js (scripts/sweep/t12r3/mutate.mjs deletes them)
+/.t12mut/

@@ -1,0 +1,12 @@
+{
+ "url": "/api/tablet/state?table=1",
+ "status": 200,
+ "body": {
+  "sessions": [],
+  "members": [],
+  "calls": [],
+  "orders": [],
+  "items": [],
+  "requests": []
+ }
+}

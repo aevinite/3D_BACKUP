@@ -129,9 +129,37 @@ export async function browser() {
   if (_browser) return _browser;
   const { chromium } = await import("playwright");
   _browser = await chromium.launch();
+  if (process.env.T12_COV || process.env.T12_MUT) await instrument(_browser);
   return _browser;
 }
-export async function closeBrowser() { if (_browser) { await _browser.close().catch(() => {}); _browser = null; } }
+export async function closeBrowser() {
+  if (!_browser) return;
+  if (process.env.T12_COV) { const { covFlush } = await import("../t12r3/cov.mjs"); await covFlush(); }
+  await _browser.close().catch(() => {}); _browser = null;
+}
+// ── ROUND 3: coverage and mutation hooks (sweep #10 T12, 2026-10-16) ─────────────────────────────
+// T12_COV=<dir>  every page records which characters of the tablet's code ran (../t12r3/cov.mjs), and
+//                writes that record before it navigates, closes, or its context or browser closes.
+// T12_MUT=<file> every context is served THAT file in place of /panels/tablet/app.js, with the service
+//                worker blocked (it would otherwise answer the panel's files from its own cache and the
+//                broken copy would never load). ../t12r3/mutate.mjs uses it; the real file is never edited.
+async function instrument(b) {
+  const COV = process.env.T12_COV ? await import("../t12r3/cov.mjs") : null;
+  const MUT = process.env.T12_MUT ? readFileSync(process.env.T12_MUT, "utf8") : null;
+  const orig = b.newContext.bind(b);
+  b.newContext = async (opts = {}) => {
+    const ctx = await orig(MUT ? { ...opts, serviceWorkers: "block" } : opts);
+    if (MUT) await ctx.route(/\/panels\/tablet\/app\.js(\?|$)/, (r) => r.fulfill({ status: 200, contentType: "application/javascript; charset=utf-8", body: MUT }));
+    if (COV) {
+      const np = ctx.newPage.bind(ctx);
+      ctx.newPage = async () => { const p = await np(); await COV.covStart(p); return p; };
+      ctx.on("page", (p) => { COV.covStart(p); });
+      const close = ctx.close.bind(ctx);
+      ctx.close = async (...a) => { await COV.covFlushContext(ctx); return close(...a); };
+    }
+    return ctx;
+  };
+}
 
 /** A signed-in waiter context. `device` = { width, height, touch, dpr, mobile, dark }. */
 export async function waiterContext(device = {}) {

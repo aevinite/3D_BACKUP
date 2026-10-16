@@ -43,3 +43,30 @@ Sabotage: with origin/main's `app.js` put back, verify:tablet-taps fails 5 and v
 | R2-b | no box on the tablet was a dialog to a screen reader (found by L9) | 23c723ef | verify:tablet-taps |
 
 Re-planned test: `scripts/sweep/t12r2/` — 452 rows, 452 ✅ on the final run (`LEDGER/T12-S10.md` → ROUND 2).
+
+## Round 3 (2026-10-16) — the owner's "do it again … completely error free … every single bit", planned by MEASUREMENT
+
+Plan: `scripts/sweep/t12r3/PLAN.md`. Rows: `LEDGER/T12-S10.md` → ROUND 3 (P213001–P213999, 529 rows, all ✅).
+Rounds 1 + 2 ran 60.2% of app.js; round 3's fixture world, host pages, and the reruns bring it to **99.2%** (3,656 / 3,685).
+Mutation testing: 340 distinct breaks over three fresh samples, about 306 caught (90%), every survivor shown unobservable.
+
+| # | what was wrong | commit | guard |
+|---|---|---|---|
+| 1 | closing a table that is already free said "Couldn't check T5 just now — try again" (the read's success was not trusted) | d241bf65 | verify:tablet-taps |
+| 2 | the pay sheet offered loyalty points below the restaurant's minimum | 6a5ce453 | verify:tablet-taps |
+| 3 | "Use points" offline said "⭐ ₹0 off — undefined points used"; a refused one said nothing | cd3643f5 | verify:tablet-taps |
+| 4 | a table type picked with no internet said "Marked 👑 VIP" | 6074a317 | verify:tablet-taps |
+| 5 | a refused tip read "…switched off here.. Add it from the manager panel." | ed7f65cd | verify:tablet-taps |
+| 6 | a tip typed on the pay sheet was lost on "Split this bill →" — round 2's item 5 was incomplete | 8846f276 | verify:tablet-taps |
+| 7 | a dish edit saved with no internet said "Dish updated" | 2f6ce99d | verify:tablet-taps |
+| 8 | banquet "Create the bill" with no plates was a disabled button that swallowed the tap | 5131480f | verify:tablet-taps |
+| 9 | a sectioned waiter's guest bell listed other sections' calls — round 1's P181200 had matched the line's text | 0919c1f8 | verify:tablet-taps |
+| 10 | the drawer's clock showed the tablet's time zone, not the restaurant's (New York device: 02:26 AM vs 11:56 am) | aee33dc0 | verify:tablet-taps |
+
+Not re-run on the final code: round 1's block B (P181201–P181345) — it needs four free tables and French House held two in
+eight tries (five binned-but-open sessions left by other terminals' scripts that insert cancelled+deleted orders directly,
+plus their live runs). Not mine to clean. 145/145 ✅ on the morning's round-3 code; band F covers the same journeys offline.
+
+Outside this territory, noted (no change made): the KOT ▾ menu's greyed rows (tablet AND manager, kept identical on
+purpose) swallow a tap like item 8 did; the floor's 💳 sheet names no bill number where the table's own sheet says "#41";
+the old full-screen ✕ (#tabletClose) is hidden under every popup today, its handler only reached through the phone's Back.
