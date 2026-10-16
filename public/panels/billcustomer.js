@@ -226,6 +226,10 @@
       wrap.querySelector(".tbl-modal-close").onclick = () => finish(null);
       wrap.querySelector(".bc-cancel").onclick = () => finish(null);
       wrap.onclick = (e) => { if (e.target === wrap) finish(null); };
+      // Esc closes it, like every other dialog in the panels (item 8, owner 2026-10-16 — "do all that").
+      // Listened for on the sheet itself, so it only fires while a box on it has the keyboard, and it
+      // stops there: the panel underneath never sees the same key and closes something else too.
+      wrap.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(null); } });
 
       // nameTouched: once the waiter edits the name themselves we stop overwriting it
       // with a looked-up one (their correction wins).
