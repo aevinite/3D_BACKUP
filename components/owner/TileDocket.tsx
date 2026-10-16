@@ -73,8 +73,11 @@ function Area({ pts, h = 118 }: { pts: DocketPoint[]; h?: number }) {
       {pts.map((p, i) => <rect key={i} x={X(i) - w / pts.length / 2} y={0} width={w / pts.length} height={h}
         fill="transparent" {...on(p.hint || `${p.x} · ${Math.round(p.v)}`)}>
         <title>{p.hint || `${p.x} · ${Math.round(p.v)}`}</title></rect>)}
-      {[0, Math.floor(pts.length / 2), pts.length - 1].map((i, k) =>
-        <text key={i} x={X(i)} y={h + 12} textAnchor={k === 0 ? "start" : k === 2 ? "end" : "middle"}>{pts[i].x}</text>)}
+      {/* DE-DUPLICATED (sweep #10 T20, item 6). With exactly two days the list was [0, 1, 1]: React
+          warned about a duplicate key, and the last date was printed twice — once end-anchored, once
+          CENTRED on the right edge, half of it hanging off the card. */}
+      {[...new Set([0, Math.floor(pts.length / 2), pts.length - 1])].map((i, k, a) =>
+        <text key={i} x={X(i)} y={h + 12} textAnchor={k === 0 ? "start" : k === a.length - 1 ? "end" : "middle"}>{pts[i].x}</text>)}
     </svg>
   );
   return <div {...off}>{svg}{line}</div>;
@@ -100,8 +103,9 @@ function Bars({ pts, compare, h = 118 }: { pts: DocketPoint[]; compare?: boolean
           </g>
         );
       })}
-      {[0, pts.length - 1].map((i, k) =>
-        <text key={i} x={i * bw + bw / 2} y={h + 12} textAnchor={k ? "end" : "start"}>{pts[i].x}</text>)}
+      {/* one bar (a two-restaurant compare with one withheld) is one label, centred — not [0, 0] */}
+      {[...new Set([0, pts.length - 1])].map((i, k, a) =>
+        <text key={i} x={i * bw + bw / 2} y={h + 12} textAnchor={a.length === 1 ? "middle" : k ? "end" : "start"}>{pts[i].x}</text>)}
     </svg>
   );
   return <div {...off}>{svg}{line}</div>;

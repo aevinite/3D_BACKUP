@@ -1210,6 +1210,14 @@ console.log("\nT11-E · saying so when a read failed");
     /"none paid yet"/.test(dashPage) && /paid or still open"/.test(dashPage) && /todayOrd && todayRev \? inr\(todayRev \/ todayOrd\) : "—"/.test(dashPage),
     "app/owner/page.tsx — the Today sheet's average row.",
   );
+  // item 6 — with exactly two days the axis index list was [0, 1, 1]: a duplicate React key and the last
+  // date printed twice, once centred off the right edge of the card.
+  check(
+    "item 6 · the docket's axis labels are de-duplicated (two days print two dates, not three)",
+    /\[\.\.\.new Set\(\[0, Math\.floor\(pts\.length \/ 2\), pts\.length - 1\]\)\]/.test(docket) &&
+      /\[\.\.\.new Set\(\[0, pts\.length - 1\]\)\]/.test(docket),
+    "components/owner/TileDocket.tsx — Area and Bars must not label the same index twice.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
