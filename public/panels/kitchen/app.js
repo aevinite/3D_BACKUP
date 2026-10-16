@@ -814,7 +814,12 @@ function applyView() {
 // so the clash wording it would gain is one it can never reach. `Failed: <message>` stays, and the
 // kitchen being the odd one of the three panels here is deliberate, not drift. See
 // docs/REJECTED-IDEAS.md R21.
-const act = async (fn) => { try { await fn(); await freshLoad(); } catch (e) { toast("Failed: " + e.message); } };
+// OBITUARY — act() is gone (sweep #10 T11 round 2, found by measuring which functions the panel ever runs).
+// It was `try { await fn(); await freshLoad(); } catch (e) { toast("Failed: " + e.message); }`, the 86 board's old
+// "write, then reload" wrapper. The 86 board went optimistic on 2026-07-07 and stopped calling it; nothing has
+// called it since. The R21 decision above is about the wording every refusal on this screen keeps —
+// `Failed: <message>` — and still stands: it is honoured at each refusal (markItemReady, markOrderReady, platAct,
+// the 86 toggle), not by this helper.
 
 // Marking dishes READY is OPTIMISTIC. In a rush the cook taps ✓ down a long ticket
 // one after another; we flip the dish locally + redraw INSTANTLY, fire the API in the

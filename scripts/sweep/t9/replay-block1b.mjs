@@ -1,5 +1,5 @@
 // Replay of LEDGER/T6.md block 1, second half — P02601–P02700.
-import { row, APPC, hasRe, lacksRe } from "./lib.mjs";
+import { row, APP, APPC, hasRe, lacksRe } from "./lib.mjs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
 
@@ -51,10 +51,12 @@ row("P02619", "the view choice persists per device", () =>
   (hasRe(APPC(), /localStorage\.setItem\("kds_view", view\)/) === true && hasRe(APPC(), /localStorage\.getItem\("kds_view"\) === "wall"/) === true) || "the layout choice is not both written and read back");
 
 // ── act() and the ready paths — P02620–P02655 ────────────────────────────────
-row("P02620", "act() refreshes with freshLoad(), not load(), because it follows a write", () =>
-  hasRe(APPC(), /const act = async \(fn\) => \{ try \{ await fn\(\); await freshLoad\(\); \}/));
-row("P02621", "act() keeps the plain `Failed: <message>` wording R21 settled on", () =>
-  hasRe(APPC(), /const act = async \(fn\) => \{[\s\S]{0,120}toast\("Failed: " \+ e\.message\)/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2): act() had no caller since the 86 board went optimistic (2026-07-07)
+// and was retired as dead code; its R21 note now covers the refusals that really run.
+row("P02620", "act() is retired — no caller, and an obituary says why", () =>
+  (!/const act = async/.test(APPC()) && /OBITUARY — act\(\) is gone/.test(APP())) || "act() is back, or its obituary is gone");
+row("P02621", "every refusal on this screen keeps the plain `Failed: <message>` wording R21 settled on", () =>
+  ((APPC().match(/toast\("Failed: " \+ e\.message\)/g) || []).length >= 4) || "a refusal lost the R21 wording");
 row("P02622", "scheduleReadyReconcile() debounces to one refetch 2.5s after the last tap", () => {
   const fn = slice("function scheduleReadyReconcile()", "function setLocalReady(");
   return (/if \(readyReconcileTimer\) clearTimeout\(readyReconcileTimer\)/.test(fn) && /\}, 2500\)/.test(fn)) || "the debounce has drifted";
