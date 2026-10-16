@@ -42,7 +42,7 @@ export async function blockFE(R, id) {
 
   // ── the grid and the cart ──────────────────────────────────────────────────────────────────
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
     await takeOrder(page, 5);
     const head = await page.evaluate(() => ({ h: document.querySelector(".om-head h2").textContent, exit: document.getElementById("omExit").textContent, cats: document.querySelectorAll(".om-nav .om-cat").length }));
     await check(id(), F, "＋ Take order opens the dish browser titled with the table, a search box, ← back and the category rail", H, () => ok(head.h === "T5" && head.exit === "← back" && head.cats > 1, JSON.stringify(head)));
@@ -90,7 +90,7 @@ export async function blockFE(R, id) {
 
   // ── the options popup ──────────────────────────────────────────────────────────────────────
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
     await takeOrder(page, 5);
     await dishTap(page, "t-opt"); await page.waitForSelector("#optOverlay #optAdd");
     await check(id(), F, "a dish with sizes/extras opens its popup instead of quick-adding", H, async () => ok((await cart(page)).length === 0 && await page.evaluate(() => document.querySelector("#optOverlay h3").textContent) === "Test Pizza"));
@@ -205,7 +205,7 @@ export async function blockFE(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
     await takeOrder(page, 5); await dishTap(page, "t-plain"); await review(page);
     await ctx.setOffline(true);
     await page.click("#sendOrder"); await answerConfirm(page, true);
@@ -308,7 +308,7 @@ export async function blockFE(R, id) {
 
   // ── editing a dish already on the order ────────────────────────────────────────────────────
   {
-    const { w, ctx, page, items, orders } = await scene((w) => seat(w, 5, { orders: [{ status: "preparing", allergies: ["dairy"], items: [{ title: "Test Lassi", price: 120, status: "preparing", note: "less ice" }, { title: "Mint Melon Juice", price: 380, status: "served" }] }] }));
+    const { w, ctx, page, items } = await scene((w) => seat(w, 5, { orders: [{ status: "preparing", allergies: ["dairy"], items: [{ title: "Test Lassi", price: 120, status: "preparing", note: "less ice" }, { title: "Mint Melon Juice", price: 380, status: "served" }] }] }));
     await openTable(page, 5);
     await tap(page, "[data-edit-order]"); await answerConfirm(page, true);
     await page.click(`[data-edit-dish="${items[0].id}"]`); await page.waitForSelector(".dish-edit-overlay");

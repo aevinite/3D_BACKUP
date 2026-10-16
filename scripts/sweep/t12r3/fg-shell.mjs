@@ -70,7 +70,7 @@ export async function blockFG(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { w.profile = { ...w.profile, profileModule: true }; }, {}, PHONE);
+    const { ctx, page } = await scene((w) => { w.profile = { ...w.profile, profileModule: true }; }, {}, PHONE);
     await openDrawer(page);
     const me = await page.evaluate(() => { const r = document.getElementById("dwMeRow"); return r && !r.hidden && getComputedStyle(r).display !== "none"; });
     await check(id(), F, "where the restaurant HAS the profile module, 'My profile & pay' shows in the drawer", H, () => ok(me === true));
@@ -92,7 +92,7 @@ export async function blockFG(R, id) {
   }
   {
     const { ctx, page } = await scene(null, {}, PHONE);
-    await page.evaluate(() => { try { delete window.LFH_BELL; } catch (e) { window.LFH_BELL = undefined; } });
+    await page.evaluate(() => { try { delete window.LFH_BELL; } catch { window.LFH_BELL = undefined; } });
     await openDrawer(page);
     const has = await page.$("#dwBell");
     if (has) {

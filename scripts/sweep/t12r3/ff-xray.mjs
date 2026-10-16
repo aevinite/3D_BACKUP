@@ -26,7 +26,7 @@ const ribbon = (page) => page.evaluate(() => { const r = document.getElementById
 export async function blockFF(R, id) {
   const { check } = R;
   {
-    const { w, ctx, page } = await scene({ higherView: true }, { tablet_discount: "off", tablet_table_tags: "off", tablet_khata: "off", tablet_invoice: "off" }, `rid=${RID}`, (w) => seat(w, 5, { orders: [{ status: "served" }] }));
+    const { ctx, page } = await scene({ higherView: true }, { tablet_discount: "off", tablet_table_tags: "off", tablet_khata: "off", tablet_invoice: "off" }, `rid=${RID}`, (w) => seat(w, 5, { orders: [{ status: "served" }] }));
     const rb = await ribbon(page);
     const expectOff = await page.evaluate(() => XRAY_CAPS.filter((c) => { const s2 = state.data.settings; if (c.key === "tablet_banquet" && !(s2.banquet_allowed === true && (s2.banquet_owner_control !== true || s2.banquet_enabled !== false))) return false; if (c.key === "tablet_table_ops" && !s2.table_ops_tablet_allowed) return false; return tperm(c.key) === "off"; }).length);
     await check(id(), F, "the admin looking in gets a ribbon: 'Admin view', the path Dashboard › restaurant › Tablet panel", H, () => ok(/^Admin view Dashboard ?› ?.+ ?› ?Tablet panel/.test(rb), rb));
@@ -72,7 +72,7 @@ export async function blockFF(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene({ higherView: true }, { tablet_discount: "on", tablet_table_tags: "on", tablet_khata: "on", tablet_mark_paid: "on", tablet_take_orders: "on", tablet_banquet: "on", tablet_table_ops: "on" });
+    const { ctx, page } = await scene({ higherView: true }, { tablet_discount: "on", tablet_table_tags: "on", tablet_khata: "on", tablet_mark_paid: "on", tablet_take_orders: "on", tablet_banquet: "on", tablet_table_ops: "on" });
     await page.click("#xrayZonesBtn");
     const t = await page.evaluate(() => document.getElementById("xrayZones").innerText.replace(/\s+/g, " "));
     await check(id(), F, "with nothing switched off the list says 'Nothing is off — waiters see everything you see.'", H, () => ok(/Nothing is off — waiters see everything you see\./.test(t), t));
@@ -104,7 +104,7 @@ export async function blockFF(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene({ higherView: false, simulated: true, asName: "Ravi" }, {}, `rid=${RID}&view=real&as=staff-1`);
+    const { ctx, page } = await scene({ higherView: false, simulated: true, asName: "Ravi" }, {}, `rid=${RID}&view=real&as=staff-1`);
     const rb = await ribbon(page);
     await check(id(), F, "the ACTUAL-tablet view keeps one admin trace: 'Admin view · as Ravi', with 'See full admin view' and Exit", H, () => ok(/^Admin view · as Ravi/.test(rb) && /See full admin view/.test(rb) && /Exit view/.test(rb), rb));
     await Promise.all([page.waitForURL((u) => !/view=real/.test(u.toString()), { timeout: 8000 }).catch(() => {}), page.click("#xrayFullBtn")]);

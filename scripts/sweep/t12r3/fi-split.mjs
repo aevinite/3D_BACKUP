@@ -23,7 +23,7 @@ export async function blockFI(R, id) {
 
   // ── the split screen ───────────────────────────────────────────────────────────────────────
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 555.55 }] }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 555.55 }] }));
     await openSplit(page, 5);
     const title = await page.evaluate(() => document.querySelector("#panel h2, #panel .pk-title, #panel h3")?.textContent || document.getElementById("panel").innerText.split("\n")[0]);
     await check(id(), F, "🍴 Split the bill opens titled with the table and the exact bill: 'Split T5's bill · ₹555.55'", H, () => ok(/Split .*5.*'s bill · ₹555\.55/.test(title), title));
@@ -181,7 +181,7 @@ export async function blockFI(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page, orders } = await scene((w) => seat(w, 6, { orders: [{ status: "preparing", discount: 50, items: [{ title: "Thali", price: 1000 }] }] }), { tablet_discount: "on" });
+    const { w, ctx, page } = await scene((w) => seat(w, 6, { orders: [{ status: "preparing", discount: 50, items: [{ title: "Thali", price: 1000 }] }] }), { tablet_discount: "on" });
     await openTable(page, 6);
     await tap(page, "[data-edit-order]"); await page.click("#confirmYes");
     const lbl = await page.evaluate(() => document.querySelector("[data-discount]").textContent.trim());
@@ -196,7 +196,7 @@ export async function blockFI(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 7, { orders: [{ status: "preparing", items: [{ title: "Thali", price: 1000 }, { title: "Water bottle", price: 20, is_mrp: true }], extra: { taxable_base: 1000, nontax_amount: 20, mrp_amount: 20 } }] }), { tablet_discount: "on" });
+    const { ctx, page } = await scene((w) => seat(w, 7, { orders: [{ status: "preparing", items: [{ title: "Thali", price: 1000 }, { title: "Water bottle", price: 20, is_mrp: true }], extra: { taxable_base: 1000, nontax_amount: 20, mrp_amount: 20 } }] }), { tablet_discount: "on" });
     await openTable(page, 7); await openDisc(page);
     await page.fill(".disc-pay-input", "10");
     const b = await boxes(page);

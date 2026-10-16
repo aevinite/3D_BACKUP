@@ -48,7 +48,7 @@ export async function blockFH(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene();
+    const { ctx, page } = await scene();
     await open(page);
     const state0 = await page.evaluate(() => { const b = document.getElementById("bqCreate"); return { disabled: b.disabled, dim: getComputedStyle(b).opacity }; });
     await clearToastsNow(page);
@@ -80,8 +80,9 @@ export async function blockFH(R, id) {
     const { w, ctx, page } = await scene(null, { tablet_banquet: "pin" });
     w.answer("POST", /^\/banquet\/place/, { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } });
     await open(page); await page.click('[data-bq-step="1"][data-bq-id="bq-veg"]'); await page.click("#bqCreate");
-    await page.waitForSelector(".pp-cancel"); await page.click(".pp-cancel"); await settle(page, 300);
-    await check(id(), F, "…cancelling the PIN leaves the sheet open and the button usable again", H, async () => ok(await page.evaluate(() => !!document.getElementById("bqCreate") && !document.getElementById("bqCreate").disabled)));
+    await clearToastsNow(page);
+    await page.waitForSelector(".pp-cancel"); await page.click(".pp-cancel"); await settle(page, 400);
+    await check(id(), F, "…cancelling the PIN leaves the sheet open, the button usable, and says nothing (no false 'created', no error)", H, async () => ok(await page.evaluate(() => !!document.getElementById("bqCreate") && !document.getElementById("bqCreate").disabled) && (await toastsNow(page)).length === 0, (await toastsNow(page)).join(" | ")));
     await ctx.close();
   }
   {
@@ -92,7 +93,7 @@ export async function blockFH(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene();
+    const { ctx, page } = await scene();
     await open(page); await page.click('[data-bq-step="1"][data-bq-id="bq-veg"]');
     await ctx.setOffline(true);
     await page.click("#bqCreate");
@@ -101,7 +102,7 @@ export async function blockFH(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { w.banquet = { items: [] }; });
+    const { ctx, page } = await scene((w) => { w.banquet = { items: [] }; });
     await open(page);
     const t = await page.evaluate(() => document.getElementById("bqBody").textContent.trim());
     await check(id(), F, "a restaurant with no banquet items is told where they are added", H, () => ok(t === "No banquet items yet — the manager adds them in the manager panel’s Banquet tab.", t));
@@ -110,7 +111,7 @@ export async function blockFH(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => w.answer("GET", /^\/banquet-items/, { status: 403, body: { error: "Banquet billing is switched off." } }));
+    const { ctx, page } = await scene((w) => w.answer("GET", /^\/banquet-items/, { status: 403, body: { error: "Banquet billing is switched off." } }));
     await page.evaluate(() => openBanquet());
     await check(id(), F, "if the banquet menu can't be read, it says so and closes (never an endless 'Loading…')", H, async () => ok(await waitToast(page, /^Couldn't open banquet billing: Banquet billing is switched off\.$/) && (await settle(page, 300), !(await page.$("#bqBody"))), (await toastsNow(page)).join(" | ")));
     await ctx.close();

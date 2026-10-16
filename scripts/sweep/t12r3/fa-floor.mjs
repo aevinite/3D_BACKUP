@@ -3,7 +3,7 @@
 // can fail, and the fallback poll a tablet runs when its realtime script never loaded.
 // Fixture world: nothing is written anywhere; what the panel SENT is read back from the world's log.
 import { ok } from "../t12s10/lib.mjs";
-import { freshWorld, openWorld, seat, answerConfirm, toastsNow, clearToastsNow, waitToast, settle } from "./f-world.mjs";
+import { freshWorld, openWorld, seat, answerConfirm, toastsNow, waitToast, settle } from "./f-world.mjs";
 
 const F = "public/panels/tablet/app.js";
 const H = "FIXTURE — the panel against the test's own server (nothing written)";
@@ -29,7 +29,7 @@ export async function blockFA(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { seat(w, 5, { orders: [{}] }); seat(w, 6, { orders: [{}] }); });
+    const { ctx, page } = await scene((w) => { seat(w, 5, { orders: [{}] }); seat(w, 6, { orders: [{}] }); });
     await quick(page, "t-take", 5); await page.waitForSelector("#omScroll .dish");
     await check(id(), F, "a tile's ＋ Take order opens straight into taking an order for THAT table", H, async () => ok(await page.evaluate(() => state.ordering && state.table === "5")));
     await page.click("#omScroll .dish:not(.out) .dname");
@@ -54,7 +54,7 @@ export async function blockFA(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 399 }] }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 399 }] }));
     const has = await page.evaluate(() => !!document.querySelector('.tile[data-t="5"] .tpay'));
     await check(id(), F, "a served-but-unpaid tile carries 💳", H, () => ok(has));
     await quick(page, "tpay", 5); await page.waitForSelector(".pay-overlay");

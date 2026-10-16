@@ -1,6 +1,6 @@
 // scripts/sweep/t12r3/mutate.mjs — band M: MUTATION TESTING of the waiter tablet (sweep #10 T12 round 3).
 //
-//   node scripts/sweep/t12r3/mutate.mjs <per-group coverage root> [--max=120] [--workers=4] [--seed=1] [--json=out] [--keys=file]
+//   node scripts/sweep/t12r3/mutate.mjs --cov=<per-group coverage root> [--max=120] [--workers=4] [--seed=1] [--json=out] [--keys=file]
 //
 // "Every line ran" (cov.mjs) says nothing about whether a check would NOTICE that line being wrong. So
 // this makes ONE small deliberate break at a time in a COPY of public/panels/tablet/app.js — a comparison
@@ -20,7 +20,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", "..");
 const REL = "public/panels/tablet/app.js";
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
-const COVROOT = process.argv[2];
+const COVROOT = arg("cov", "");
+if (!COVROOT) { console.log("Give the per-group coverage folder: --cov=<dir> (one sub-folder per band-F group, from T12_COV runs)."); process.exit(2); }
 const MAX = Number(arg("max", 120)), WORKERS = Number(arg("workers", 4)), SEED = Number(arg("seed", 1)), OUT = arg("json", "");
 const ONLY = arg("keys", "") ? new Set(JSON.parse(readFileSync(arg("keys", ""), "utf8"))) : null;
 const SKIP = new Set(arg("skip", "") ? JSON.parse(readFileSync(arg("skip", ""), "utf8")) : []);

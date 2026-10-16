@@ -193,7 +193,7 @@ export async function blockFJ(R, id) {
 
   // ── restaurants built differently ──────────────────────────────────────────────────────────
   {
-    const { w, ctx, page } = await scene((w) => { w.summary.restaurant = { ...w.summary.restaurant, logo_text: "", name: { en: "  Little French House  ", hi: "छोटा फ़्रेंच हाउस" } }; });
+    const { ctx, page } = await scene((w) => { w.summary.restaurant = { ...w.summary.restaurant, logo_text: "", name: { en: "  Little French House  ", hi: "छोटा फ़्रेंच हाउस" } }; });
     const n = await page.evaluate(() => restDisplayName(state.data.restaurant));
     await check(id(), F, "a restaurant whose name is stored per language shows its English name (trimmed)", H, () => ok(n === "Little French House", n));
     const n2 = await page.evaluate(() => restDisplayName({ name: { hi: "छोटा घर" } }) + "|" + restDisplayName({ name: {} }));
@@ -230,9 +230,12 @@ export async function blockFJ(R, id) {
     await settle(page, 400);
     const spy = await page.evaluate(() => ({ on: document.querySelector(".om-nav .om-cat.on")?.dataset.cat, first: document.querySelector(".om-nav .om-cat")?.dataset.cat, top: state._omTop }));
     await check(id(), F, "scrolling the dish list moves the lit category chip with it", H, () => ok(spy.on && spy.on !== spy.first && spy.top > 0, JSON.stringify(spy)));
+    // The spot is taken BEFORE searching: comparing against state._omTop afterwards compared a value with
+    // itself (a scroll back to 0 also rewrites _omTop to 0) — mutation pass 2 showed it could only pass.
+    const was = await page.evaluate(() => document.getElementById("omScroll").scrollTop);
     await page.fill("#dishSearch", "juice"); await page.fill("#dishSearch", "");
-    const back = await page.evaluate(() => Math.abs(document.getElementById("omScroll").scrollTop - state._omTop) < 4);
-    await check(id(), F, "…and clearing a search puts the waiter back where they were browsing", H, () => ok(back));
+    const now = await page.evaluate(() => document.getElementById("omScroll").scrollTop);
+    await check(id(), F, "…and clearing a search puts the waiter back where they were browsing", H, () => ok(was > 50 && Math.abs(now - was) < 40, `was ${was}, now ${now}`));   // within one dish row
     await ctx.close();
   }
   {

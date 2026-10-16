@@ -161,8 +161,7 @@ export async function blockFB(R, id) {
   }
   {
     const { w, ctx, page, members } = await scene((w) => seat(w, 16, { orders: [{}], members: [{ name: "Ravi", role: "owner" }, { name: "Meera", role: "guest" }] }));
-    let tries = 0;
-    w.answer("POST", /\/members\/[^/]+\/ban/, { fn: (req) => { tries++; return req.body && req.body.managerPin === "4321" ? { status: 200, body: { ok: true } } : { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } }; } });
+    w.answer("POST", /\/members\/[^/]+\/ban/, { fn: (req) => { return req.body && req.body.managerPin === "4321" ? { status: 200, body: { ok: true } } : { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } }; } });
     await openTable(page, 16);
     await tap(page, `[data-ban="${members[1].id}"]`);
     const q = await answerConfirm(page, true);
@@ -208,7 +207,7 @@ export async function blockFB(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page, orders } = await scene((w) => seat(w, 19, { orders: [{ status: "preparing", allergies: ["nuts"] }] }));
+    const { w, ctx, page } = await scene((w) => seat(w, 19, { orders: [{ status: "preparing", allergies: ["nuts"] }] }));
     await openTable(page, 19);
     await tap(page, "[data-edit-order]");
     const q = await answerConfirm(page, false);
@@ -255,7 +254,7 @@ export async function blockFB(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 20, { orders: [{ status: "preparing" }] }));
+    const { ctx, page } = await scene((w) => seat(w, 20, { orders: [{ status: "preparing" }] }));
     await openTable(page, 20);
     await tap(page, "[data-edit-order]"); await answerConfirm(page, true); await settle(page, 200);
     await tap(page, "[data-done-order]"); await settle(page, 200);
@@ -290,7 +289,7 @@ export async function blockFB(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { const a = seat(w, 23, { orders: [{ kot_no: 311 }] }); seat(w, 24, {}); w.slices["24"].sessions = []; w.summary.merges = [{ parent_table: "23", child_table: "24" }]; });
+    const { w, ctx, page } = await scene((w) => { seat(w, 23, { orders: [{ kot_no: 311 }] }); seat(w, 24, {}); w.slices["24"].sessions = []; w.summary.merges = [{ parent_table: "23", child_table: "24" }]; });
     await openTable(page, 23);
     await tap(page, '[data-unmerge="24"]');
     const q = await answerConfirm(page, false);
@@ -321,7 +320,7 @@ export async function blockFB(R, id) {
 
   // ── closing a table ────────────────────────────────────────────────────────────────────────
   {
-    const { w, ctx, page, s } = await scene((w) => seat(w, 27, { orders: [{ status: "served", total: 399 }] }));
+    const { w, ctx, page } = await scene((w) => seat(w, 27, { orders: [{ status: "served", total: 399 }] }));
     let n = 0;
     w.answer("POST", /\/sessions\/[^/]+\/close/, { fn: (req) => { n++; if (!req.body || !req.body.force) return { status: 409, body: { error: "This bill isn't paid yet — close anyway?", reason: "unpaid" } }; return req.body.managerPin ? { status: 200, body: { ok: true } } : { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } }; } });
     await openTable(page, 27);
@@ -367,7 +366,7 @@ export async function blockFB(R, id) {
   }
   // ── the tile a seated party with no order gets, and the box of what is waiting to send ────────
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 30, { members: [{ name: "Ravi" }, { name: "Meera" }] }));
+    const { ctx, page } = await scene((w) => seat(w, 30, { members: [{ name: "Ravi" }, { name: "Meera" }] }));
     await openTable(page, 30);
     const t = await page.evaluate(() => { patchTileFromSlice("30"); return state.summary.tiles["30"]; });
     await check(id(), F, "a seated party with no order yet reads 'Seated · 2 · no orders yet'", H, () => ok(t.state === "seated" && t.label === "Seated · 2" && t.meta === "no orders yet", JSON.stringify(t)));

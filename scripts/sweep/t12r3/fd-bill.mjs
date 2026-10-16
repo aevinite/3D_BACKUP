@@ -227,7 +227,7 @@ export async function blockFD(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 400 }], session: { cust_phone: "9876543210", cust_name: "Asha" } }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 400 }], session: { cust_phone: "9876543210", cust_name: "Asha" } }));
     await openTable(page, 5); await openPay(page);
     const known = await page.evaluate(() => document.querySelector(".pay-cust-known")?.innerText.replace(/\s+/g, " "));
     await check(id(), F, "a table whose guest already gave their number is not asked again: 'already saved for this table · Asha · 9876543210'", H, () => ok(/already saved for this table/.test(known) && /Asha · 9876543210/.test(known), known));
@@ -238,8 +238,7 @@ export async function blockFD(R, id) {
   }
   {
     const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 400 }] }), { tablet_mark_paid: "pin" });
-    let seen = 0;
-    w.answer("POST", /^\/tables\/5\/pay$/, { fn: (r) => (seen++, r.body && r.body.managerPin ? { status: 200, body: { ok: true } } : { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } }) });
+    w.answer("POST", /^\/tables\/5\/pay$/, { fn: (r) => (r.body && r.body.managerPin ? { status: 200, body: { ok: true } } : { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } }) });
     await openTable(page, 5); await openPay(page);
     await page.click('.pay-tip-pick[data-tip-pct="5"]');
     await page.click(".pay-method-btn[data-method='Card']");

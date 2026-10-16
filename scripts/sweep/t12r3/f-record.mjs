@@ -40,7 +40,7 @@ await page.evaluate(async () => {
   const byState = {};
   for (const [n, t] of Object.entries(tiles)) if (t && !byState[t.state || "free"]) byState[t.state || "free"] = n;
   const tries = [...Object.values(byState).map((n) => `/state?table=${encodeURIComponent(n)}`), "/khata/customers", "/banquet-items"];
-  for (const p of tries.filter(Boolean)) { try { await api("GET", p); } catch (e) { /* recorded with its status */ } }
+  for (const p of tries.filter(Boolean)) { try { await api("GET", p); } catch { /* recorded with its status */ } }
 });
 await page.waitForTimeout(1500);
 for (const [k, v] of Object.entries(seen)) writeFileSync(join(OUT, k + ".json"), JSON.stringify(v, null, 1));

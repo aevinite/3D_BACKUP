@@ -28,7 +28,7 @@ export async function blockFC(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { seat(w, 5, { orders: [{ status: "received" }] }); seat(w, 12, { orders: [{}] }); w.summary.my_tables = ["1", "2", "3", "4", "5", "6"]; });
+    const { ctx, page } = await scene((w) => { seat(w, 5, { orders: [{ status: "received" }] }); seat(w, 12, { orders: [{}] }); w.summary.my_tables = ["1", "2", "3", "4", "5", "6"]; });
     await kotMenu(page, 5);
     const r = Object.fromEntries((await rows(page)).map((x) => [x.op, x.on]));
     await check(id(), F, "Merge is greyed when the only other open table is outside the waiter's section", H, () => ok(r.merge === false, JSON.stringify(r)));
@@ -51,7 +51,7 @@ export async function blockFC(R, id) {
     await ctx.close();
   }
   {
-    const { ctx, page } = await scene((w) => { const a = seat(w, 5, { orders: [{}] }); seat(w, 6, {}); w.slices["6"].sessions = []; w.summary.merges = [{ parent_table: "5", child_table: "6" }]; });
+    const { ctx, page } = await scene((w) => { seat(w, 5, { orders: [{}] }); seat(w, 6, {}); w.slices["6"].sessions = []; w.summary.merges = [{ parent_table: "5", child_table: "6" }]; });
     await kotMenu(page, 5);
     const r = (await rows(page)).find((x) => x.op === "shift");
     await check(id(), F, "a merged party's Change table row says 'unmerge first' and is greyed", H, () => ok(r.label === "Change table — unmerge first" && !r.on, JSON.stringify(r)));
@@ -130,7 +130,7 @@ export async function blockFC(R, id) {
     await ctx.close();
   }
   {
-    const { ctx, page, s } = await scene((w) => seat(w, 5, { orders: [{}] }));
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }));
     await openTable(page, 5);
     await page.evaluate(() => renderMergePicker("5", sessionOf("5")));
     const t = await page.evaluate(() => document.querySelector(".shiftgrid").textContent.trim());
@@ -158,7 +158,7 @@ export async function blockFC(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { seat(w, 5, { orders: [{ kot_no: 301 }] }); w.summary.my_tables = ["5"]; });
+    const { ctx, page } = await scene((w) => { seat(w, 5, { orders: [{ kot_no: 301 }] }); w.summary.my_tables = ["5"]; });
     await kotMenu(page, 5); await tap(page, '[data-kotop="movekot"]'); await tap(page, "[data-pickorder]");
     const t = await page.evaluate(() => document.querySelector(".shiftgrid").textContent.trim());
     await check(id(), F, "with no other table in the section, Move a KOT says 'No other table in your section to move this to.'", H, () => ok(t === "No other table in your section to move this to.", t));
@@ -166,7 +166,7 @@ export async function blockFC(R, id) {
     await ctx.close();
   }
   {
-    const { w, ctx, page } = await scene((w) => { seat(w, 5, { orders: [{ payment_status: "paid" }] }); });
+    const { ctx, page } = await scene((w) => { seat(w, 5, { orders: [{ payment_status: "paid" }] }); });
     await openTable(page, 5);
     await page.evaluate(() => renderMoveOrderPicker("5"));
     const t = await page.evaluate(() => document.querySelector(".pactions").textContent.trim());
@@ -220,7 +220,7 @@ export async function blockFC(R, id) {
     await tap(page, "[data-printkitchen]");
     await check(id(), F, "…in the kitchen: one print job for that order, and 'it comes out marked DUPLICATE'", H, async () => ok(await waitToast(page, /KOT #301 sent to the kitchen printer — it comes out marked DUPLICATE\./) && posts(w, /^\/print-jobs/).some((p) => p.body.order_id === orders[0].id), (await toastsNow(page)).join(" | ")));
     await tap(page, '#kotMenuBtn').catch(() => {});
-    await page.evaluate((o) => renderReprintWhere("5", state.data.orders[0]), null);
+    await page.evaluate(() => renderReprintWhere("5", state.data.orders[0]), null);
     await page.waitForSelector("[data-printhere]");
     const doc = await page.evaluate(() => { let got = null; const orig = LFH_BILLDOC.kotDocHtml; LFH_BILLDOC.kotDocHtml = (a) => { got = a; return orig(a); }; document.querySelector("[data-printhere]").click(); LFH_BILLDOC.kotDocHtml = orig; return got && { reprint: got.reprint, kot: got.kot, lines: got.lines.length, frames: document.querySelectorAll("iframe").length }; });
     await check(id(), F, "…Print here builds the shared ticket with the DUPLICATE banner and prints it in a hidden frame", H, async () => ok(doc && doc.reprint === true && doc.kot === 301 && doc.lines === 2 && doc.frames >= 1 && await waitToast(page, /KOT #301 sent to print/), JSON.stringify(doc)));

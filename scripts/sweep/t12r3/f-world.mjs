@@ -61,7 +61,7 @@ function defaultAnswer(w, req) {
         const one = {}; for (const x of t.split(",")) if (w.summary.tiles[x]) one[x] = w.summary.tiles[x];
         const s = w.summary; return { tiles: one, order_count: s.order_count, latest_order_table: s.latest_order_table, calls: s.calls, requests: s.requests, joiners: s.joiners, blocklist: s.blocklist, merges: s.merges };
       }
-      if (q.get("nomenu") === "1") { const { dishes, categories, ...rest } = w.summary; return rest; }
+      if (q.get("nomenu") === "1") { const rest = { ...w.summary }; delete rest.dishes; delete rest.categories; return rest; }
       return w.summary;
     }
     if (p === "/state") return w.slices[q.get("table")] || EMPTY_SLICE();
@@ -82,6 +82,7 @@ export async function openWorld(w, device = {}, { query = "", wait = true } = {}
     viewport: { width: device.width || 1194, height: device.height || 834 },
     hasTouch: device.touch !== false, isMobile: !!device.mobile, deviceScaleFactor: device.dpr || 1,
     colorScheme: device.dark ? "dark" : "light", serviceWorkers: "block",
+    ...(device.tz ? { timezoneId: device.tz } : {}),
   });
   if (device.offline) await ctx.setOffline(true);
   await ctx.route(/\/api\//, async (route) => {
