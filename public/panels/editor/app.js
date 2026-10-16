@@ -326,8 +326,12 @@ const fmtWaited = (ms) => {
   const n = Number(ms || 0);
   if (!n || n < 0) return "";
   if (n < 60000) return "under a minute";
-  if (n < 3600000) return Math.round(n / 60000) + " minutes";
-  if (n < 86400000) return Math.round(n / 3600000) + " hours";
+  // the twin of lib/printBoardWords.ts waitedWords — singular for one, and a rounded-up unit moves up a
+  // step (item 9, 2026-10-16): never "1 minutes", "60 minutes" or "24 hours".
+  const m = Math.round(n / 60000);
+  if (m < 60) return m === 1 ? "1 minute" : m + " minutes";
+  const h = Math.round(n / 3600000);
+  if (h < 24) return h === 1 ? "1 hour" : h + " hours";
   const d = Math.round(n / 86400000);
   return d === 1 ? "a whole day" : d + " days";
 };

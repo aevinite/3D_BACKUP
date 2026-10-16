@@ -232,9 +232,15 @@ export function waitedWords(ms: number | null | undefined): string {
   const n = Number(ms || 0);
   if (!n || n < 0) return "";
   if (n < 60_000) return "under a minute";
-  if (n < 3_600_000) return `${Math.round(n / 60_000)} minutes`;
-  if (n < 86_400_000) return `${Math.round(n / 3_600_000)} hours`;
-  const d = Math.round(n / 86_400_000);
+  // ONE OF A THING IS SINGULAR, AND A ROUNDED-UP UNIT MOVES UP A STEP (item 9, owner 2026-10-16 —
+  // "do all that"). The board read "oldest 1 minutes", "1 hours", and "24 hours" for 23h40m. So the
+  // number is rounded FIRST and the unit chosen from the rounded number: 59m40s is "1 hour", not
+  // "60 minutes"; 23h40m is "a whole day". Twin: fmtWaited in public/panels/editor/app.js.
+  const m = Math.round(n / 60_000);
+  if (m < 60) return m === 1 ? "1 minute" : `${m} minutes`;
+  const h = Math.round(n / 3_600_000);
+  if (h < 24) return h === 1 ? "1 hour" : `${h} hours`;
+  const d = Math.max(1, Math.round(n / 86_400_000));
   return d === 1 ? "a whole day" : `${d} days`;
 }
 
@@ -243,9 +249,12 @@ export function waitedShort(ms: number | null | undefined): string {
   const n = Number(ms || 0);
   if (!n || n < 0) return "";
   if (n < 60_000) return "under a minute";
-  if (n < 3_600_000) return `${Math.round(n / 60_000)} min`;
-  if (n < 86_400_000) return `${Math.round(n / 3_600_000)}h`;
-  return `${Math.round(n / 86_400_000)}d`;
+  // the same rounding cascade as waitedWords: "60 min" is "1h", "24h" is "1d"
+  const m = Math.round(n / 60_000);
+  if (m < 60) return `${m} min`;
+  const h = Math.round(n / 3_600_000);
+  if (h < 24) return `${h}h`;
+  return `${Math.max(1, Math.round(n / 86_400_000))}d`;
 }
 
 /**

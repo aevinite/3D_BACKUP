@@ -2276,6 +2276,26 @@ for (const f of ["scripts/verify-printing-sweep.mjs", "scripts/verify-print-spee
     "the print computer's bill has no logo while every panel's copy does");
 }
 
+// ── HOW LONG SOMETHING HAS WAITED, SAID THE SAME WAY ON BOTH PRINTING SCREENS (item 9, 2026-10-16) ──
+// The admin console reads lib/printBoardWords.ts; the manager panel keeps a hand-written twin
+// (fmtWaited). Both run over every boundary here, and must agree and never say "1 minutes", "1 hours",
+// "60 minutes" or "24 hours".
+{
+  const W = await import("../lib/printBoardWords.ts");
+  const src = read("public/panels/editor/app.js");
+  const body = (src.match(/const fmtWaited = \(ms\) => \{[\s\S]*?\n\};/) || [""])[0];
+  let fmtWaited = null;
+  try { fmtWaited = new Function(body + "\nreturn fmtWaited;")(); } catch { /* reported below */ }
+  const MS = [0, 30e3, 59_999, 60e3, 89_999, 90e3, 119_999, 600e3, 3_569_999, 3_570_000, 3_600_000, 5_399_999, 5_400_000,
+    7_200_000, 84_599_999, 84_600_000, 86_400_000, 129_599_999, 129_600_000, 172_800_000, 76 * 3_600_000];
+  const said = MS.map((ms) => [W.waitedWords(ms), fmtWaited ? fmtWaited(ms) : "?"]);
+  const differ = said.filter(([a, b]) => a !== b);
+  const clumsy = said.flat().filter((t) => /^1 (minutes|hours)$|^60 minutes$|^24 hours$/.test(t));
+  check(!!fmtWaited && differ.length === 0 && clumsy.length === 0 && W.waitedWords(60e3) === "1 minute" && W.waitedWords(84_600_000) === "a whole day",
+    "the waiting time reads the same on the admin console and the manager panel, and never '1 minutes' / '24 hours'",
+    `waiting-time wording: ${!fmtWaited ? "fmtWaited not found in the manager panel" : differ.length ? "the two screens differ: " + JSON.stringify(differ.slice(0, 3)) : "clumsy: " + clumsy.join(", ")}`);
+}
+
 if (fails.length) {
   console.log(`\n✗ verify:print-helper — ${fails.length} check(s) failed:`);
   for (const f of fails) console.log("   · " + f);
