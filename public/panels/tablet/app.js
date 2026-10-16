@@ -4248,7 +4248,11 @@ async function renderLoyalty(ov, t, phone) {
   const min = Number(st.min_redeem) || 0;
   const per = (Number(st.point_value_paise) || 100) / 100;
   const worth = Math.round(bal * per);
-  const canSpend = bal >= min && min > 0 ? true : bal > 0;
+  // THE MINIMUM IS A MINIMUM (sweep #10 T12 round 3, item 2). This read `bal >= min && min > 0 ? true
+  // : bal > 0`, which is true for ANY balance above zero — so a guest with 30 points under a 100-point
+  // minimum was offered "Use ₹15 off" (a spend the rules forbid), and the "N more to use them" line
+  // below could never show. The manager panel's copy of this sheet has the right rule; this is it.
+  const canSpend = min > 0 ? bal >= min : bal > 0;
   el.style.display = "";
   el.innerHTML = `<span style="font-weight:700;color:#b45309">⭐ ${bal} point${bal === 1 ? "" : "s"}</span>`
     + `<span style="color:var(--muted)"> · worth ₹${worth}</span>`

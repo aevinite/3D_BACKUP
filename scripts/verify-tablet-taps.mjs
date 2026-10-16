@@ -1561,6 +1561,16 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── LOYALTY POINTS UNDER THE MINIMUM ARE NOT OFFERED (sweep #10 T12 round 3, item 2) ─────────────────
+{
+  const i = src.indexOf("async function renderLoyalty("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: the pay sheet offers 'Use ₹X off' only once the guest has the restaurant's minimum points",
+    /const canSpend = min > 0 \? bal >= min : bal > 0;/.test(body),
+    `${TABLET} renderLoyalty: the same rule as the manager panel — below the minimum it says how many more are needed.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");
