@@ -112,3 +112,48 @@ which has no service worker (green on the production build).
 **For other terminals:** migrations 423/424 are on the dev DB only — AV live needs the ask-first release.
 Hook failures seen in the shared folder belong to other terminals' work (t27r2 retired admin routes,
 verify-guest-menu-switch preflight, t11s10 run.mjs exit).
+
+## Round 4 (2026-10-16) — owner picked 41 and 40; the full re-test (re-planned again) found 42–47
+
+Owner's words: *"do 41 and for 40 one of the session is already doing making AV live up to date. So
+coordinate with it … do a full bug test … Replan whole test. Don't use the previous one."*
+
+| # | Where | What was wrong | Status |
+|---|---|---|---|
+| 40 | AV live | migrations 423/424 + PR #1526 not on the client site | done by T12 (backup-menu-17): AV live 3cffa7e0 = backup a0ba0a91; applier ✓ 423/424; the function-body read waits on the owner's own command |
+| 41 | bill → each dish's 🗑 | on a phone under 380 px the row was too NARROW (not short): the bin's 44 px box squeezed to 25 px | fixed — never shrinks; controls start under the photo < 380 px; 5 px gaps < 340 px |
+| 42 | backend only | Postgres `\d` matched ٤ ४ ４ (ICU collation) and `::int` raised 22P02 in both guest functions | fixed — `[0-9]`, migration 425 |
+| 43 | bill + bell → table box | a number pad typing ٤ / ४ / ૪ / ４ left the box empty (every key thrown away) | fixed — lib/digits.ts, all 770 Unicode digits |
+| 44 | backend only | qty 1.5 / "2.0" / "1e3" / 3e9 made the database raise → door said "busy" → phone re-sent forever | fixed — door refuses as bad_body |
+| 45 | backend only | a waiter call for a restaurant that does not exist failed its foreign key → "busy" → re-sent | fixed — unknown_restaurant, migration 425 |
+| 46 | bell popup, dish popup, bill | keyboard focus stayed on the page behind; Tab walked out; Escape dropped the focus | fixed — lib/dialogFocus.ts |
+| 47 | menu → Add → bill | storage full / blocked: "Caffè Latte added" but the bill was empty — no order possible | fixed — lib/tenantStorage.ts keeps refused writes in memory |
+
+**Test, re-planned from zero (scripts/sweep/t3s10/r4/):** A real HTTP to the four doors (~250 requests) ·
+B the database's own answers, every call in a rolled-back transaction (nothing written) · C 14 random
+baskets: the bill on screen = what the database would store, to the rupee as the printed bill rounds it
+(orders caught in the browser, priced in a rolled-back transaction) · D the same tap twice and phones at
+once (the only real writes: 9 orders + 3 calls on tables 22–23, retired by id, tickets dismissed) · E the
+three menu doors + another restaurant · F WebKit (iPhone) — Firefox would not start on this Mac · G axe-core
+on 6 screens × 2 skins + keyboard focus · H six languages · I hostile phone storage · J 40 open/close rounds
+and a 3-minute idle menu · K a real rating, changed, then deleted · M the two new helpers in memory.
+
+**Looked like faults, are not:** the bill shows whole rupees (₹95) while the database keeps paise (₹94.50) —
+the printed bill rounds the same way (billRows + a Round off row), so they agree · a repeat request
+answered with `duplicate: true` is the idempotency layer's own marker.
+
+**Own slips this round:** check B13 called the order function inside an UPDATE's WHERE, so Postgres ran it
+once per row: thousands of rolled-back orders and table 27 held for ~2 minutes, twice (nothing stored) ·
+area D's re-run tripped table 23's waiter-call limit; its limit record was deleted by id and D now uses
+separate tables and removes any record it causes · M09 was first written so it could only pass; rewritten ·
+my first diagnosis of item 41 (rows too short) was wrong — they were too narrow.
+
+**For other terminals (not changed here):** lfh_banquet_bill_create, lfh_staff_merge_tables,
+lfh_staff_move_order, lfh_staff_move_order_item and lfh_staff_shift_table test a table with `'^\d+$'`
+then cast — the same ٤ / overflow error as item 42 (floor / banquet) · during one run French House's bill
+read GST 12% for a moment while its settings say 5% — another suite borrowing settings (T27 item 30
+area) · the menu's QR table reading (components/MenuView.tsx) and the join gate (components/SessionGate.tsx)
+still drop non-0–9 digits (item 43's cause, their screens) · T12 item 10 made lib/idempotency.ts import two
+helpers from lib/clash; round 3's in-memory suite was red on main until its stand-in learned them (fixed
+here) · shared-folder hook failures: t27r2 retired admin routes, verify-guest-menu-switch preflight, t11s10
+run.mjs exit.
