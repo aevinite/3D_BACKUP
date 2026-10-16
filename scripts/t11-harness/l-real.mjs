@@ -1,6 +1,6 @@
 // SWEEP #10 T11 ROUND 2 · THE KITCHEN SCREEN ON THE REAL APP — P180979–P180999.
 // The real server on this terminal's port (T11_BASE, default :4411), French House's kitchen login (signed in ONCE,
-// scripts/sweep/login.mjs caches it), the real dev database. ONE test ticket is written — table 29 (reserved in
+// scripts/sweep/login.mjs caches it), the real dev database. ONE test ticket is written — table 24 (reserved in
 // scripts/sweep/fixtureTables.mjs), placed_by "sweep10-t11-r2" — and it is CANCELLED then binned by its own id in a
 // finally and on SIGINT/SIGTERM (a hard delete is refused by the billing guardrail, mig 331: a sale is never made to
 // disappear). Nothing else is changed; Aangan is never written to.
@@ -13,7 +13,7 @@ await requireUp(BASE, "the kitchen screen's real-app checks");
 const rows = [];
 const k = (id, file, check, ok, note = "") => { const pass = ok === true; rows.push({ id, file, check, how: "LIVE — the real app on " + BASE + ", French House's kitchen login, the real dev database", mark: pass ? "✅" : "❌", note: String(note).slice(0, 220) }); console.log(`${pass ? "✅" : "❌"} ${id}  ${check}${!pass && note ? "  — " + String(note).slice(0, 200) : ""}`); };
 const APP = "public/panels/kitchen/app.js", ROUTE = "app/api/kitchen/[...path]/route.ts";
-const TABLE = "29";
+const TABLE = "24";   // its own table (scripts/sweep/fixtureTables.mjs) — 29 is round 1's new-d-live.mjs
 let order = null, dishes = [];
 async function cleanup() {
   if (!order) return;
