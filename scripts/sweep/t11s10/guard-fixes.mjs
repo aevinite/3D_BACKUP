@@ -216,3 +216,13 @@ row("P180575", "item 11 · the light skin's SOLD OUT word uses the deep red, not
   hasRe(CSSC_(), /html\[data-theme="light"\] \.btn\.danger \{ color: #b91c1c; \}/));
 row("P180576", "item 11 · a dish's toggle never shrinks beside a long name; the name wraps instead", () =>
   hasRe(CSSC_(), /\.dish-row \.btn \{ flex-shrink: 0; white-space: nowrap; \}/) && hasRe(CSSC_(), /\.dish-row \.dtitle \{ min-width: 0;/));
+
+// ══ ROUND 2 · ITEM 13 · a failed step on the kitchen route is a failure, never { ok: true } — P180834–P180836 ══
+row("P180834", "item 13 · ALL READY's dish update is checked (must), so a failure is never reported as success", () =>
+  hasRe(ROUTEC(), /must\(await sb\.from\("order_items"\)\.update\(\{ status: "ready" \}\)\.eq\("order_id", b\)\.eq\("restaurant_id", rid\)\.neq\("status", "served"\)\);/));
+row("P180835", "item 13 · the ✓'s two pre-reads and its order rollup are checked (a blip answers busy, never skips a protection)", () => {
+  const b = branch('if (a === "items" && c === "status")');
+  return (/const own = must\(await sb\.from\("order_items"\)/.test(b) && /const ord = must\(await sb\.from\("orders"\)/.test(b) && /must\(await sb\.from\("orders"\)\.update\(\{ status: overall \}\)/.test(b)) || "an unchecked step is back";
+});
+row("P180836", "item 13 · the delivery accept-gate's permission read is checked, so a blip is never a false 'not allowed'", () =>
+  hasRe(branch('if (a === "platform" && c === "status")'), /data: must\(await sb\.from\("settings"\)\.select\("kitchen_can_accept_platform"\)/));

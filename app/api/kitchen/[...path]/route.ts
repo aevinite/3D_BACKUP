@@ -625,7 +625,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
-      await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
+      // must(): A WRITE THAT FAILED IS NOT A SUCCESS (sweep #10 T11 round 2, item 13). Unchecked, a failed dish
+      // update still answered { ok: true } — the ticket slid into Ready on the cook's screen, the order JSON said
+      // ready, and every dish row (what the floor and the waiter read) still said cooking. Now the cook is told,
+      // and a busy database answers busy, so the outbox keeps the tap and sends it again (it is idempotent).
+      must(await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served"));
       await logAction("kitchen", "order_ready", { ...adminMark, order_id: b, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
@@ -712,7 +716,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
       // Item 12 (sweep #10 T10 round 2): ask the dish's ORDER first — this handler rewrites that order's
       // status from its dishes below, so on a cancelled ticket it would quietly revive it.
-      { const own = (await sb.from("order_items").select("order_id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as { order_id?: string | null; status?: string | null } | null;
+      // must() on both pre-reads (item 13): unchecked, a read that FAILED looked like "no such row", and the
+      // served / cancelled protections below were silently skipped for exactly the request that hit the blip.
+      { const own = must(await sb.from("order_items").select("order_id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { order_id?: string | null; status?: string | null } | null;
         // A DISH THE WAITER HAS SERVED STAYS SERVED (sweep #10 T11, item 1). The kitchen's ✓ and its
         // take-back both land here, and neither may un-serve: a ✓ tapped a second after the waiter
         // carried the plate out, or replayed from the offline queue later, used to write 'ready' over
@@ -721,7 +727,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // same rule. Un-serving is the waiter tablet's own explicit "↩ Send back to kitchen".
         if (own && own.status === "served") return err(SERVED_DISH_MSG, 409);
         if (own && own.order_id) {
-          const ord = (await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()).data as { status?: string } | null;
+          const ord = must(await sb.from("orders").select("status").eq("id", own.order_id).eq("restaurant_id", rid).maybeSingle()) as { status?: string } | null;
           if (ord && ord.status === "cancelled") return err("That ticket was cancelled — restore it first if it should go back to the kitchen.", 409);
         } }
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id"));
@@ -739,7 +745,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
         const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
-        await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
+        must(await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid));   // item 13: the rollup failing is a failure
       }
       // Moving ONE dish along is the kitchen's most frequent action and it was the only one here with
       // no record — so "who marked this ready, and when?" had no answer, and a cook's own Activity
@@ -765,7 +771,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // status==='accepted', and the RPC has no from-state guard). Once past 'new', cooking it
       // through is the kitchen's job. The UI already hides the button; this is belt-and-braces.
       if (owns.status === "new") {
-        const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle();
+        // must() (item 13): a FAILED read here used to look like "the kitchen may not accept" — a 403, which the
+        // outbox treats as final, so a database blip dropped the cook's tap with a false reason. Busy is busy.
+        const s = { data: must(await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle()) as { kitchen_can_accept_platform?: boolean } | null };
         if (!(s.data && s.data.kitchen_can_accept_platform)) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }

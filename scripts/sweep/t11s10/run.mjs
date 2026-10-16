@@ -11,4 +11,4 @@ for (const b of blocks) await import("./" + files[b]);
 const only = arg("--only") ? arg("--only").split(",") : null;
 const rows = await runAll({ ledger: process.argv.includes("--ledger"), only, quiet: process.argv.includes("--quiet") });
 await closeAll();
-process.exit(rows.some((r) => r.mark === "❌") ? 1 : 0);
+process.stdout.write("", () => process.exit(rows.some((r) => r.mark === "❌") ? 1 : 0));   // flush first (verify-guards-alive)
