@@ -298,7 +298,14 @@ check(
 // The veg/non-veg mark must mean the same thing on the grid and on the dish page.
 check(
   "the dish page hides the veg/non-veg mark on a single-diet menu, exactly as the grid does",
-  /const dietMeaningful =/.test(src[ITEM_CLIENT]) && /\{showDiet && \(/.test(src[ITEM_CLIENT]) &&
+  // A FACT, NOT A NAME (sweep #10 T2, 2026-10-16 — item 6). This used to ask only that a line
+  // starting `const dietMeaningful =` existed and that `{showDiet && (` was drawn — so
+  // `const dietMeaningful = true;`, or a showDiet that simply stopped using it, both stayed GREEN.
+  // Broken both ways on purpose and measured: exit 0. It now asks for the derivation itself (every
+  // dish on one side of the line → not meaningful) and that showDiet is built from it.
+  /const dietMeaningful =\s*allItems\.length === 0 \|\| !\(allItems\.every\(\(it\) => it\.veg\) \|\| allItems\.every\(\(it\) => !it\.veg\)\);/.test(src[ITEM_CLIENT]) &&
+    /const showDiet = !!features\.diet_filter && dietMeaningful;/.test(src[ITEM_CLIENT]) &&
+    /\{showDiet && \(/.test(src[ITEM_CLIENT]) &&
     /const dietMeaningful =/.test(src[MENU_VIEW]),
   `${ITEM_CLIENT} → derive showDiet the same way ${MENU_VIEW} derives dietShown, or a pure-veg ` +
     "restaurant shows no mark in the grid and one the moment a dish is opened."
