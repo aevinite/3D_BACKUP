@@ -10,8 +10,8 @@ const GROUPS = [["FA", "./fa-floor.mjs", "blockFA"], ["FB", "./fb-table.mjs", "b
   ["FE", "./fe-order.mjs", "blockFE"], ["FF", "./ff-xray.mjs", "blockFF"], ["FG", "./fg-shell.mjs", "blockFG"], ["FH", "./fh-banquet.mjs", "blockFH"], ["FI", "./fi-split.mjs", "blockFI"], ["FJ", "./fj-rest.mjs", "blockFJ"], ["FT", "./ft-host.mjs", "blockFT"], ["FK", "./fk-mut.mjs", "blockFK"]];
 // FJ (the coverage top-up, written after the first measurement) gets a narrower range so the host-page
 // rows (band T, P213961–P213975) and the mutation rows (band M, P213976–P213999) keep theirs.
-// P213987–P213991 = item 25's rows, P213992–P213999 = the mutation passes (written by hand in the ledger).
-const RANGE = { FJ: [213901, 213935], FK: [213936, 213975], FT: [213976, 213986] };
+// P213988–P213992 = item 25's rows, P213993–P213999 = the mutation passes (written by hand in the ledger).
+const RANGE = { FJ: [213901, 213935], FK: [213936, 213976], FT: [213977, 213987] };
 const want = (() => { const i = process.argv.indexOf("--groups"); return i > 0 ? new Set(process.argv[i + 1].split(",")) : null; })();
 const R = makeRunner("T12 round 3 · band F — the fixture world");
 const bail = process.argv.includes("--bail");

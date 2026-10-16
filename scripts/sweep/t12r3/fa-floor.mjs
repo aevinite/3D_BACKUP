@@ -54,7 +54,7 @@ export async function blockFA(R, id) {
     await ctx.close();
   }
   {
-    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 399 }] }));
+    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served", total: 399 }] }));
     const has = await page.evaluate(() => !!document.querySelector('.tile[data-t="5"] .tpay'));
     await check(id(), F, "a served-but-unpaid tile carries 💳", H, () => ok(has));
     await quick(page, "tpay", 5); await page.waitForSelector(".pay-overlay");
@@ -62,6 +62,8 @@ export async function blockFA(R, id) {
     // From the FLOOR the sheet names no bill number (the tile's summary carries none) — inside the table
     // it says "#41". Not wrong, only less; recorded in the report as an observation, not a fault.
     await check(id(), F, "…💳 opens the same pay sheet as the table, for that table's bill, without opening the table", H, async () => ok(/^Mark bill (#41 )?paid for table 5$/.test(head) && await page.evaluate(() => state.table === null), head));
+    await page.click(".pay-method-btn[data-method='Cash']"); await settle(page, 800);
+    await check(id(), F, "…and paying from it settles that table's bill (Cash), the floor never opening the table", H, async () => ok(w.sent("POST", /^\/tables\/5\/pay$/).some((r) => r.body.payment_method === "Cash") && await page.evaluate(() => state.table === null)));
     await ctx.close();
   }
   {

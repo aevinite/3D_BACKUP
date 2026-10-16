@@ -4,7 +4,7 @@
 // undefined from a falsy reader, a repaint the next refresh does anyway) are equivalent and recorded as
 // such in the round-3 report instead. Fixture world: nothing is written anywhere.
 import { ok } from "../t12s10/lib.mjs";
-import { freshWorld, openWorld, seat, openTable, tap, settle } from "./f-world.mjs";
+import { freshWorld, openWorld, seat, openTable, tap, answerConfirm, typePin, waitToast, toastsNow, settle } from "./f-world.mjs";
 
 const F = "public/panels/tablet/app.js";
 const H = "FIXTURE — aimed at a mutation survivor (nothing written)";
@@ -17,7 +17,7 @@ const scene = async (build, settings = {}, device = {}, who) => {
 };
 const posts = (w, re) => w.sent("POST", re);
 
-export async function blockFK(R, id) { await blockFK1(R, id); await blockFK2(R, id); await blockFK3(R, id); }
+export async function blockFK(R, id) { await blockFK1(R, id); await blockFK2(R, id); await blockFK3(R, id); await blockFK4(R, id); }
 async function blockFK1(R, id) {
   const { check } = R;
   {
@@ -326,6 +326,35 @@ async function blockFK3(R, id) {
     await check(id(), F, "cancelling the pay-later person sheet answers 'nobody' at once (the split screen and the pay flow never wait forever)", H, () => ok(r.answered && r.v === null, JSON.stringify(r)));
     const r2 = await page.evaluate(async () => { const p = openKhataPersonSheet(100, "5"); await new Promise((x) => setTimeout(x, 200)); document.querySelector(".kp-close").click(); return await Promise.race([p.then((v) => ({ answered: true, v })), new Promise((x) => setTimeout(() => x({ answered: false }), 2000))]); });
     await check(id(), F, "…and so does its ✕", H, () => ok(r2.answered && r2.v === null, JSON.stringify(r2)));
+    await ctx.close();
+  }
+}
+
+// ── THE LAST LINES COVERAGE STILL LISTED (the final measured run, 99.1%) ──────────────────────────────
+async function blockFK4(R, id) {
+  const { check } = R;
+  {
+    const { ctx, page } = await scene((w) => seat(w, 5, { orders: [{ status: "served" }] }), { tablet_invoice: "off" }, {}, { higherView: true });
+    await openTable(page, 5);
+    await page.hover("#genInvoiceBtn"); await settle(page, 150);
+    const t = await page.evaluate(() => document.getElementById("genInvoiceBtn").title);
+    await check(id(), F, "the admin hovering the tinted invoice control is told the RULE (a waiter never issues it), not 'a switch is off'", H, () => ok(/^Only a manager issues the invoice — a waiter never can, on any restaurant\./.test(t), t));
+    await ctx.close();
+  }
+  {
+    const { w, ctx, page, items } = await scene((w) => seat(w, 5, { orders: [{ status: "preparing" }] }));
+    w.answer("POST", /\/items\/[^/]+\/delete/, { status: 400, body: { error: "That dish is already served." } });
+    await openTable(page, 5);
+    await page.click(`[data-del-item="${items[0].id}"]`); await answerConfirm(page, true);
+    await check(id(), F, "a plain refusal through the shared action says 'Failed:' and the server's reason", H, async () => ok(await waitToast(page, /^Failed: That dish is already served\.$/), (await toastsNow(page)).join(" | ")));
+    await ctx.close();
+  }
+  {
+    const { w, ctx, page } = await scene((w) => seat(w, 5, { orders: [{}] }), { table_tags_allowed: true, tablet_table_tags: "pin" });
+    w.answer("POST", /\/tag$/, { fn: (r) => r.body && r.body.managerPin ? { status: 400, body: { error: "Table types are switched off." } } : { status: 403, body: { error: "A manager PIN is required for this.", needPin: true } } });
+    await openTable(page, 5); await tap(page, "#tagTable"); await page.waitForSelector(".tag-pick");
+    await page.click('.tag-pick[data-tag="vip"]'); await typePin(page, "2468");
+    await check(id(), F, "a table type whose PIN is right but is then refused is put back and says why", H, async () => ok(await waitToast(page, /^Failed: Table types are switched off\.$/) && await page.evaluate(() => (state.summary.tiles["5"].tag || "") === ""), (await toastsNow(page)).join(" | ")));
     await ctx.close();
   }
 }
