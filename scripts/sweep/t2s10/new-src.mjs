@@ -3,7 +3,7 @@
 // AR at 40%, the reveal curtain, mig 418 "my review"), at the thinnest files by subject, and at the
 // §1b questions: does every request that signs a private file need the right login, and is each
 // restaurant's data read only for that restaurant?   node scripts/sweep/t2s10/new-src.mjs
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { check, run, idGen, F, code, raw, ROOT } from "./lib.mjs";
 const id = idGen(171001);
@@ -11,7 +11,6 @@ const S = Object.fromEntries(Object.entries(F).map(([k, p]) => [k, /\.json$/.tes
 const R = Object.fromEntries(Object.entries(F).map(([k, p]) => [k, raw(p)]));
 const has = (s, ...b) => b.every((x) => s.includes(x));
 const C = (file, what, how, fn) => check(id(), file, what, how, fn);
-const fileOf = { viewer: F.viewer, item: F.item, pmv: F.pmv, viewPage: F.viewPage, itemPage: F.itemPage, itemPageR: F.itemPageR, toast: F.toast, media: F.media };
 const V = S.viewer, I = S.item, P = S.pmv;
 
 // ── A · the 3D screen since 2026-09-20 (mig 402 tags, AR at 40%, the curtain) ─────────────────────

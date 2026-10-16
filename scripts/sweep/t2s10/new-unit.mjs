@@ -3,7 +3,7 @@
 // driven, never in a dish/3D sweep before), lib/modelWatchlist.ts (13 / 1) and lib/modelLoader.ts —
 // exercised IN PROCESS: the real file, bundled, with only the network and the database stood in.
 //   node scripts/sweep/t2s10/new-unit.mjs
-import { check, run, assert, idGen, F } from "./lib.mjs";
+import { check, run, idGen, F } from "./lib.mjs";
 import { load } from "./bundle.mjs";
 const id = idGen(171201);
 const ML = F.media, WL = F.watch, LD = F.loader;

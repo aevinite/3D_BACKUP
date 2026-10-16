@@ -2,7 +2,7 @@
 // ids come from this terminal's PRE-ALLOCATED block P171001–P172000 and nowhere else; the allocator
 // throws rather than leave it. Results land in node_modules/.cache/t2s10/<tag>.json; ledger.mjs
 // turns them into rows.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
