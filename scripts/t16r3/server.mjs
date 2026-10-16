@@ -22,6 +22,13 @@ export function setApi(fn) { api = fn; log.length = 0; }
 // at /sw.js) — so the REAL helper that loads it can be driven end to end.
 const statics = new Map();
 export function file(path, type, body) { statics.set(path, { type, body }); }
+// The stand-in OFFLINE WORKER, shared by every family that loads swreg.js: it takes charge at once and
+// echoes every message back to the page, so a check can read exactly what swreg.js told it.
+file("/sw.js", "application/javascript", `
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("message", (e) => { e.waitUntil(self.clients.matchAll({ includeUncontrolled: true }).then((cs) => cs.forEach((c) => c.postMessage({ echo: e.data })))); if (e.data && e.data.type === "LFH_SW_KILL") self.registration.unregister(); });
+`);
 export function page(name, { scripts = [], body = "", pre = "", head = "", after = "" } = {}) {
   pages.set(name, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script>${pre}</script>${head}</head><body>${body}` +
     scripts.map((s) => `<script src="/panels/${s}"></script>`).join("") + (after ? `<script>${after}</script>` : "") + "</body></html>");

@@ -165,8 +165,7 @@ C("P", "issue-raise.js", "with a signal the Add photo button is ON; a voice note
 });
 
 // ── the swipe hint and the offline-layer installer, loaded late or on a clipped row ───────────
-// (Its own stand-in worker, so this family runs on its own — family J defines the same address.)
-file("/sw.js", "application/javascript", "self.addEventListener('install', () => self.skipWaiting());");
+// (The stand-in offline worker at /sw.js is the shared one in server.mjs.)
 C("P", "swipehint.js + swreg.js", "a row that clips its overflow (cannot scroll) promises nothing even when content is cut; both helpers still start when loaded after the page finished loading", async () => {
   const P = page("p-late", { body: '<div id="clip" data-swipe-hint style="width:200px;overflow:hidden;white-space:nowrap">' + "<span style='display:inline-block;width:90px'>x</span>".repeat(6) + "</div>", after: "window.addEventListener('load',()=>setTimeout(()=>{for(const f of ['swipehint.js','swreg.js']){const s=document.createElement('script');s.src='/panels/'+f;document.body.appendChild(s);}},200));" });
   const h = await open(P); const p = h.page;

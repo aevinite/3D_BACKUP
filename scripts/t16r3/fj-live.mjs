@@ -183,11 +183,7 @@ C("J", "connbadge.js", "the Connection panel lists every waiting change by name 
 });
 
 // ── the offline layer's installer ─────────────────────────────────────────────────────────────
-file("/sw.js", "application/javascript", `
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
-self.addEventListener("message", (e) => { e.waitUntil(self.clients.matchAll({ includeUncontrolled: true }).then((cs) => cs.forEach((c) => c.postMessage({ echo: e.data })))); if (e.data && e.data.type === "LFH_SW_KILL") self.registration.unregister(); });
-`);
+// (The stand-in offline worker at /sw.js lives in server.mjs, shared with family P.)
 const SWP = page("j-sw", { head: '<link rel="stylesheet" href="/panels/editor/style.css">', scripts: ["swreg.js"], pre: "window.__got=[];navigator.serviceWorker&&navigator.serviceWorker.addEventListener('message',(e)=>window.__got.push(e.data.echo));" });
 C("J", "swreg.js", "installs the offline layer once, for the whole site; once it is in charge it is told to keep this panel's page and its own files — and nothing from another site", async () => {
   const h = await open(SWP); const p = h.page;

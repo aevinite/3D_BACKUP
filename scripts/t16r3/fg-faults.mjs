@@ -127,4 +127,5 @@ for (const [role, dir] of PANELS) for (const [name, sc] of Object.entries(SCEN))
     return ok(!problems.length, problems.join(" · ") || `${h.seen.gets.length} reads (${h.seen.gets.filter((g) => g.f !== "ok").length} faulted), back in ${rec.secs}s, ${h.seen.writes} writes kept in the browser`);
   } finally { for (const r of fault.held.splice(0)) r.abort().catch(() => {}); await h.close(); }
 });
-C("G", "browser", "close the browser", async () => { if (browser) await browser.close(); return ok(true, ""); });
+// (Sets it back to null, so family H — run in the same process — opens a fresh one.)
+C("G", "browser", "close the browser", async () => { if (browser) await browser.close(); browser = null; return ok(true, ""); });
