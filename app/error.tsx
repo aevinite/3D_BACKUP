@@ -138,9 +138,13 @@ export default function AppError({ error, reset, retry }: { error: Error & { dig
           // `retry()` refreshes from the server and re-draws (see the note above AppError); `reset()`
           // alone only re-draws. A file that no longer exists under its name needs a real reload.
           onClick={() => (isStaleCodeError(error?.message) ? window.location.reload() : again())}
+          // The button wears the device's own two system colours, swapped — never a restaurant's.
+          // It was #d4a574, restaurant #1's gold (app/globals.css --accent), so every restaurant's
+          // diners met French House's colour on this screen; the boundary cannot know whose menu
+          // failed, which is the whole reason it is unbranded (sweep #10 T1, item 5).
           style={{
-            background: "#d4a574",
-            color: "#1a1a1a",
+            background: "CanvasText",
+            color: "Canvas",
             border: 0,
             borderRadius: 10,
             padding: "11px 22px",

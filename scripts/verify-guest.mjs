@@ -549,6 +549,14 @@ check("P170012", "both restaurant lookups refuse an address no restaurant can ha
   const ok1 = before(g, '.rpc("lfh_guest_restaurant"'), ok2 = before(m, '.rpc("lfh_slug_moved"');
   return { ok: shape && ok1 && ok2, note: `shape rule=${shape} restaurant lookup=${ok1} moved lookup=${ok2}` };
 });
+// item 5 (sweep #10 T1): the two error screens cannot know whose menu failed, so they are unbranded —
+// their "Try again" button wore #d4a574, restaurant #1's gold, on every restaurant's error screen.
+check("P170014", "neither error screen paints anything in a restaurant's colour (no #1 gold, no accent)", () => {
+  const e = code("app/error.tsx") || "", g = code("app/global-error.tsx") || "";
+  const gold = /#d4a574|rgba?\(\s*212\s*,\s*165\s*,\s*116|--accent/i;
+  const sysOnly = !/#[0-9a-f]{3,8}\b|rgba?\(/i.test(e);   // app/error.tsx uses ONLY the device's system colours
+  return { ok: !!e && !!g && !gold.test(e) && !gold.test(g) && sysOnly, note: `error.tsx gold=${gold.test(e)} system-colours-only=${sysOnly} · global-error.tsx gold=${gold.test(g)}` };
+});
 
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a

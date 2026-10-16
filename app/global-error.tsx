@@ -53,7 +53,9 @@ export default function GlobalError({ error, reset, retry }: { error: Error & { 
           <button
             // A missing file is not cured by re-rendering the same tree; only a reload gets fresh names.
             onClick={() => (isStaleCodeError(error?.message) ? window.location.reload() : (retry || reset)())}
-            style={{ background: "#d4a574", color: "#1a1a1a", border: 0, borderRadius: 10, padding: "10px 20px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
+            // Light on this screen's fixed dark ground — never #d4a574, restaurant #1's gold, which every
+            // restaurant's visitors used to meet here (sweep #10 T1, item 5; same fix as app/error.tsx).
+            style={{ background: "#f4f4f5", color: "#0b0b0c", border: 0, borderRadius: 10, padding: "10px 20px", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
             Try again
           </button>
