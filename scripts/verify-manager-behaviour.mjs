@@ -721,7 +721,24 @@ async function clashInWords() {
     : bad("the menu editor's Save no longer words a clash");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets, clashInWords];
+// ── S · AN ORDER HANDED BACK SHOWS EVERYTHING IT STILL CARRIES (sweep #10 T7, 2026-10-16) ─────────
+// A refused order re-opens the builder with `restore`: the lines, the allergens, the held discount
+// and the kitchen note all come back. The note came back into the VARIABLE but the box was drawn
+// empty, so the screen said "no note" while the note rode along on the next Send. Every piece of
+// `restore` the builder reads must be drawn: the note box is filled from orderNote at build.
+async function handBackShowsAll() {
+  console.log("\nS. an order handed back shows everything it still carries");
+  const app = src("public/panels/editor/app.js");
+  const to = app.slice(app.indexOf("\nfunction openTakeOrder("), app.indexOf("\nfunction openShiftPicker("));
+  /orderNote = rs\.note \|\| "";/.test(to)
+    ? ok("the refused order's kitchen note is put back (restore.note)")
+    : bad("restore no longer puts the kitchen note back — re-point this check");
+  /const noteBox = wrap\.querySelector\("\.to-note"\);\s*\n\s*noteBox\.value = orderNote;/.test(to)
+    ? ok("…and the note box is DRAWN with it, so what is on screen is what will be sent")
+    : bad("the note box is drawn empty over a note that will still be sent", "set .to-note's value from orderNote when the builder is built");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets, clashInWords, handBackShowsAll];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

@@ -13679,7 +13679,12 @@ function openTakeOrder(table, rerender, opts = {}) {
   }
   const search = wrap.querySelector(".to-search");
   search.oninput = () => { q = search.value; paintList(); };
-  wrap.querySelector(".to-note").oninput = (e) => { orderNote = e.target.value; };
+  // THE NOTE THAT CAME BACK IS SHOWN (sweep #10 T7, item 9). A refused order re-opens this builder
+  // with `restore`, and orderNote was put back — but the box was drawn empty, so the screen said
+  // "no note for the kitchen" while the old one still rode along on the next Send, unseen.
+  const noteBox = wrap.querySelector(".to-note");
+  noteBox.value = orderNote;
+  noteBox.oninput = (e) => { orderNote = e.target.value; };
   // The whole-order row. A TYPED allergy adds/removes a whole chip, so that case redraws
   // the row and rebinds; a standard chip only flips its class, which keeps the common
   // tap flicker-free. The row lives outside paintCart's markup, hence its own painter.
