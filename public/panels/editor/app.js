@@ -8685,16 +8685,18 @@ async function saveRetention(which, val) {
     // api() carries the parsed reply on `e.data` (with `e.status`) — that is this panel's
     // contract for every call, so read the code from there and nowhere else.
     const code = (e && e.data && e.data.code) || "";
+    // Put the dropdown back on the value that is really stored, so the screen never keeps
+    // showing a window the restaurant is not on. Done to the element rather than through a
+    // full redraw: this runs inside a tab whose own redraw would also refetch the log.
+    // ON EVERY REFUSAL (sweep #10 T7, item 7) — it used to happen only for the two lock codes, so a
+    // server error left the box on the window just refused, under a toast saying it wasn't saved.
+    const sel = document.querySelector('.ret-select[data-ret="' + which + '"]');
+    if (sel) sel.value = String(Number((state.data.settings || {})[which]) || 90);
     if (code === "retention_locked" || code === "retention_manager_blocked") {
       toast(e.message || "That's not yours to change.", "err");
-      // Put the dropdown back on the value that is really stored, so the screen never keeps
-      // showing a window the restaurant is not on. Done to the element rather than through a
-      // full redraw: this runs inside a tab whose own redraw would also refetch the log.
-      const sel = document.querySelector('.ret-select[data-ret="' + which + '"]');
-      if (sel) sel.value = String(Number((state.data.settings || {})[which]) || 90);
       return;
     }
-    toast("Couldn't save retention: " + e.message, "err");
+    toast("Couldn't save retention: " + errText(e), "err");
   }
 }
 

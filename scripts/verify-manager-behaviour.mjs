@@ -669,7 +669,26 @@ async function tagsFirstSaveWins() {
     : bad("the Tags screen's tick writes a dish's whole tag list with no expectation");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins];
+// ── Q · A REFUSED LOG-RETENTION CHANGE PUTS THE DROPDOWN BACK (sweep #10 T7, 2026-10-16) ─────────
+// Only the two "locked" codes reset the box; any other refusal left it on the window just refused.
+// saveRetention is lifted and run against a server that refuses three different ways.
+async function retentionResets() {
+  console.log("\nQ. a refused log-retention change puts the dropdown back");
+  const code = lift("public/panels/editor/app.js", "async function saveRetention(", "\n}\n", "saveRetention");
+  for (const [label, err] of [["a server error", Object.assign(new Error("boom"), { status: 500, data: {} })], ["an Aevidine lock", Object.assign(new Error("Aevidine set this."), { status: 403, data: { code: "retention_locked" } })], ["no answer at all", new Error("Failed to fetch")]]) {
+    const sel = { value: "7" };
+    const toasts = [];
+    const run = new Function("api", "state", "document", "toast", "okToast", "errText", "RETENTION_OPTS", `${code}\nreturn saveRetention;`)(
+      async () => { throw err; }, { data: { settings: { oplog_retention_days: 90 } } }, { querySelector: () => sel },
+      (m) => toasts.push(m), () => {}, (e) => e.message, []);
+    await run("oplog_retention_days", "7");
+    sel.value === "90"
+      ? ok(`${label}: the box goes back to the 90 days really kept (${toasts[0]})`)
+      : bad(`${label}: the box still shows the refused ${sel.value} days`);
+  }
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }
