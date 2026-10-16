@@ -566,6 +566,12 @@ check("P170015", "a remembered search filters only while the search switch is on
   const noOther = !/fold\(deferredQuery/.test(mv.replace(/const q = features\.search !== false \? fold\(deferredQuery\.trim\(\)\) : "";/, ""));
   return { ok: gated && box && noOther, note: `q gated=${gated} box gated=${box} no second filter on the raw text=${noOther}` };
 });
+// item 7 (sweep #10 T1): a currency whose sign IS its code (AED, SAR, QAR) was listed as "AED AED".
+check("P170525", "the currency list never prints a code twice (a sign is drawn only when it differs from the code)", () => {
+  const h = code("components/Header.tsx") || "";
+  const ok = /\{c\.symbol !== c\.label \? c\.symbol : ""\}/.test(h) && !/>\{c\.symbol\}<\/span>\s*<span>\{c\.label\}/.test(h);
+  return { ok, note: `sign drawn only when different: ${ok}` };
+});
 
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
@@ -751,6 +757,13 @@ async function live(base) {
       const t = await pg.evaluate(() => document.body.innerText);
       check("P170013", "LIVE: an address carrying a null byte gets the guest's 'menu isn't available', never the error screen", () =>
         ({ ok: status === 404 && /isn’t available|doesn’t exist/.test(t) && !/couldn’t load this/i.test(t), note: `${status} · ${t.replace(/\s+/g, " ").slice(0, 60)}` }));
+      await c.close(); }
+    { const { c, pg } = await open("/r/burger-barn/menu", 2500);
+      const btn = await pg.$("button.nav-btn[aria-label^='Currency']");
+      let rows = [];
+      if (btn) { await btn.click(); await pg.waitForTimeout(300); rows = await pg.$$eval("[role='listbox'] > [role='option']", (e) => e.map((x) => [...x.querySelectorAll("span span")].map((s) => s.textContent.trim()).filter(Boolean).join(" ") || x.textContent.trim())); }
+      check("P170526", "LIVE: Burger Barn's currency list reads each currency once (no 'AED AED')", () =>
+        ({ ok: rows.length >= 4 && rows.every((r) => !/^(\S+)\s*\1$/.test(r)), note: rows.join(" · ") || "no currency picker found" }));
       await c.close(); }
     for (const path of ["/r/zz-no-such-place-t1/menu", "/r/french-house/item/zz-no-such-dish", "/r/french-house%09/menu", "/q/ZZZZZZ", "/zz-stray-t1"]) {
       const { c, pg } = await open(path, 3500);
