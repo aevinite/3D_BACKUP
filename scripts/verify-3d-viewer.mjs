@@ -255,6 +255,27 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
   );
 }
 
+// ── the review note box stops where the database stops (sweep #10 T2, item 3) ─────────────────
+// lfh_submit_review keeps left(comment, N). The box had no limit: 799 characters typed, "Review
+// posted", 500 stored — the diner's own review cut mid-word after a reload, with nothing said.
+// The number is read from the NEWEST migration that defines the function, so a later migration
+// that changes it turns this red until the page agrees.
+{
+  const { readdirSync } = await import("node:fs");
+  const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /\.sql$/.test(f)).sort();
+  const defining = migs.filter((f) => /FUNCTION (public\.)?lfh_submit_review\(/.test(read(`supabase/migrations/${f}`)));
+  const last = defining.at(-1);
+  const body = last ? read(`supabase/migrations/${last}`).match(/FUNCTION (public\.)?lfh_submit_review\([\s\S]*?\$function\$\s*;|FUNCTION (public\.)?lfh_submit_review\([\s\S]*?\$\$\s*;/)?.[0] || "" : "";
+  const dbMax = (body.match(/left\(nullif\(trim\(p_comment\), ''\), (\d+)\)/) || [])[1];
+  const pageMax = (src[ITEM_CLIENT].match(/const REVIEW_NOTE_MAX = (\d+);/) || [])[1];
+  check(
+    "the dish page's review note box stops at the same length the database keeps",
+    !!dbMax && dbMax === pageMax && /id="review-text"[\s\S]{0,200}maxLength=\{REVIEW_NOTE_MAX\}/.test(src[ITEM_CLIENT]),
+    `${ITEM_CLIENT} → REVIEW_NOTE_MAX is ${pageMax ?? "missing"}, ${last ?? "no migration"} keeps ` +
+      `${dbMax ?? "an unreadable number of"} characters, and the textarea must carry maxLength={REVIEW_NOTE_MAX}.`
+  );
+}
+
 // The veg/non-veg mark must mean the same thing on the grid and on the dish page.
 check(
   "the dish page hides the veg/non-veg mark on a single-diet menu, exactly as the grid does",
