@@ -1602,6 +1602,14 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── THE PAY SHEET'S "SPLIT THIS BILL →" CARRIES THE TIP (sweep #10 T12 round 3, item 6) ───────────────
+check(
+  "tablet: a tip typed on the pay sheet goes across to the split screen with 'Split this bill →'",
+  /so\.onclick = \(\) => \{ resolved = true; close\(\); resolve\(\{ special: "split", tip \}\); \}/.test(src)
+    && /renderSplitBill\(t, \{ onBack: renderPanel, tip: picked\.tip \}\)/.test(src),
+  `${TABLET} openPaymentMethodModal: resolve the tip with the split marker — the split screen seeds from opts.tip.`,
+);
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");

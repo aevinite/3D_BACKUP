@@ -4143,7 +4143,11 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // "Other" goes straight to its text box above.
     // The small line at the bottom resolves the SAME marker the old tile did, so the caller's
     // handling is unchanged — it just opens the one split screen instead of a panel in here.
-    { const so = ov.querySelector(".pay-split-open"); if (so) so.onclick = () => { resolved = true; close(); resolve({ special: "split" }); }; }
+    // …WITH THE TIP (sweep #10 T12 round 3, item 6). Round 2's item 5 taught the split screen to take
+    // the tip this sheet hands over (opts.tip) — and this line still handed over nothing, so a tip
+    // typed here vanished the moment the waiter tapped "Split this bill →". Round 2 checked the split
+    // screen's half and never tapped this one; the fixture world tapped it.
+    { const so = ov.querySelector(".pay-split-open"); if (so) so.onclick = () => { resolved = true; close(); resolve({ special: "split", tip }); }; }
     const otherInput = ov.querySelector(".pay-other-input");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     ov.querySelector(".pay-other-confirm").onclick = confirmOther;
