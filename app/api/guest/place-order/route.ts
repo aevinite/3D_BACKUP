@@ -143,9 +143,17 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // for about four minutes (six rounds of backoff) before the diner was told anything. It is a body
   // problem, not a busy restaurant: say so at once with the code the phone already words.
   const textOrNum = (v: unknown) => v === undefined || v === null || typeof v === "string" || (typeof v === "number" && Number.isFinite(v));
+  // A QUANTITY IS A WHOLE NUMBER THE DATABASE CAN READ (sweep #10 T3 round 4, item 44). lfh_price_order reads
+  // it with `::int`, which raises on 1.5, "2.0", "1e3" or anything past 2,147,483,647 — and a database error
+  // here is answered "busy" (502), so the phone kept the order and re-sent it for minutes, an order that could
+  // never be priced. Missing / null / "" still mean 1 (the function's own default); 0 and negatives still
+  // reach it and are lifted to 1 there, as before. The app's own basket only ever holds 1–99.
+  const wholeQty = (q: unknown) => q === undefined || q === null || q === ""
+    || (typeof q === "number" && Number.isInteger(q) && Math.abs(q) <= 2147483647)
+    || (typeof q === "string" && /^\s*[+-]?[0-9]{1,9}\s*$/.test(q));
   const goodItem = (x: unknown) => !!x && typeof x === "object" && !Array.isArray(x)
     && typeof (x as { id?: unknown }).id === "string" && (x as { id: string }).id.length > 0
-    && Number.isFinite(Number((x as { qty?: unknown }).qty ?? 1));
+    && wholeQty((x as { qty?: unknown }).qty);
   if (!items.every(goodItem) || !allergies.every((a) => typeof a === "string")
     || !textOrNum(b.table) || (b.token !== undefined && b.token !== null && typeof b.token !== "string")) {
     return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 });
