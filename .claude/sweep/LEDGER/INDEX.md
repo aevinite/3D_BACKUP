@@ -66,7 +66,7 @@ terminals' rows — keep both sides.
 | T11 | `P180001`–`P181000` | The kitchen screen | `T11-S10.md` | 564 | 564 | 6 | 6 |
 | T12 | `P181001`–`P182000` + `P213001`–`P213999` (round 3, claimed on `main` before a row was written, owner's yes 2026-10-16 — above every claim in this table) | The waiter tablet screen | `T12-S10.md` | 952 | 948 | 9 | 9 |
 | T13 | `P182001`–`P183000` + `P169001`–`P169999` (round 2, the last unclaimed block of the planning gap — claimed on `main` before a row was written; owner asked 2026-10-11 for 500–1000 more, "every single bit") | The waiter tablet's server route, and the shared floor logic | `T13-S10.md` | 1121 | 1119 | 32 | 32 |
-| T14 | `P183001`–`P184000` + `P214001`–`P214999` (round 2 — the owner's fresh full re-test, 2026-10-16: "do five hundred or thousand phases … replan whole test"; claimed on `main` before a row was written — above every claim in this table) | The bill and KOT document | `T14-S10.md` | 503 | 503 | 7 | 7 |
+| T14 | `P183001`–`P184000` + `P214001`–`P214999` (round 2 — the owner's fresh full re-test, 2026-10-16: "do five hundred or thousand phases … replan whole test"; claimed on `main` before a row was written — above every claim in this table) | The bill and KOT document | `T14-S10.md` | 1037 | 1025 | 15 | 15 |
 | T15 | `P184001`–`P185000` | The print queue and the print helper | `T15-S10.md` | 504 | 504 | 9 | 9 |
 | T16 | `P185001`–`P186000` | Shared panel plumbing — the helpers every panel loads | `T16-S10.md` | 907 | 907 | 24 | 24 |
 | T17 | `P186001`–`P187000` + `P161001`–`P163997` (rounds 3–6; extra ids from the planning gap, owner item 21) | Logins, sign-outs and the gates every request passes | `T17-S10.md` | 3997 | 3991 | 29 | 29 |
