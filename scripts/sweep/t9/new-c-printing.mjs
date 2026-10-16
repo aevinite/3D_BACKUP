@@ -1,7 +1,7 @@
 // SWEEP #8 · T9 · NEW CHECKS, block C+D — P62801–P62950.
 // The printer status sheet, the waiting-to-print counter, the stuck badge, and the whole client
 // end of the durable print queue. Every name in here was in the 69 that no ledger row mentioned.
-import { row, APPC, CSS, ROUTEC, has, hasRe, lacksRe, P } from "./lib.mjs";
+import { row, APPC, CSS, ROUTEC, has, hasRe, lacksRe, P, code, src } from "./lib.mjs";
 import { readFileSync } from "node:fs";
 
 const slice = (from, to) => { const a = APPC(); const i = a.indexOf(from); const j = a.indexOf(to); return i < 0 || j < 0 ? "" : a.slice(i, j); };
@@ -263,31 +263,36 @@ row("P62933", "the claim re-asks that same question, because a stale tab still b
   hasRe(ROUTEC(), /const may = screenMayPrint\(tgt, \{ panel: "kitchen", personId: g\.user\?\.id \|\| null, deviceId: dev \}\)/));
 row("P62934", "the claim takes the person and device from the REQUEST, never from the panel's word for itself", () => {
   const r = ROUTEC();
-  const claim = r.slice(r.indexOf('if (a === "print-jobs" && b === "claim")'), r.indexOf('if (a === "print-station" && b === "take")'));
+  const claim = r.slice(r.indexOf('if (a === "print-jobs" && b === "claim")'), r.indexOf('if (a === "print-jobs" && c === "done")'));
   return lacksRe(claim, /body\?\.panel|body\.personId|body\.deviceId/);
 });
 row("P62935", "a refused claim answers WHY, and where printing happens instead", () =>
   hasRe(ROUTEC(), /return ok\(\{ won: \[\], refused: may\.why === "computer" \? "helper" : may\.why, printTarget: tgt,/));
 row("P62936", "a refused claim wins nothing — it never returns ids the panel would print", () => hasRe(ROUTEC(), /return ok\(\{ won: \[\], refused/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 17): `kitchenMayAuto` asked screenMayPrint's question a second time and
+// is retired; these two rows now assert the ONE answer — the route, through screenMayPrint — decides it.
 row("P62937", "the ROUTE decides which room prints, and the retired coarse column does not get a vote", () => {
   const r = ROUTEC();
-  return (/if \(target\.kind === "screen"\) kitchenMayAuto = target\.panel === "kitchen";/.test(r) &&
-          !/kot_print_target/.test(r.slice(r.indexOf("let kitchenMayAuto")))) || "the retired setting still votes";
+  return (/const mayI = screenMayPrint\(target, \{ panel: "kitchen"/.test(r) && /const screenPrints = mayI\.ok && !paused;/.test(r) &&
+          !/kot_print_target/.test(r) && !/kitchenMayAuto/.test(r)) || "the route is not the one answer, or the retired setting still votes";
 });
 row("P62938", "a computer owning the paper stops this screen being offered tickets", () =>
-  hasRe(ROUTEC(), /else if \(target\.kind === "off" \|\| target\.kind === "computer"\) kitchenMayAuto = false;/));
-row("P62939", "print-station/take refuses without a device id, rather than taking the station for nobody", () =>
-  hasRe(ROUTEC(), /if \(!dev\) return err\("This browser has no device id yet — reload the panel and try again\.", 409\)/));
-row("P62940", "print-station/take refuses when automatic printing is off for the restaurant", () =>
-  hasRe(ROUTEC(), /return err\("Automatic printing is switched off for this restaurant\.", 409\)/));
-row("P62941", "print-station/take refuses when a computer owns the paper, in words a person can act on", () =>
-  has(ROUTEC(), '"A computer prints this restaurant\'s kitchen slips — no screen needs to."'));
-row("P62942", "print-station/take refuses when another screen is the named one", () =>
-  has(ROUTEC(), '"Kitchen slips are set to print on another screen."'));
-row("P62943", "taking the station is written to the Activity log in plain words", () =>
-  has(ROUTEC(), 'detail: "this kitchen screen is now the printer"'));
-row("P62944", "releasing the station is logged too", () => has(ROUTEC(), 'detail: "this kitchen screen stopped printing"'));
-row("P62945", "releasing without a device id still answers, rather than throwing", () => hasRe(ROUTEC(), /if \(dev\) await releaseStation\(rid, dev\);/));
+  hasRe(code(src("lib/printHelpers.ts")), /if \(t\.kind === "computer"\) return \{ ok: false, why: "computer" \};/) && hasRe(ROUTEC(), /const screenPrints = mayI\.ok && !paused;/));
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 17 — the owner's standing rule, "a new way replaces the old one"):
+// the kitchen's print-station/take and /release are retired. Their buttons left this screen on 2026-08-29 when the
+// admin's Printing board became the one place that names who prints, and nothing called the doors after that. The
+// seven ids stay; they now assert the doors STAY gone and that the one road left still does their job.
+const K_POST = () => { const r = ROUTEC(); return r.slice(r.indexOf("async function postImpl(")); };
+row("P62939", "print-station/take is GONE from the kitchen route (item 17)", () => lacksRe(K_POST(), /a === "print-station" && b === "take"/));
+row("P62940", "print-station/release is GONE from the kitchen route too", () => lacksRe(K_POST(), /a === "print-station" && b === "release"/));
+row("P62941", "a request for either reaches the ordinary 404, never a silent success", () => hasRe(K_POST(), /return err\("unknown POST endpoint", 404\)/));
+row("P62942", "the kitchen screen still becomes the printer — at its first claim, through mayClaim (which takes the station)", () =>
+  hasRe(K_POST(), /const gate = await mayClaim\(rid, \{/) && hasRe(code(src("lib/printQueue.ts")), /const taken = await takeStation\(rid, \{ deviceId: opts\.deviceId/));
+row("P62943", "the kitchen screen sends no print-station request of any kind", () => lacksRe(APPC(), /(?:api\(\s*"[A-Z]+",\s*[`"']|fetch\(\s*[`"'][^`"']*)\/print-station\//));
+row("P62944", "the MANAGER's own take door is untouched — the manager screen still claims through it", () =>
+  hasRe(code(src("app/api/editor/[...path]/route.ts")), /a === "print-station" && b === "take"/) && hasRe(code(src("public/panels/editor/app.js")), /api\("POST", "\/print-station\/take", \{\}\)/));
+row("P62945", "the obituary says why the doors went and where their job lives now", () =>
+  /OBITUARY — print-station\/take and print-station\/release are gone[\s\S]{0,900}mayClaim → takeStation/.test(readFileSync(P("app/api/kitchen/[...path]/route.ts"), "utf8")) || "no obituary");
 row("P62946", "the done report refuses an unknown job id with a plain sentence", () => hasRe(ROUTEC(), /if \(!r\.found\) return err\("That print job is gone\.", 404\)/));
 row("P62947", "a successful print is logged as INFO, so normal service never colours the log", () => {
   const r = ROUTEC();

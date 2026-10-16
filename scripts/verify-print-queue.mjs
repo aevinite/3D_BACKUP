@@ -115,7 +115,8 @@ check(/the order was cancelled before this ticket printed/.test(lib) && /=== "ca
 // decided by the Kitchen slips ROUTE through screenMayPrint — not by mig 336's coarse column, which
 // could contradict it (the sweep caught the older one winning). So the check asserts the ROUTE is
 // consulted, and that the retired column is NOT.
-check(/kitchenMayAuto/.test(kroute) && /screenMayPrint\(/.test(kroute)
+// (sweep #10 T11 round 2, item 17: the duplicate `kitchenMayAuto` vote was retired — screenMayPrint alone answers it now.)
+check(/const screenPrints = mayI\.ok && !paused;/.test(kroute) && /const mayI = screenMayPrint\(target, \{ panel: "kitchen"/.test(kroute)
   && !/kot_print_target/.test(kroute.replace(/^\s*\/\/[^\n]*$/gm, "")),
   "the KITCHEN room is decided by the Kitchen slips route, so 'the counter prints' does not print in both rooms",
   "the kitchen route ignores the route, or reads the retired kot_print_target again — with the counter chosen, a kitchen screen left open prints the same ticket in the other room (measured)");
@@ -430,9 +431,14 @@ check(/STATION_STALE_MS/.test(lib) && /stale/.test(lib),
 check(/export async function mayClaim/.test(lib) && (kroute.match(/mayClaim\(/g) || []).length >= 1 && (eroute.match(/mayClaim\(/g) || []).length >= 1,
   "BOTH routes ask one gate (mayClaim) before handing a ticket to a screen",
   "a route claims without asking who the station is — that is how two screens start fighting over every ticket");
-check(/print-station" && b === "take"/.test(kroute) && /print-station" && b === "take"/.test(eroute),
-  "both the kitchen and the counter screen can TAKE printing in one tap",
-  "a panel lost its take-over endpoint, so a person standing at the right printer cannot move printing to it");
+// EXPECTATION CHANGED (sweep #10 T11 round 2, item 17). This said "both screens can TAKE printing in one tap" — the
+// model before the Printing board, and it contradicted the very next check ("printing moves in ONE place"). The
+// kitchen's take/release doors had no caller after their buttons left on 2026-08-29 and are retired; a kitchen screen
+// becomes the printer at its first CLAIM (mayClaim). The counter's door stays: the manager screen claims through it.
+check(!/print-station" && b === "(take|release)"/.test(kroute) && /return err\("unknown POST endpoint", 404\)/.test(kroute)
+  && /print-station" && b === "take"/.test(eroute) && /api\("POST", "\/print-station\/take"/.test(read("public/panels/editor/app.js")),
+  "a kitchen screen becomes the printer by claiming (no take-over door of its own); the counter screen's silent claim door is still there and still used",
+  "the kitchen's retired take/release door is back (two roads again), or the counter lost the door its screen claims through");
 // INVERTED, NOT SATISFIED (2026-08-31). This required a take-over button on BOTH panels
 // (`data-station-set`, `data-kstation`). Both were removed on purpose: a button that says "print
 // here instead" is a second answer to a question the admin has already answered on the Printing

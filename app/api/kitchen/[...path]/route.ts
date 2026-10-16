@@ -25,7 +25,7 @@ import { panelFailure } from "@/lib/panelFailure";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // The print queue itself (mig 269 + 335) — shared with the manager route so two panels can never
 // drift into two different ideas of what "claimed" means.
-import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, takeStation, releaseStation, mayClaim, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, mayClaim, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
 // WHEN A COMPUTER OWNS THE PAPER, A SCREEN MUST NOT ALSO PRINT IT (mig 341). A helper prints on the
 // printer the address book names; a screen prints on whatever that machine's default printer is. Both
 // printing means the same ticket in two places — and the screen's copy is the one that comes out in
@@ -314,7 +314,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // left open on the same restaurant printing every ticket the counter was set to print.
       // A MANUAL REPRINT IS DIFFERENT and always reaches the kitchen: the manager pressing "Reprint
       // in kitchen" is naming this printer on purpose, whatever the automatic routing says.
-      let kitchenMayAuto = true;
       // …AND WHETHER A COMPUTER HAS THE JOB AT ALL. With a helper named for kitchen slips, this
       // screen goes back to being an ordinary display: it stops being offered tickets, stops
       // healing, and says on its own printer sheet where the paper is coming out instead.
@@ -333,8 +332,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // appearing in a room nobody is standing in is worse than paper that has not appeared,
       // because nobody learns the printer is broken. (This sentence was left spliced in half by
       // that edit — it still said "`backupPanel` counts too" and then contradicted itself.)
-      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
-      else if (target.kind === "off" || target.kind === "computer") kitchenMayAuto = false;
+      // (`kitchenMayAuto` stood here and answered the same question a second time — a screen route naming another
+      // panel, "off" or "computer" — which screenMayPrint below already answers, so flipping it changed nothing
+      // a screen could see: proved by the round-2 mutation run. Retired with item 17; one question, one answer.)
       const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
       // ── A STOPPED QUEUE STOPS THIS SCREEN TOO (sweep #10 T11, item 4) ───────────────────────────
       // The admin's ⏸ on Printing (modules.printing.paused) is THE master stop: "tickets wait". The
@@ -345,7 +345,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // went on saying "Automatic printing ON · this screen". Stopped now means: no queue handed over,
       // no self-healing net, and the sheet is told why (`printRefused: "paused"`, words it already has).
       const paused = isPaused(must(settings));
-      const screenPrints = kitchenMayAuto && mayI.ok && !paused;
+      const screenPrints = mayI.ok && !paused;
       const printJobs = paused ? [] : await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
       // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
       // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
@@ -873,35 +873,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ won: await claimKotJobs(rid, ids), station: gate.station });
     }
 
-    // ── print-station/take · /release — "print HERE instead", and "stop printing here" ──────────
-    // The one tap that moves a restaurant's printing to the screen the person is standing at. It is a
-    // write, so it rides the outbox like every other panel write; replaying it late is harmless (the
-    // worst case is the station moving to a screen that then goes quiet, and quiet stations are
-    // taken over automatically after a few minutes).
-    if (a === "print-station" && b === "take") {
-      if (!dev) return err("This browser has no device id yet — reload the panel and try again.", 409);
-      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle()) as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: unknown } | null;
-      if (!(st2?.auto_print_kot === true && st2?.auto_print_kot_allowed === true)) return err("Automatic printing is switched off for this restaurant.", 409);
-      if (isPaused(st2)) return err("Printing is stopped for this restaurant — tickets wait until it starts again.", 409); // item 4
-      // The ROUTE decides whether this room may hold printing at all (mig 369), asked through the one
-      // resolver every other path uses — with the person and device from the REQUEST, so a narrowed
-      // route ("only Rishi's counter PC") refuses a kitchen screen here too.
-      const tgTake = await targetFor(rid, "kot");
-      const mayTake = screenMayPrint(tgTake, { panel: "kitchen", personId: g.user?.id || null, deviceId: dev });
-      if (!mayTake.ok) return err(
-        tgTake.kind === "computer" ? "A computer prints this restaurant's kitchen slips — no screen needs to."
-        : tgTake.kind === "off" ? "Kitchen slips are switched off for this restaurant."
-        : "Kitchen slips are set to print on another screen.", 409);
-      const view = await takeStation(rid, { deviceId: dev, label: "Kitchen screen", panel: "kitchen", by: g.user?.name || g.user?.username || null });
-      await logAction("kitchen", "print_station_take", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen is now the printer" });
-      return ok({ ok: true, station: view });
-    }
-    if (a === "print-station" && b === "release") {
-      if (dev) await releaseStation(rid, dev);
-      await logAction("kitchen", "print_station_release", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen stopped printing" });
-      return ok({ ok: true, station: await stationView(rid, dev) });
-    }
+    // OBITUARY — print-station/take and print-station/release are gone (sweep #10 T11 round 2, item 17).
+    // They were "print HERE instead" and "stop printing here", the two buttons of the old model where a
+    // restaurant worked out who printed by tapping around its own screens. Those buttons left this screen
+    // on 2026-08-29, when the admin's Printing board became the one place that names who prints ("there is
+    // two printing things, one is working and one is just showing"); nothing has called these doors since.
+    // The kitchen screen still becomes the printer — by itself, at its first claim (mayClaim → takeStation,
+    // above), which is the one road now. A new way replaces the old one: the old doors go with their buttons.
+    // (The MANAGER's own print-station/take stays: the manager screen still claims through it — editor route.)
 
     // ── print-jobs/:id/done — the printed/failed report closes the loop ──────────────
     // ok:true also RESOLVES every open printer problem: a sheet of paper coming out is the

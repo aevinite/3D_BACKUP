@@ -135,7 +135,7 @@ row("P180027", "item 4 · one helper answers 'is the queue stopped?' from module
 row("P180028", "item 4 · the board's ONE settings read carries `modules`, so the stop costs no new query", () =>
   hasRe(BOARD(), /from\("settings"\)\.select\("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names, modules"\)/));
 row("P180029", "item 4 · a stopped queue means this screen is not the printer (no auto rows, no net)", () =>
-  hasRe(BOARD(), /const paused = isPaused\(must\(settings\)\);\s*const screenPrints = kitchenMayAuto && mayI\.ok && !paused;/));
+  hasRe(BOARD(), /const paused = isPaused\(must\(settings\)\);\s*const screenPrints = mayI\.ok && !paused;/));   // kitchenMayAuto retired, item 17
 row("P180030", "item 4 · …and hands over NO job at all, the manager's reprints included", () =>
   hasRe(BOARD(), /const printJobs = paused \? \[\] : await pendingKotJobs\(/));
 row("P180031", "item 4 · the board tells the sheet WHY — printRefused 'paused' outranks every routing reason", () =>
@@ -145,8 +145,9 @@ row("P180032", "item 4 · the CLAIM refuses while stopped, before winning anythi
   const stop = b.indexOf('if (isPaused(st)) return ok({ won: [], refused: "paused"'), win = b.indexOf("claimKotJobs(rid, ids)");
   return (stop > 0 && win > stop) || "the claim's stop check is missing or comes after the claim";
 });
-row("P180033", "item 4 · 'print here instead' refuses while stopped, with the reason in words", () =>
-  hasRe(branch('if (a === "print-station" && b === "take")'), /if \(isPaused\(st2\)\) return err\("Printing is stopped for this restaurant — tickets wait until it starts again\.", 409\);/));
+// EXPECTATION CHANGED (item 17): 'print here instead' is retired; the claim — the one road left — refuses while stopped.
+row("P180033", "item 4 · the one road to becoming the printer (the claim) refuses while stopped, and the old take door is gone", () =>
+  hasRe(branch('if (a === "print-jobs" && b === "claim")'), /if \(isPaused\(st\)\) return ok\(\{ won: \[\], refused: "paused"/) && !/a === "print-station" && b === "take"/.test(ROUTEC()));
 row("P180034", "item 4 · the 🖨 sheet has the words for a stopped queue", () =>
   hasRe(APPC(), /refused === "paused" \? "nobody right now — printing is stopped for this restaurant, and tickets wait until it starts again"/));
 row("P180035", "item 4 · ⚙️ Settings no longer goes silent on a stopped queue — it says so, in the same words", () =>

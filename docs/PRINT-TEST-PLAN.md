@@ -17,6 +17,8 @@ A1  a lone kitchen screen prints with no set-up, hidden the whole time
 A2  exactly one active station exists
 A3  a second entitled screen is TOLD where printing is, and prints nothing
 A4  "print here instead" moves the station in one tap; the loser stops
+    (later: the kitchen's tap left on 2026-08-29 with the Printing board; its server door was retired on 2026-10-16 —
+    a kitchen screen now becomes the printer at its first claim. The manager screen still claims through its own door.)
 A5  a station gone quiet is taken over automatically
 A6  auto-print OFF → no printing section on the kitchen screen, no Printing row in the manager
 A7  auto-print ON → the row returns with the status + guide + 3 starters
