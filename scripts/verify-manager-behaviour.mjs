@@ -476,7 +476,64 @@ async function gstEmptyLine() {
   /No paid bills in this month\./.test(g.slice(0, 9000)) ? bad("the GST report still prints 'in this month' whatever the window") : ok("…and 'in this month' is no longer printed under a today-only heading");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine];
+// ── L · A FUNCTION IS NEVER A YES/NO (sweep #10 T7, 2026-10-16) ──────────────────────────────────
+// The table popup's ✎ Edit button vanished for a month (2026-09-17 → 2026-10-16). tablePanelParts()
+// declares `const allOut = <is every dish out?>`, and the one-bill redesign declared a SECOND
+// `const allOut = (r) => …` inside the orders block, which shadowed it. The Edit toggle below read
+// `allOut ? "" : <the button>` — a FUNCTION, always truthy — so the button never drew. Nothing
+// failed: the screen simply lacked a control. So this resolves every yes/no test in the manager
+// panel (if / ?: / && / || / !) through real scopes (acorn + eslint-scope, the parser
+// verify:panel-names uses) and fails if one is a name that holds a FUNCTION. Then it asserts the
+// Edit toggle's own test resolves to the table-wide boolean.
+async function functionAsCondition() {
+  console.log("\nL. a yes/no test in the manager panel never reads a function (the ✎ Edit toggle)");
+  const acorn = await import("acorn");
+  const { analyze } = await import("eslint-scope");
+  const app = src("public/panels/editor/app.js");
+  const ast = acorn.parse(app, { ecmaVersion: 2024, sourceType: "script", locations: true, ranges: true });
+  const sm = analyze(ast, { ecmaVersion: 2024, sourceType: "script" });
+  const isFn = (v) => v && v.defs.some((d) => d.type === "FunctionName"
+    || (d.type === "Variable" && d.node.init && /^(ArrowFunctionExpression|FunctionExpression)$/.test(d.node.init.type) && d.parent && d.parent.kind === "const"));
+  const refAt = new Map();
+  for (const sc of sm.scopes) for (const r of sc.references) refAt.set(r.identifier, r);
+  const tests = [];
+  const walk = (n, parent) => {
+    if (!n || typeof n.type !== "string") return;
+    if (n.type === "IfStatement" || n.type === "ConditionalExpression" || n.type === "WhileStatement") tests.push(n.test);
+    if (n.type === "UnaryExpression" && n.operator === "!") tests.push(n.argument);
+    if (n.type === "LogicalExpression" && parent && (parent.type === "IfStatement" || parent.type === "ConditionalExpression" || (parent.type === "UnaryExpression" && parent.operator === "!"))) { tests.push(n.left); tests.push(n.right); }
+    for (const k of Object.keys(n)) { if (k === "parent") continue; const v = n[k]; if (Array.isArray(v)) v.forEach((c) => walk(c, n)); else if (v && typeof v.type === "string") walk(v, n); }
+  };
+  walk(ast, null);
+  const hits = [];
+  for (const t of tests) {
+    if (!t || t.type !== "Identifier") continue;
+    const r = refAt.get(t);
+    if (r && r.resolved && isFn(r.resolved)) hits.push(`${t.name} at line ${t.loc.start.line}`);
+  }
+  hits.length
+    ? bad("a yes/no test reads a FUNCTION, so it is always yes", hits.slice(0, 6).join(", "))
+    : ok(`none of ${tests.length} yes/no tests in the manager panel reads a function`);
+  // The Edit toggle itself: its test must resolve to the table-wide boolean, and it must be offered
+  // where it unlocks something (a waiting ticket) — never on every table, never on none.
+  let decl = null;
+  const find = (n) => { if (!n || typeof n.type !== "string" || decl) return; if (n.type === "VariableDeclarator" && n.id.name === "editToggle") { decl = n; return; } for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach(find); else if (v && typeof v.type === "string") find(v); } };
+  find(ast);
+  if (!decl) { bad("the table popup's editToggle is gone — re-point this check"); return; }
+  const names = [];
+  const collect = (n) => { if (!n || typeof n.type !== "string") return; if (n.type === "Identifier") names.push(n); for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach(collect); else if (v && typeof v.type === "string" && k !== "consequent" && k !== "alternate") collect(v); } };
+  collect(decl.init.type === "ConditionalExpression" ? decl.init.test : decl.init);
+  const allOutRef = names.find((x) => x.name === "allOut");
+  const res = allOutRef && refAt.get(allOutRef) && refAt.get(allOutRef).resolved;
+  res && !isFn(res) && res.defs[0].node.init && res.defs[0].node.init.type === "LogicalExpression"
+    ? ok("the ✎ Edit toggle's 'is every dish out?' resolves to the table-wide boolean, not a per-row function")
+    : bad("the ✎ Edit toggle's test does not read the table-wide allOut", res ? `resolves to the declaration at line ${res.defs[0].node.loc.start.line}` : "no allOut in its test");
+  names.some((x) => x.name === "newOrders") && names.some((x) => x.name === "editing")
+    ? ok("…and it is offered while a ticket is waiting (its extras draw only there) or while Edit is on")
+    : bad("the ✎ Edit toggle no longer asks whether a ticket is waiting", "it would ask about the kitchen and then unlock nothing");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

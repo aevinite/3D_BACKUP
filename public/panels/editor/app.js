@@ -12329,10 +12329,15 @@ function tablePanelParts(t, host = "float") {
     // SERVED SINKS (owner, 2026-09-17: "which are mark as serve should go to bottom, only left one
     // on top"). What is still to come is what the screen is for; what is already on the table is
     // the record. Both halves keep the menu's order inside themselves.
-    const allOut = (r) => (r._parts ? r._parts.every((x) => x.status === "served") : r.status === "served");
+    // NAMED rowServed, NEVER allOut (sweep #10 T7, item 1). It was `allOut` from 2026-09-17, which
+    // SHADOWED the table-wide `allOut` boolean declared above tablePanelParts' orders block — so the
+    // Edit toggle further down read `allOut ? "" : …` against this FUNCTION, always truthy, and the
+    // ✎ Edit button never drew on any table for a month. verify:manager-behaviour (L) refuses the
+    // name coming back inside this block.
+    const rowServed = (r) => (r._parts ? r._parts.every((x) => x.status === "served") : r.status === "served");
     const shownRows = view === "kot"
       ? [...flat].sort((a, b) => ((a._kot || 0) - (b._kot || 0)) || byMenuOrder(a, b))
-      : mergeRows(flat).sort((a, b) => (allOut(a) ? 1 : 0) - (allOut(b) ? 1 : 0) || byMenuOrder(a, b));
+      : mergeRows(flat).sort((a, b) => (rowServed(a) ? 1 : 0) - (rowServed(b) ? 1 : 0) || byMenuOrder(a, b));
 
     // ONE LINE: spine · qty · dish (+ what to leave out) · course or ticket · money · serve · ✎.
     // Serve and ✎ are on EVERY line ("for particular item, edit button, serve button and
@@ -12453,7 +12458,12 @@ function tablePanelParts(t, host = "float") {
     // is NOT lost with it: every line keeps its own ✎ (which is allowed at any status, owner
     // 2026-07-03 — "allergy can be added to all items"); what Edit adds is per-TICKET "avoid in
     // all dishes" and ＋ Add dish.
-    const editToggle = allOut ? "" : (editing
+    // ONLY WHERE IT UNLOCKS SOMETHING (sweep #10 T7, item 1). Since the one-bill redesign
+    // (2026-09-17) those two per-ticket extras draw only inside a WAITING ticket's amber box —
+    // accepted dishes are merged lines with their own ✎ — so on a table with no waiting ticket the
+    // toggle would ask about the kitchen and then change nothing on screen. It shows while there
+    // is a waiting ticket, and while Edit is already on (so ✓ Done can always switch it off).
+    const editToggle = (allOut || (!newOrders.length && !editing)) ? "" : (editing
       ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done</button>`
       : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`);
     const shownN = newOrders.length + liveOrders.length;
