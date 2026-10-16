@@ -242,12 +242,12 @@ row("P180859", "item 16 · a delivery tap is refused when the order was cancelle
   return (own > 0 && canc > own && back > canc && same > back && rpc > same && /PLAT_RANK: Record<string, number> = \{ new: 0, accepted: 1, preparing: 2, ready: 3, handed_over: 4 \}/.test(b)) || "the forward-only rule is missing, reordered, or the call is unchecked";
 });
 // ══ ROUND 2 · the hermetic server suites run with this guard — P180860 ══
-// scripts/t11-harness runs the REAL route against an in-memory database (no server, no network). u-route.mjs and
-// u-route3.mjs take well under a second, so they run here; u-route2.mjs (8s — it walks 505 devices through the block
+// scripts/t11-harness runs the REAL route against an in-memory database (no server, no network). u-route.mjs,
+// u-route3.mjs and u-route4.mjs take well under a second, so they run here; u-route2.mjs (8s — it walks 505 devices through the block
 // memo) and mutate.mjs (minutes) are run by hand: `node scripts/t11-harness/u-route2.mjs`, `node scripts/t11-harness/mutate.mjs`.
-row("P180860", "the hermetic kitchen-route suites (u-route 200 rows, u-route3 22 rows) are green", () => {
+row("P180860", "the hermetic kitchen-route suites (u-route 200 rows, u-route3 22, u-route4 8) are green", () => {
   const bad = [];
-  for (const s of ["u-route.mjs", "u-route3.mjs"]) {
+  for (const s of ["u-route.mjs", "u-route3.mjs", "u-route4.mjs"]) {
     const r = spawnSync(process.execPath, [join(T11H, s)], { encoding: "utf8", timeout: 120000 });
     const tail = ((r.stdout || "").match(/(\d+) rows · (\d+) ✅ · (\d+) ❌/) || []);
     if (r.status !== 0 || !tail[0] || tail[3] !== "0") bad.push(`${s}: ${tail[0] || "exit " + r.status}`);

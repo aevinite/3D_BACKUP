@@ -2,11 +2,11 @@
 //
 // Coverage says a line RAN; it does not say a check would notice if the line were wrong. So this makes one small
 // break at a time in app/api/kitchen/[...path]/route.ts — === ↔ !==, && ↔ ||, true ↔ false, a refusal turned into
-// a success, a status code changed, a restaurant filter DROPPED — runs both route suites with T11_STRICT=1 (stop at
+// a success, a status code changed, a restaurant filter DROPPED — runs the four route suites with T11_STRICT=1 (stop at
 // the first failed check), and records whether any check noticed ("killed") or none did ("survived").
 // The file is restored BYTE FOR BYTE after every mutant, in a `finally`, and on SIGINT/SIGTERM.
 //
-//   node scripts/t11-harness/mutate.mjs [--limit 240] [--out <file.json>]
+//   node scripts/t11-harness/mutate.mjs [--limit 240] [--out <file.json>] [--lines 236,547]   (--lines: only mutants on those lines, all of them)
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ const restore = () => writeFileSync(FILE, ORIGINAL);
 for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => { restore(); process.exit(130); });
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const LIMIT = +arg("--limit", 240), OUT = arg("--out", null);
+const LINES = arg("--lines", null) ? new Set(arg("--lines").split(",").map(Number)) : null;
 
 const text = ORIGINAL.toString("utf8");
 const lines = text.split("\n");
@@ -31,6 +32,7 @@ const OPS = [
 ];
 const mutants = [];
 lines.forEach((l, i) => {
+  if (LINES && !LINES.has(i + 1)) return;
   const c = codeOf(l);
   if (!c.trim()) return;
   for (const [from, to] of OPS) {
@@ -49,7 +51,7 @@ try {
     ls[m.line - 1] = l.slice(0, m.col) + m.to + l.slice(m.col + m.from.length);
     writeFileSync(FILE, ls.join("\n"));
     let killed = false, by = "";
-    for (const suite of ["u-route.mjs", "u-route2.mjs"]) {
+    for (const suite of ["u-route.mjs", "u-route3.mjs", "u-route4.mjs", "u-route2.mjs"]) {
       const r = spawnSync(process.execPath, [join(here, suite)], { cwd: root, env: { ...process.env, T11_STRICT: "1" }, encoding: "utf8", timeout: 300000 });
       const out = (r.stdout || "") + (r.stderr || "");
       if (r.status !== 0) { killed = true; by = (out.match(/KILLED by (P\d+)/) || [])[1] || (/SyntaxError|TypeError|ReferenceError/.test(out) ? "crash" : "exit " + r.status); break; }
