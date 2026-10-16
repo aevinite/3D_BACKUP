@@ -774,6 +774,9 @@
 + (d.note
 ? "  .bar .note{margin-right:auto;align-self:center;text-align:left;max-width:52%;\n"
 + "             font:11.5px/1.35 system-ui,sans-serif;color:#3a3a42}\n"
+// ON A PHONE THE EXPLANATION GETS ITS OWN ROW (item 10, 2026-10-16). At 360px the 52% column squeezed it
+// into eleven lines between the zoom chip and the buttons. Screen-only; nothing here reaches paper.
++ "  @media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}\n"
 : "")
 + "  @media print{.bar{display:none !important}}\n"
 + "</style>\n"
@@ -1188,7 +1191,9 @@
 + "        .bar{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);margin-top:-8px;\n"
 + "             flex-wrap:nowrap;align-items:center;padding:10px 12px}\n"
 + "        .bar .note{flex:1 1 auto;max-width:52%;margin-right:auto;align-self:center}\n"
-+ "      }\n";
++ "      }\n"
+// …and on a phone the explanation takes its own row (item 10, 2026-10-16).
++ "      @media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}\n";
   }
   function kotBarHtml(note) {
     if (!note) return "";
@@ -2370,6 +2375,8 @@ function banquetDocHtml(a) {
   .bar button.x{background:#111;color:#fff;border-color:#111}
   .bar .note{margin-right:auto;align-self:center;text-align:left;max-width:52%;
              font:11.5px/1.35 system-ui,sans-serif;color:#3a3a42}
+  /* on a phone the explanation takes its own row (item 10, 2026-10-16) — screen only */
+  @media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}
   @media print{.bar{display:none !important}}
   @media print{tr,.ms,.footg,.bx{break-inside:avoid}thead{display:table-row-group}}
 </style></head><body>

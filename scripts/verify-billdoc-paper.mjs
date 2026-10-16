@@ -991,6 +991,18 @@ dateBad.length === 0
     : ok("a restaurant with no GSTIN charges no tax — on the bill, on a banquet, and in the guest's cart; an older bill keeps what it charged");
 }
 
+/* ── ON A PHONE, A PREVIEW'S EXPLANATION TAKES ITS OWN ROW (item 10, 2026-10-16) — screen only ── */
+{
+  const RULE = "@media screen and (max-width:560px){.bar{flex-wrap:wrap}.bar .note{flex:1 1 100%;max-width:none;order:-1;margin-right:0}}";
+  const docs = [["bill", BILLDOC.billDocHtml({ note: "x" })], ["kitchen ticket", BILLDOC.kotDocHtml({ note: "x" })], ["banquet sheet", BILLDOC.banquetDocHtml({ bill: {}, lines: [], note: "x" })]];
+  const missing = docs.filter(([, h]) => !h.includes(RULE)).map(([n]) => n);
+  // …and a real print (no note) carries no toolbar rule at all on the ticket, so nothing reaches paper
+  const kotPrint = BILLDOC.kotDocHtml({});
+  missing.length === 0 && !kotPrint.includes("max-width:560px")
+    ? ok("on a phone, the bill, ticket and banquet previews put their explanation on its own row — screen only")
+    : bad("a preview squeezes its explanation on a phone", missing.length ? missing.join(", ") : "the ticket's print copy carries the toolbar rule");
+}
+
 /* ── A BILL KEEPS THE TAX IT CHARGED, WHATEVER THE SCHEME IS TODAY (item 13, 2026-10-16) ── */
 {
   const os = [{ status: "served", subtotal: 1000, taxable_base: 1000, tax_rate: 0.05, items: [{ title: "Thali", qty: 1, price: 1000 }] }];
