@@ -509,6 +509,24 @@ check("P15602", "an open search is a back-step, so back does not offer to leave 
   rx(F.menuView, /useBackClose\("menu-search", !!q, \(\) => setSearchQuery\(""\)\)/) &&
   has(F.menuView, 'from "@/lib/backStack"'));
 
+// THE "THERE IS MORE THIS WAY" FADES FOLLOW WHAT IS DRAWN, NOT WHAT IS TYPED (sweep #10 T1, item 1 —
+// a REGRESSION: ledger row P00346 was green on 2026-09-14 and red on 2026-10-16). Since 2026-09-17 the
+// suggestions panel and the filter-chip row are drawn from `deferredQuery`, a render behind the typed
+// `searchQuery`. Both cue effects stayed keyed on the typed text, so they measured a screen that was not
+// drawn yet: one typed letter or a pasted word gave eight suggestions with 165px hidden and no fade, and
+// after any search the chip row (337px past the edge at 360px) lost its fade for good. Both effects must
+// list `deferredQuery`, and neither may list the typed text. Driven in the live half below.
+check("P170001", "the two scroll-cue effects re-measure on the DEFERRED search text the screen is drawn from", () => {
+  const rowDeps = /\}, \[deferredQuery, features\.favorites, features\.diet_filter, loaded, menuData\.length\]\);/.test(F.menuView || "");
+  const panelBox = (F.menuView || "").indexOf('document.querySelector<HTMLElement>(".search-dropdown")');
+  const panelDeps = panelBox > 0 && /^[\s\S]{0,900}?\}, \[deferredQuery\]\);/.test(F.menuView.slice(panelBox));
+  const typedNowhere = !/\}, \[searchQuery[\],]/.test(F.menuView || "");
+  const declaredFirst = (F.menuView || "").indexOf("const deferredQuery = useDeferredValue(searchQuery);") > 0 &&
+    F.menuView.indexOf("const deferredQuery = useDeferredValue(searchQuery);") < F.menuView.indexOf('document.querySelector<HTMLElement>(".filter-row")');
+  return { ok: rowDeps && panelDeps && typedNowhere && declaredFirst,
+    note: `chip row=${rowDeps} suggestions=${panelDeps} no effect keyed on the typed text=${typedNowhere} declared above both=${declaredFirst}` };
+});
+
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
 // 0 over the saved position before the restore could read it, so every Back landed at the top of
@@ -651,6 +669,20 @@ async function live(base) {
       check("P15612", "LIVE: a real back-forward restore still wakes the screen", () =>
         ({ ok: afterRestore > afterPlain, note: `${afterPlain} → ${afterRestore}` }));
       await cc.close(); }
+
+    // LIVE: THE TWO FADES APPEAR AT THE TWO MOMENTS THAT LOST THEM (sweep #10 T1, item 1). A single
+    // `fill` is one keystroke's worth of change — exactly the case that broke — and Aangan's chip row
+    // and its one-letter search both genuinely overflow at 360px, so "1" is the only right answer.
+    { const { c, pg } = await open("/r/aangan-garden-restaurant/menu", 3000);
+      await pg.fill("#search-input", "a"); await pg.waitForTimeout(1200);
+      const panel = await pg.$eval(".search-dropdown", (b) => ({ hidden: b.scrollHeight - b.clientHeight, cue: b.getAttribute("data-can-scroll") })).catch(() => null);
+      await pg.fill("#search-input", ""); await pg.waitForTimeout(1500);
+      const row = await pg.$eval(".filter-row", (r) => ({ over: r.scrollWidth - r.clientWidth, cue: r.getAttribute("data-can-scroll") })).catch(() => null);
+      check("P170002", "LIVE: one typed letter — the suggestions that run past the panel get their fade", () =>
+        ({ ok: !!panel && panel.hidden > 4 && panel.cue === "1", note: JSON.stringify(panel) }));
+      check("P170003", "LIVE: after a search is cleared — the chip row that runs past the edge gets its fade back", () =>
+        ({ ok: !!row && row.over > 4 && row.cue === "1", note: JSON.stringify(row) }));
+      await c.close(); }
 
     // LIVE: every shape of wrong turn. The five guest ones must reach a real menu; the switched-off
     // restaurant must NOT (its menu is closed, and a redirect would be a lie about that); the staff

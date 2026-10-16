@@ -108,6 +108,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // what they see before they choose anything.
   const [layout, setLayout] = useState(defaultLayout || "gallery");
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
+  // The search text the SCREEN is drawn from — a beat behind `searchQuery` on a busy phone. Why it
+  // exists is explained at `const q` further down; it is declared up HERE because the two "there is
+  // more this way" effects below must follow it, not the typed text (sweep #10 T1, item 1).
+  const deferredQuery = useDeferredValue(searchQuery);
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
@@ -567,9 +571,17 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       ro?.disconnect();
     };
     // Re-attach when the row is rebuilt (a search hides it) or its chips change.
-    // `searchQuery`, not the folded `q` — `q` is derived further down the component, so
+    // `deferredQuery`, not the folded `q` — `q` is derived further down the component, so
     // naming it here would read a const before it is initialised and crash the render.
-  }, [searchQuery, features.favorites, features.diet_filter, loaded, menuData.length]);
+    //
+    // …AND NOT `searchQuery` EITHER (sweep #10 T1, item 1 — a regression). The row is drawn from the
+    // DEFERRED text (`{!q && …}` below), which since 2026-09-17 lands a render after the typed text.
+    // Keyed on the typed text, this effect ran on the render where a just-cleared search had not been
+    // drawn away yet, found no row, and never ran again — so after any search the chips lost their
+    // fade for good. Measured at 360px: French House's row runs 337px past the edge, Aangan's 164px,
+    // and the Veg / Non-Veg chips sat out there with no cue, which is the 2026-08-04 fault again.
+    // The deferred text changes on exactly the render that draws the row back, so it re-attaches then.
+  }, [deferredQuery, features.favorites, features.diet_filter, loaded, menuData.length]);
 
   // I3 — "THERE ARE MORE SUGGESTIONS THAN YOU CAN SEE" (T1 improvement 3, 2026-08-12).
   // Up to 8 suggestions are built, but the panel is max-height 340px — about five and a half rows on
@@ -590,11 +602,14 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     let ro: ResizeObserver | undefined;
     try { ro = new ResizeObserver(sync); ro.observe(box); } catch {}
     return () => { box.removeEventListener("scroll", sync); ro?.disconnect(); };
-    // `searchQuery`, NOT `searchResults` — the results list is derived further down this component,
-    // so naming it here would read a const before it is initialised and crash the render. Same trap,
+    // `deferredQuery`, NOT `searchResults` — the results list is derived further down this component,
+    // so naming it here would read a const before it is initialised and crash the render. And not the
+    // typed `searchQuery`: the panel is drawn from the DEFERRED text, so keyed on the typed one this
+    // effect ran before the panel existed — one typed letter or a pasted word, and the panel showed
+    // eight suggestions with 165px hidden below and no fade at all (sweep #10 T1, item 1). Same trap,
     // same answer, as the filter-row effect above. A new query is what rebuilds the rows anyway, and
     // the ResizeObserver catches the rest.
-  }, [searchQuery]);
+  }, [deferredQuery]);
 
   // If the data hasn't arrived within a moment, reveal the skeleton.
   // (Wait 200ms first; if it's still loading, show the grey placeholder boxes.
@@ -994,7 +1009,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   //
   // The box's own value stays `searchQuery` (below), and so do the effects that remember what was
   // typed — this only changes WHEN the results are recomputed, never what they are.
-  const deferredQuery = useDeferredValue(searchQuery);
+  // (`deferredQuery` itself is declared beside `searchQuery` at the top: the scroll-cue effects need it
+  // and they sit above this line.)
   // q = the search text, tidied up (trimmed, lowercased, accent-folded).
   const q = fold(deferredQuery.trim());
 
