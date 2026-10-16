@@ -66,6 +66,9 @@ const EXPLAINED_MISSING = {
   "scripts/verify-access-model.mjs": { paths: ["../node_modules/.cache/accessTree.mjs", "../node_modules/.cache/staffCaps.mjs"], why: "imports files its own npm entry bundles into node_modules/.cache just before it runs" },
   "scripts/verify-kitchen-screen.mjs": { paths: ["./sweep/t9/"], why: "a folder prefix — the file name is built at run time (./sweep/t9/<module>.mjs)" },
   "scripts/verify-print-helper.mjs": { paths: ["app/pair/page.tsx", "app/api/pair/route.ts"], why: "asserts the retired pairing route is GONE" },
+  // Read 2026-10-17 (S10 T1): both assert a 404 file deliberately does NOT exist.
+  "scripts/sweep/t1s10/rerun-other.mjs": { paths: ["app/menu/not-found.tsx"], why: "asserts the menu 404 has no non-tenant twin to drift from (T30 P14682)" },
+  "scripts/sweep/t1s10/rerun-rt.mjs": { paths: ["app/r/[restaurant]/not-found.tsx"], why: "asserts the menu 404 is scoped to the menu route only (P120149)" },
   // Read 2026-10-12 (S10 T29 round 2): every one of these names the three retired routes ON PURPOSE.
   "scripts/sweep/t27r2/g-photo-export-channels.mjs": { paths: ["app/api/admin/restaurants/platform-channels/route.ts"], why: "three admin switch doors retired 2026-10-12 (sweep #10 T29 round 2, item 13 — Access & permissions does their job): the file names them so their checks keep their ids and answer ⏭ \"route retired\", and so it can assert they stay gone" },
   "scripts/sweep/t27r2/h-logo-review-quick-staff.mjs": { paths: ["app/api/admin/restaurants/google-review/route.ts", "app/api/admin/restaurants/staff-features/route.ts"], why: "three admin switch doors retired 2026-10-12 (sweep #10 T29 round 2, item 13 — Access & permissions does their job): the file names them so their checks keep their ids and answer ⏭ \"route retired\", and so it can assert they stay gone" },
@@ -91,6 +94,10 @@ const EXPLAINED_WRITES = {
   "scripts/sweep/t12r3/fk-mut.mjs": "a CHECK whose writes go to a local fake server (the fixture world) — nothing reaches a database",
   // classifies older parcels' tax once (mig 421) — writes only the new, empty columns, only on rows not yet
   // classified, never `total`; a second run is a no-op. Read 2026-10-11.
+  // sweep #10 T1's shared helper: it only DEFINES sql() and runs no statement itself. The suites that write
+  // through it name their own put-back (rerun-n12 unseed(), rerun-s9 and see-search-off restore in a finally,
+  // rerun-n56 restore()). Read 2026-10-17.
+  "scripts/sweep/t1s10/lib.mjs": "a helper that defines sql() and runs no statement itself — each suite that writes through it names its own put-back",
   "scripts/backfill-parcel-tax.mjs": TOOL,
   "scripts/apply-migration-avlive.mjs": TOOL,
   "scripts/apply-migration-prod.mjs": TOOL,

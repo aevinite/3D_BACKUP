@@ -63,6 +63,39 @@ function sweep(m: Map<string, { at: number }>, keep: number): void {
   }
 }
 
+/**
+ * The address segment as the restaurant's slug: percent-escapes decoded, spaces trimmed, folded to lower
+ * case. ONE helper for both lookups below, so they can never read the same address two ways.
+ *
+ * DECODED HERE, NOT TRUSTED TO THE ROUTER (sweep #10 T1, item 2). Next hands a page its `[restaurant]`
+ * segment with some escapes still in it — measured on a production build: `/r/french-house%20/menu`
+ * reached the PAGE as "french-house%20" (no restaurant → "That table doesn't exist") while the
+ * menu-data API beside it received "french-house " and answered 200. The dead-end screen asks that API
+ * whether the menu is live, heard yes, and offered a "Go to the menu" button pointing at the very
+ * address it was standing on — so a diner whose chat app left a space on a pasted link tapped the way
+ * out and landed back on the same dead end, for ever. Decoding is lossless for every real restaurant:
+ * a slug is lower-case letters, digits and hyphens and can never contain a "%". A segment that will not
+ * decode is left as it is (it then resolves to nothing, honestly); the middleware turns most of those
+ * into the guest screen before they get here anyway.
+ */
+function slugOf(raw: string): string {
+  let s = String(raw || "");
+  if (s.includes("%")) { try { s = decodeURIComponent(s); } catch { /* unreadable — keep it as typed */ } }
+  return s.trim().toLowerCase();
+}
+
+/**
+ * The only shape a restaurant's address can have. Every writer builds it with the same cleaner
+ * (app/api/admin/restaurants → `s.toLowerCase().replace(/[^a-z0-9]+/g, "-")…slice(0, 40)`), and all 307
+ * rows on the dev database match it. Anything else names no restaurant, so it is answered "unknown"
+ * WITHOUT asking the database (sweep #10 T1, item 2's follow-up): once slugOf() decodes escapes, a
+ * `%00` in an address became a real null byte, Postgres refused the lookup (22P05 "\u0000 cannot be
+ * converted to text"), and the honest "I couldn't ask" turned a stray address into the error screen
+ * instead of the guest's "this menu isn't available". It also means a crawler's invented strings cost
+ * no round trip and are never cached.
+ */
+const SLUG_SHAPE = /^[a-z0-9-]{1,80}$/;
+
 const bySlug = new Map<string, { value: Restaurant | null; at: number }>();
 const TTL_MS = 15000;
 // How long a LAST KNOWN answer may stand in when the database won't answer. Generous on purpose:
@@ -113,7 +146,9 @@ export async function getRestaurantBySlug(slugRaw: string): Promise<Restaurant |
   // menu-data API and lib/panelGate.ts every one of them resolve through this function — one place
   // to be case-blind, and the per-process cache is keyed on the folded value so `/r/FRENCH-HOUSE`
   // and `/r/french-house` share one entry instead of reading the database twice.
-  const slug = String(slugRaw || "").trim().toLowerCase();
+  // …and a stray percent-escape or space must not either — see slugOf() above (sweep #10 T1, item 2).
+  const slug = slugOf(slugRaw);
+  if (!SLUG_SHAPE.test(slug)) return null;   // no restaurant can have this address — see SLUG_SHAPE
   const hit = bySlug.get(slug);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   sweep(bySlug, STALE_ON_ERROR_MS);
@@ -189,8 +224,8 @@ const MOVED_TTL_MS = 60_000;
  * on its way to notFound(), and this is only trying to do better than that.
  */
 export async function slugMovedTo(slugRaw: string): Promise<string | null> {
-  const slug = String(slugRaw || "").trim().toLowerCase();
-  if (!slug) return null;
+  const slug = slugOf(slugRaw);
+  if (!SLUG_SHAPE.test(slug)) return null;
   const hit = movedSlug.get(slug);
   if (hit && Date.now() - hit.at < MOVED_TTL_MS) return hit.value;
   sweep(movedSlug, MOVED_TTL_MS);

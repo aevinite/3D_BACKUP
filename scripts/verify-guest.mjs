@@ -509,6 +509,70 @@ check("P15602", "an open search is a back-step, so back does not offer to leave 
   rx(F.menuView, /useBackClose\("menu-search", !!q, \(\) => setSearchQuery\(""\)\)/) &&
   has(F.menuView, 'from "@/lib/backStack"'));
 
+// THE "THERE IS MORE THIS WAY" FADES FOLLOW WHAT IS DRAWN, NOT WHAT IS TYPED (sweep #10 T1, item 1 —
+// a REGRESSION: ledger row P00346 was green on 2026-09-14 and red on 2026-10-16). Since 2026-09-17 the
+// suggestions panel and the filter-chip row are drawn from `deferredQuery`, a render behind the typed
+// `searchQuery`. Both cue effects stayed keyed on the typed text, so they measured a screen that was not
+// drawn yet: one typed letter or a pasted word gave eight suggestions with 165px hidden and no fade, and
+// after any search the chip row (337px past the edge at 360px) lost its fade for good. Both effects must
+// list `deferredQuery`, and neither may list the typed text. Driven in the live half below.
+check("P170001", "the two scroll-cue effects re-measure on the DEFERRED search text the screen is drawn from", () => {
+  const rowDeps = /\}, \[deferredQuery, features\.favorites, features\.diet_filter, loaded, menuData\.length\]\);/.test(F.menuView || "");
+  const panelBox = (F.menuView || "").indexOf('document.querySelector<HTMLElement>(".search-dropdown")');
+  const panelDeps = panelBox > 0 && /^[\s\S]{0,900}?\}, \[deferredQuery\]\);/.test(F.menuView.slice(panelBox));
+  const typedNowhere = !/\}, \[searchQuery[\],]/.test(F.menuView || "");
+  const declaredFirst = (F.menuView || "").indexOf("const deferredQuery = useDeferredValue(searchQuery);") > 0 &&
+    F.menuView.indexOf("const deferredQuery = useDeferredValue(searchQuery);") < F.menuView.indexOf('document.querySelector<HTMLElement>(".filter-row")');
+  return { ok: rowDeps && panelDeps && typedNowhere && declaredFirst,
+    note: `chip row=${rowDeps} suggestions=${panelDeps} no effect keyed on the typed text=${typedNowhere} declared above both=${declaredFirst}` };
+});
+
+// ONE ADDRESS, READ ONE WAY, BY EVERY DOOR (sweep #10 T1, item 2). A page received `/r/french-house%20/menu`
+// with the escape still in it and found no restaurant, while the menu-data API decoded the same address and
+// answered 200 — so the dead end offered "Go to the menu" pointing back at itself. Both lookups in
+// lib/tenant.ts now go through slugOf(), which decodes before it trims and folds. Driven in the live half.
+check("P170004", "both restaurant lookups decode an address's escapes before trimming and folding it", () => {
+  const t = code("lib/tenant.ts") || "";
+  const helper = /function slugOf\(raw: string\): string \{[\s\S]{0,200}?decodeURIComponent\(s\)[\s\S]{0,120}?return s\.trim\(\)\.toLowerCase\(\);/.test(t);
+  const both = (t.match(/const slug = slugOf\(slugRaw\);/g) || []).length === 2;
+  const noRawFold = !/String\(slugRaw \|\| ""\)\.trim\(\)\.toLowerCase\(\)/.test(t);
+  return { ok: helper && both && noRawFold, note: `helper decodes=${helper} used by both lookups=${both} no un-decoded fold left=${noRawFold}` };
+});
+// …AND A DECODED ADDRESS THAT NO RESTAURANT COULD HAVE NEVER REACHES THE DATABASE (sweep #10 T1, item 2). Once
+// escapes are decoded, `%00` is a real null byte, Postgres refuses it, and the lookup's honest "I couldn't ask"
+// showed the error screen. Both lookups test the address's shape first and answer "unknown" without a read.
+check("P170012", "both restaurant lookups refuse an address no restaurant can have BEFORE asking the database", () => {
+  const t = code("lib/tenant.ts") || "";
+  const shape = /const SLUG_SHAPE = \/\^\[a-z0-9-\]\{1,80\}\$\/;/.test(t);
+  const g = t.indexOf("export async function getRestaurantBySlug"), m = t.indexOf("export async function slugMovedTo");
+  const before = (from, rpc) => { const a = t.indexOf("if (!SLUG_SHAPE.test(slug)) return null;", from), b = t.indexOf(rpc, from); return a > 0 && b > a; };
+  const ok1 = before(g, '.rpc("lfh_guest_restaurant"'), ok2 = before(m, '.rpc("lfh_slug_moved"');
+  return { ok: shape && ok1 && ok2, note: `shape rule=${shape} restaurant lookup=${ok1} moved lookup=${ok2}` };
+});
+// item 5 (sweep #10 T1): the two error screens cannot know whose menu failed, so they are unbranded —
+// their "Try again" button wore #d4a574, restaurant #1's gold, on every restaurant's error screen.
+check("P170014", "neither error screen paints anything in a restaurant's colour (no #1 gold, no accent)", () => {
+  const e = code("app/error.tsx") || "", g = code("app/global-error.tsx") || "";
+  const gold = /#d4a574|rgba?\(\s*212\s*,\s*165\s*,\s*116|--accent/i;
+  const sysOnly = !/#[0-9a-f]{3,8}\b|rgba?\(/i.test(e);   // app/error.tsx uses ONLY the device's system colours
+  return { ok: !!e && !!g && !gold.test(e) && !gold.test(g) && sysOnly, note: `error.tsx gold=${gold.test(e)} system-colours-only=${sysOnly} · global-error.tsx gold=${gold.test(g)}` };
+});
+// item 6 (sweep #10 T1): with the search switch OFF the box is gone, so a remembered search must stop
+// filtering too — it left a guest on 6 "coffee" dishes with no box, no ✕ and no sections.
+check("P170015", "a remembered search filters only while the search switch is on (like favourites and veg)", () => {
+  const mv = code("components/MenuView.tsx") || "";
+  const gated = /const q = features\.search !== false \? fold\(deferredQuery\.trim\(\)\) : "";/.test(mv);
+  const box = /\{features\.search && \(/.test(mv);
+  const noOther = !/fold\(deferredQuery/.test(mv.replace(/const q = features\.search !== false \? fold\(deferredQuery\.trim\(\)\) : "";/, ""));
+  return { ok: gated && box && noOther, note: `q gated=${gated} box gated=${box} no second filter on the raw text=${noOther}` };
+});
+// item 7 (sweep #10 T1): a currency whose sign IS its code (AED, SAR, QAR) was listed as "AED AED".
+check("P170525", "the currency list never prints a code twice (a sign is drawn only when it differs from the code)", () => {
+  const h = code("components/Header.tsx") || "";
+  const ok = /\{c\.symbol !== c\.label \? c\.symbol : ""\}/.test(h) && !/>\{c\.symbol\}<\/span>\s*<span>\{c\.label\}/.test(h);
+  return { ok, note: `sign drawn only when different: ${ok}` };
+});
+
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
 // 0 over the saved position before the restore could read it, so every Back landed at the top of
@@ -651,6 +715,64 @@ async function live(base) {
       check("P15612", "LIVE: a real back-forward restore still wakes the screen", () =>
         ({ ok: afterRestore > afterPlain, note: `${afterPlain} → ${afterRestore}` }));
       await cc.close(); }
+
+    // LIVE: THE TWO FADES APPEAR AT THE TWO MOMENTS THAT LOST THEM (sweep #10 T1, item 1). A single
+    // `fill` is one keystroke's worth of change — exactly the case that broke — and Aangan's chip row
+    // and its one-letter search both genuinely overflow at 360px, so "1" is the only right answer.
+    { const { c, pg } = await open("/r/aangan-garden-restaurant/menu", 3000);
+      await pg.fill("#search-input", "a"); await pg.waitForTimeout(1200);
+      const panel = await pg.$eval(".search-dropdown", (b) => ({ hidden: b.scrollHeight - b.clientHeight, cue: b.getAttribute("data-can-scroll") })).catch(() => null);
+      await pg.fill("#search-input", ""); await pg.waitForTimeout(1500);
+      const row = await pg.$eval(".filter-row", (r) => ({ over: r.scrollWidth - r.clientWidth, cue: r.getAttribute("data-can-scroll") })).catch(() => null);
+      check("P170002", "LIVE: one typed letter — the suggestions that run past the panel get their fade", () =>
+        ({ ok: !!panel && panel.hidden > 4 && panel.cue === "1", note: JSON.stringify(panel) }));
+      check("P170003", "LIVE: after a search is cleared — the chip row that runs past the edge gets its fade back", () =>
+        ({ ok: !!row && row.over > 4 && row.cue === "1", note: JSON.stringify(row) }));
+      await c.close(); }
+
+    // LIVE: A STRAY SPACE ON A PASTED LINK STILL OPENS THE MENU, AND NO DEAD END POINTS AT ITSELF
+    // (sweep #10 T1, item 2). The second half is the general rule the first one broke: a "Go to the menu"
+    // button whose address is the page it sits on is a loop, whatever caused it.
+    for (const [id, path] of [["P170005", "/r/french-house%20/menu"], ["P170006", "/r/%20french-house/menu"]]) {
+      const { c, pg } = await open(path, 3500);
+      const r = await pg.evaluate(() => ({ path: location.pathname, cards: document.querySelectorAll(".item-card").length }));
+      check(id, `LIVE: ${path} opens French House's menu on its one address`, () =>
+        ({ ok: r.path === "/r/french-house/menu" && r.cards > 0, note: `${r.path}, ${r.cards} dishes` }));
+      await c.close();
+    }
+    // LIVE (sweep #10 T1, item 3): the badge's name is in Chrome's OWN accessibility tree, once per card —
+    // the source can carry a perfect label that no screen reader ever reaches.
+    { const { c, pg } = await open("/r/french-house/menu", 3500);
+      const badges = await pg.$$eval(".item-card .diet-badge svg[role=img]", (e) => e.length);
+      const cdp = await pg.context().newCDPSession(pg);
+      const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+      const named = nodes.filter((n) => !n.ignored && /^(Non-)?Vegetarian$/.test(n.name?.value || "")).length;
+      check("P170009", "LIVE: every veg / non-veg badge on the menu is reachable by a screen reader", () =>
+        ({ ok: badges > 0 && named === badges, note: `${badges} badges drawn, ${named} in the accessibility tree` }));
+      const glyphs = nodes.filter((n) => !n.ignored && n.role?.value === "link" && /[\uf000-\uf8ff]/.test(n.name?.value || "")).map((n) => n.name.value.slice(0, 30));
+      check("P170011", "LIVE: no dish card's spoken name contains an icon-font glyph", () =>
+        ({ ok: glyphs.length === 0, note: glyphs.join(" | ") || "none" }));
+      await c.close(); }
+    { const { c, pg, status } = await open("/r/a%00b/menu", 3000);
+      const t = await pg.evaluate(() => document.body.innerText);
+      check("P170013", "LIVE: an address carrying a null byte gets the guest's 'menu isn't available', never the error screen", () =>
+        ({ ok: status === 404 && /isn’t available|doesn’t exist/.test(t) && !/couldn’t load this/i.test(t), note: `${status} · ${t.replace(/\s+/g, " ").slice(0, 60)}` }));
+      await c.close(); }
+    { const { c, pg } = await open("/r/burger-barn/menu", 2500);
+      const btn = await pg.$("button.nav-btn[aria-label^='Currency']");
+      let rows = [];
+      if (btn) { await btn.click(); await pg.waitForTimeout(300); rows = await pg.$$eval("[role='listbox'] > [role='option']", (e) => e.map((x) => [...x.querySelectorAll("span span")].map((s) => s.textContent.trim()).filter(Boolean).join(" ") || x.textContent.trim())); }
+      check("P170526", "LIVE: Burger Barn's currency list reads each currency once (no 'AED AED')", () =>
+        ({ ok: rows.length >= 4 && rows.every((r) => !/^(\S+)\s*\1$/.test(r)), note: rows.join(" · ") || "no currency picker found" }));
+      await c.close(); }
+    for (const path of ["/r/zz-no-such-place-t1/menu", "/r/french-house/item/zz-no-such-dish", "/r/french-house%09/menu", "/q/ZZZZZZ", "/zz-stray-t1"]) {
+      const { c, pg } = await open(path, 3500);
+      const loops = await pg.evaluate(() => [...document.querySelectorAll(".gnf a, .nf a")]
+        .map((a) => a.getAttribute("href")).filter((h) => h && new URL(h, location.href).pathname === location.pathname));
+      check("P170007", `LIVE: the dead end at ${path} offers no way out that points back at itself`, () =>
+        ({ ok: loops.length === 0, note: loops.join(", ") || "none" }));
+      await c.close();
+    }
 
     // LIVE: every shape of wrong turn. The five guest ones must reach a real menu; the switched-off
     // restaurant must NOT (its menu is closed, and a redirect would be a lie about that); the staff
@@ -1001,6 +1123,33 @@ check("P102059", "the veg / non-veg badge is marked as a picture, so its name is
   const svgs = c.match(/<svg[^>]*>/g) || [];
   return { ok: svgs.length === 2 && svgs.every((t) => t.includes('role="img"') && t.includes("aria-label")),
     note: `${svgs.length} <svg> tags; a bare svg has no implicit role, and several readers then drop its aria-label` };
+});
+// …AND NOTHING AROUND IT HIDES IT AGAIN (sweep #10 T1, item 3). The check above held for a month while the
+// menu card wrapped the badge in `aria-hidden="true"`, which removes it — label and all — from the
+// accessibility tree: 59 labelled badges on French House, 0 a screen reader could reach. A label is only
+// worth anything if no ancestor hides it, so the element that directly holds <VegIcon> is asked too.
+check("P170008", "no page hides the veg / non-veg badge from a screen reader by wrapping it", () => {
+  const bad = [];
+  for (const f of ["components/FoodCard.tsx", "app/item/[slug]/ItemClient.tsx"]) {
+    const c = code(f) || "";
+    for (const m of c.matchAll(/<(div|span)\b([^>]*)>\s*<VegIcon\b/g)) if (/aria-hidden/.test(m[2])) bad.push(f.split("/").pop());
+  }
+  return { ok: bad.length === 0, note: bad.length ? `aria-hidden wrapper in ${bad.join(", ")}` : "both places that draw the badge leave it readable" };
+});
+// AN ICON-FONT GLYPH IS NOT A WORD (sweep #10 T1, item 4). A Font Awesome <i> draws a private-use character;
+// unless it is hidden, or sits inside a control that has its own spoken label, that character becomes part of
+// the accessible name of whatever holds it. The two cubes on a 3D dish card did exactly that.
+check("P170010", "every icon on a dish card is hidden from a screen reader or sits inside a labelled button", () => {
+  const c = code("components/FoodCard.tsx") || "";
+  const bad = [];
+  for (const m of c.matchAll(/<i className="fas ([^"]+)"([^>]*)>/g)) {
+    if (/aria-hidden="true"/.test(m[2])) continue;
+    const before = c.slice(Math.max(0, m.index - 400), m.index);
+    const btn = before.lastIndexOf("<button"), close = before.lastIndexOf("</button>");
+    if (btn > close && /aria-label=/.test(before.slice(btn))) continue;
+    bad.push(m[1]);
+  }
+  return { ok: bad.length === 0, note: bad.join(", ") || "every icon is hidden or inside a labelled button" };
 });
 check("P102060", "…and the badge still carries no colour of its own", () =>
   ({ ok: !rx(code("components/VegIcon.tsx"), /#[0-9a-fA-F]{3,6}/),

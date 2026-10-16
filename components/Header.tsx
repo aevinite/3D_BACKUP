@@ -246,7 +246,10 @@ export default function Header({ logoText }: { logoText?: string }) {
             key: c.code,
             label: (
               <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <span style={{ width: 22, textAlign: "center" }}>{c.symbol}</span>
+                {/* A currency with no sign of its own (AED, SAR, QAR) has symbol === label, so the row read
+                    "AED AED" — on screen and aloud (sweep #10 T1, item 7). The sign column stays, empty,
+                    so every code still lines up under ₹ / $ / €. */}
+                <span style={{ width: 22, textAlign: "center" }} aria-hidden={c.symbol === c.label || undefined}>{c.symbol !== c.label ? c.symbol : ""}</span>
                 <span>{c.label}</span>
               </span>
             ),

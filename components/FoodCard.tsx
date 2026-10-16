@@ -344,9 +344,12 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           />
           {/* Show a little "4D" cube badge only if this dish has a 3D model
               (and the restaurant hasn't switched the 3D feature off). */}
+          {/* The cube is drawn by the icon font, so without aria-hidden a screen reader reads its
+              glyph as part of the card's name — measured in Chrome's tree: "Avocado & Cream Cheese,
+              <U+F1B2> 4D, …" (sweep #10 T1, item 4). The word "4D" beside it is what is meant. */}
           {has3d ? (
             <div className="badge-4d">
-              <i className="fas fa-cube"></i> 4D
+              <i className="fas fa-cube" aria-hidden="true"></i> 4D
             </div>
           ) : null}
         </div>
@@ -354,7 +357,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           <div className="dish-name" ref={nameRef}>
             {localized(item.titleI18n || {}, lang) || item.title}
             {/* A small cube icon beside the name for 4D dishes */}
-            {has3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
+            {has3d ? <i className="fas fa-cube dish-4d-icon" aria-hidden="true"></i> : null}
           </div>
           {/* Rating (real average) and prep time. Dishes with no reviews yet
               show only the prep time — no invented stars, no extra badges
@@ -393,8 +396,15 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         {/* The veg / non-veg marker in the corner. One switch now covers the filter chips
             AND this mark (Access → Menu → Veg / non-veg): a pure-veg restaurant has nothing
             to distinguish, so marking every dish green was noise (owner, 2026-07-31). */}
+        {/* NOT aria-hidden (sweep #10 T1, item 3). The owner's item 4 of 2026-09-14 gave VegIcon
+            role="img" and its "Vegetarian" / "Non-Vegetarian" label so a screen reader would say it
+            — and this wrapper went on hiding the whole badge from the accessibility tree. Measured
+            in Chrome's own tree on French House: 59 labelled badges in the page, 0 reachable; the
+            card was read as "Espresso, 4.9 ★, ₹250" with nothing about veg. On an Indian menu that
+            is the one fact a diner may need before anything else. The badge is the only place this
+            card says it, so it is read once, with the card. */}
         {(showDiet ?? !!features.diet_filter) && (
-          <div className="diet-badge" aria-hidden="true">
+          <div className="diet-badge">
             <VegIcon isVeg={item.veg} size={18} />
           </div>
         )}
