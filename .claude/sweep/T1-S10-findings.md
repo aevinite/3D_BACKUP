@@ -1,6 +1,6 @@
 # Sweep #10 · Terminal 1 · the guest menu and its three doors — findings
 
-Ledger: `.claude/sweep/LEDGER/T1-S10.md` (524 new rows, P170001–P170526 with two guard ids added late) · re-runs stamped in
+Ledger: `.claude/sweep/LEDGER/T1-S10.md` (526 new rows, P170001–P170526) · re-runs stamped in
 `T1.md` and 15 other ledgers (3,470 rows).
 
 ## Part 1 — problems found and fixed (7)
