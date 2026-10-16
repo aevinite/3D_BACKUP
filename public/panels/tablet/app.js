@@ -4508,16 +4508,17 @@ function openTagSheet(t) {
     const done = tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed";
     const revert = () => { if (tile) { tile.tag = prev || ""; renderFloor(); renderPanel(); } };
     (async () => {
+      let r = null;
       try {
         try {
-          await api("POST", `/tables/${t}/tag`, { tag });
+          r = await api("POST", `/tables/${t}/tag`, { tag });
         } catch (e) {
           // 'pin' mode: the server asks for a manager PIN — same round-trip as actGated.
           if (!wantsPin(e)) throw e;
           let pin = await pinPrompt("Enter a manager PIN to mark this table.");
           let okd = false;
           while (pin) {
-            try { await api("POST", `/tables/${t}/tag`, { tag, managerPin: pin }); okd = true; break; }
+            try { r = await api("POST", `/tables/${t}/tag`, { tag, managerPin: pin }); okd = true; break; }
             catch (e2) {
               if (wantsPin(e2)) { pin = await pinPrompt("Enter a manager PIN to mark this table.", "That PIN didn't match — try again."); continue; }
               throw e2;
@@ -4525,7 +4526,11 @@ function openTagSheet(t) {
           }
           if (!okd) { revert(); return; } // PIN cancelled
         }
-        toast(done);
+        // SAVED IS NOT MARKED (sweep #10 T12 round 3, item 4). With no internet the device's queue
+        // answers, and this said "Marked 👑 VIP" about a mark the server had not got — the same family
+        // as round 1's print and banquet items. The tile keeps the mark it already shows; the words say
+        // it is waiting to send.
+        toast(isQueued(r) ? savedMsg(r) : done);
       } catch (e) { revert(); toast("Failed: " + errText(e), false); }
     })();
   }));

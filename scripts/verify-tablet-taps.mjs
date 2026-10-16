@@ -1582,6 +1582,16 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── A TABLE TYPE SAVED OFFLINE IS NOT "MARKED" (sweep #10 T12 round 3, item 4) ────────────────────────
+{
+  const i = src.indexOf("function openTagSheet("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: a table type picked with no internet says it is saved, not 'Marked 👑 VIP'",
+    /r = await api\("POST", `\/tables\/\$\{t\}\/tag`, \{ tag \}\);/.test(body) && /toast\(isQueued\(r\) \? savedMsg\(r\) : done\);/.test(body),
+    `${TABLET} openTagSheet: the device queue's answer is not the server's.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");
