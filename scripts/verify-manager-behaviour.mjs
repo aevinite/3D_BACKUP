@@ -688,7 +688,40 @@ async function retentionResets() {
   }
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets];
+// ── R · A "FIRST SAVE WINS" REFUSAL IS READ IN WORDS (sweep #10 T7, 2026-10-16) ───────────────────
+// On a live write the server refuses a clash with { error: "clash_changed_elsewhere", clash: { plain,
+// todo } }, and api() throws with e.message = that CODE. The menu editor's Save — the write the
+// expectation exists for — printed "Save failed: clash_changed_elsewhere". Every function in the
+// manager panel that sends an expectation must say its refusal through errText() or clash.plain,
+// never a bare e.message.
+async function clashInWords() {
+  console.log("\nR. a first-save-wins refusal is read in words, never as its code");
+  const app = src("public/panels/editor/app.js");
+  // For every write that sends an expectation, the catch that answers it (the first one within 30
+  // lines after the call) must say the refusal through errText() or clash.plain.
+  const lines = app.split("\n");
+  const bad1 = [];
+  let n = 0;
+  lines.forEach((l, i) => {
+    if (!/api\("(POST|PATCH|DELETE)"[^\n]*\{ expect: /.test(l)) return;
+    n++;
+    for (let j = i; j < Math.min(lines.length, i + 30); j++) {
+      if (!/catch \(e\) \{/.test(lines[j])) continue;
+      const c = lines.slice(j, j + 6).join("\n");
+      if (/\+ e\.message/.test(c) && !/errText\(e\)|clash\.plain|\.clash/.test(c)) bad1.push("app.js:" + (i + 1));
+      break;
+    }
+  });
+  bad1.length === 0 && n >= 5
+    ? ok(`all ${n} writes that send an expectation say a refusal in words`)
+    : bad("a write that sends an expectation answers a refusal with e.message — a clash reads as its code", bad1.join(", ") || `only ${n} found`);
+  const sv = app.slice(app.indexOf("\nasync function save() {"), app.indexOf("\nasync function removeRecord("));
+  /const clash = !!\(e && e\.data && e\.data\.clash\);\s*\n\s*toast\(clash \? errText\(e\)/.test(sv)
+    ? ok("the menu editor's Save says the server's sentence on a clash, and holds it 9 seconds")
+    : bad("the menu editor's Save no longer words a clash");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets, clashInWords];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

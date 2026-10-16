@@ -8322,7 +8322,13 @@ async function save() {
     renderList();
     renderEditor();
   } catch (e) {
-    toast("Save failed: " + e.message, "err");
+    // IN WORDS (sweep #10 T7, item 8). This is the write buildEditExpect exists for, so it is the
+    // place a "first save wins" refusal is MOST likely to land — and e.message on a live refusal is
+    // the server's CODE, so the second manager read "Save failed: clash_changed_elsewhere". errText()
+    // says the server's own sentence ("Someone else changed Price while you had it open — it now
+    // says …"), and a refusal like that is held on screen long enough to read.
+    const clash = !!(e && e.data && e.data.clash);
+    toast(clash ? errText(e) : "Save failed: " + errText(e), "err", undefined, clash ? 9000 : undefined);
   } finally {
     // renderEditor() rebuilds the Save button on success; re-query so we re-enable
     // whatever button now exists (important on the failure path, where nothing re-rendered).
