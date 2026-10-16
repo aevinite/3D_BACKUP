@@ -23,7 +23,7 @@ export function page(name, { scripts = [], body = "", pre = "", head = "", after
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, "http://x");
   if (u.pathname.startsWith("/panels/")) {
-    try { const body = panelFile(u.pathname.slice("/panels/".length)); res.writeHead(200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-store" }); return res.end(body); }
+    try { const body = panelFile(u.pathname.slice("/panels/".length)); const ext = u.pathname.split(".").pop(); res.writeHead(200, { "content-type": ({ css: "text/css", html: "text/html", json: "application/json" }[ext] || "application/javascript") + "; charset=utf-8", "cache-control": "no-store" }); return res.end(body); }
     catch { res.writeHead(404); return res.end("not found"); }
   }
   if (u.pathname.startsWith("/p/")) { const h = pages.get(u.pathname.slice(3)); res.writeHead(h ? 200 : 404, { "content-type": "text/html; charset=utf-8" }); return res.end(h || "no such page"); }

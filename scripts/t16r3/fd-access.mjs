@@ -15,13 +15,13 @@ const VIEWS = [
   { tag: "phone (webkit)", engine: "webkit", viewport: { width: 390, height: 800 }, touch: true },
   { tag: "desktop", engine: "chromium", viewport: { width: 1280, height: 860 } },
 ];
-const PROFILE = { staff: true, id: "u1", name: "Asha Rao", username: "asha", phone: "9800000000", role: "manager", hasPin: true, canSelfReset: true, canSelfSetPin: true,
+export const PROFILE = { staff: true, id: "u1", name: "Asha Rao", username: "asha", phone: "9800000000", role: "manager", hasPin: true, canSelfReset: true, canSelfSetPin: true,
   profileModule: true, canSeeOwnPay: true, job: "Floor manager", profile: {}, pay: { pay_type: "monthly", pay_amount: 21000, pay_extras: [] }, payments: [], paySummary: null, completeness: 100 };
 setApi(() => ({ status: 200, body: {} }));
-const api = (r) => (r.path.startsWith("/api/panel-profile") ? { status: 200, body: PROFILE } : r.path.startsWith("/api/rt-config") ? { status: 404, body: {} } : { status: 200, body: { ok: true } });
+export const api = (r) => (r.path.startsWith("/api/panel-profile") ? { status: 200, body: PROFILE } : r.path.startsWith("/api/rt-config") ? { status: 404, body: {} } : { status: 200, body: { ok: true } });
 
-const TOP = '<div class="topbar"><b>Panel</b><div class="top-actions"></div></div><main style="padding:16px">Board</main>';
-const W = [
+export const TOP = '<div class="topbar"><b>Panel</b><div class="top-actions"></div></div><main style="padding:16px">Board</main>';
+export const W = [
   { name: "the undo card", scripts: ["undobar.js"], back: false, sel: "#lfh-undobar",
     open: () => window.LFH_UNDO.show({ message: "Served Paneer Tikka", seconds: 5 }) },
   { name: "the offline details sheet", scripts: ["backstack.js", "offline.js"], sel: ".lfh-offsheet, [class*=lfh-off]:not(.lfh-offbar)",
