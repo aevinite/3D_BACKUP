@@ -756,7 +756,10 @@ async function live(base) {
     { const { c, pg, status } = await open("/r/a%00b/menu", 3000);
       const t = await pg.evaluate(() => document.body.innerText);
       check("P170013", "LIVE: an address carrying a null byte gets the guest's 'menu isn't available', never the error screen", () =>
-        ({ ok: status === 404 && /isn’t available|doesn’t exist/.test(t) && !/couldn’t load this/i.test(t), note: `${status} · ${t.replace(/\s+/g, " ").slice(0, 60)}` }));
+        // On Vercel the platform's own edge refuses a null byte (400 "BAD_REQUEST") before the request
+        // reaches the app — that is not the app's error screen either, so it passes; locally the app
+        // answers its 404 docket. What must never appear is the app's "We couldn't load this" screen.
+        ({ ok: ((status === 404 && /isn’t available|doesn’t exist/.test(t)) || (status === 400 && /BAD_REQUEST/.test(t))) && !/couldn’t load this/i.test(t), note: `${status} · ${t.replace(/\s+/g, " ").slice(0, 60)}` }));
       await c.close(); }
     { const { c, pg } = await open("/r/burger-barn/menu", 2500);
       const btn = await pg.$("button.nav-btn[aria-label^='Currency']");
