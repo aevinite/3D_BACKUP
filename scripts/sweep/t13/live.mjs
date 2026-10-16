@@ -98,8 +98,8 @@ await chk("P40006", "…and every one carries a real figure, never NaN or undefi
 await chk("P05814", "'per paid order' equals revenue ÷ paid orders on the RENDERED figures", async () => {
   // open the Orders popup and check its own four numbers against each other
   await pg.locator(".ow2-kpi", { hasText: /ORDERS/i }).first().click();
-  await pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const rows = await pg.locator(".ow2-tile .r").allInnerTexts();
+  await pg.waitForSelector(".tdk", { timeout: 10000 });
+  const rows = await pg.$$eval(".tdk .rows .r", (rs) => rs.map((r) => (r.querySelector(".l")?.textContent || "").trim() + "\n" + (r.querySelector(".v")?.textContent || "").trim()));
   const num = (label) => {
     const r = rows.find((x) => x.split("\n")[0].trim() === label);
     return r ? Number(r.split("\n").pop().replace(/[^0-9.]/g, "")) : NaN;
@@ -126,10 +126,10 @@ for (const [label, title] of POPUPS) {
   const id = { REVENUE: "P20860", ORDERS: "P20861", "TODAY SO FAR": "P20863", EXPENSES: "P20865", "ON HAND": "P20866" }[label];
   await chk(id, `the ${title} popup opens, is headed ${title}, and has rows`, async () => {
     await pg.locator(".ow2-kpi", { hasText: new RegExp(label, "i") }).first().click();
-    await pg.waitForSelector(".ow2-tile", { timeout: 10000 });
-    const h = await pg.locator(".ow2-tile header .ti b").innerText();
-    const rows = await pg.locator(".ow2-tile .rows .r").count();
-    const who = await pg.locator(".ow2-tile .who").innerText();
+    await pg.waitForSelector(".tdk", { timeout: 10000 });
+    const h = await pg.locator(".tdk header b").innerText();
+    const rows = await pg.locator(".tdk .rows .r").count();
+    const who = await pg.locator(".tdk header i").innerText();
     await pg.keyboard.press("Escape");
     await pg.waitForTimeout(350);
     return h === title && rows >= 3 && who.length > 2
@@ -139,7 +139,7 @@ for (const [label, title] of POPUPS) {
 await chk("P20874", "opening a popup fires ZERO API requests", async () => {
   const before = D.reqs.length;
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile", { timeout: 10000 });
+  await pg.waitForSelector(".tdk", { timeout: 10000 });
   await pg.waitForTimeout(900);
   const after = D.reqs.length;
   await pg.keyboard.press("Escape");
@@ -148,38 +148,38 @@ await chk("P20874", "opening a popup fires ZERO API requests", async () => {
 });
 await chk("P20869", "the ✕ closes the popup", async () => {
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile");
-  await pg.locator(".ow2-tile .x").click();
+  await pg.waitForSelector(".tdk");
+  await pg.locator(".tdk .x").click();
   await pg.waitForTimeout(400);
-  return (await pg.locator(".ow2-tile").count()) === 0 ? true : "the ✕ left it open";
+  return (await pg.locator(".tdk").count()) === 0 ? true : "the ✕ left it open";
 });
 await chk("P20870", "the backdrop closes it", async () => {
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile");
-  await pg.locator(".ow2-tile-back").click({ position: { x: 5, y: 5 } });
+  await pg.waitForSelector(".tdk");
+  await pg.locator(".tdk-back").click({ position: { x: 5, y: 5 } });
   await pg.waitForTimeout(400);
-  return (await pg.locator(".ow2-tile").count()) === 0 ? true : "the backdrop left it open";
+  return (await pg.locator(".tdk").count()) === 0 ? true : "the backdrop left it open";
 });
 await chk("P20871", "Escape closes it", async () => {
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile");
+  await pg.waitForSelector(".tdk");
   await pg.keyboard.press("Escape");
   await pg.waitForTimeout(400);
-  return (await pg.locator(".ow2-tile").count()) === 0 ? true : "Escape left it open";
+  return (await pg.locator(".tdk").count()) === 0 ? true : "Escape left it open";
 });
 await chk("P20872", "the phone's BACK closes it and stays on /owner", async () => {
   await pg.locator(".ow2-kpi").first().click();
-  await pg.waitForSelector(".ow2-tile");
+  await pg.waitForSelector(".tdk");
   await pg.goBack();
   await pg.waitForTimeout(700);
-  const closed = (await pg.locator(".ow2-tile").count()) === 0;
+  const closed = (await pg.locator(".tdk").count()) === 0;
   const stillHere = /\/owner(\?|$)/.test(new URL(pg.url()).pathname + (new URL(pg.url()).search || ""));
   return closed && stillHere ? true : `closed=${closed} url=${pg.url()}`;
 });
 await chk("P20873", "only one popup can be open at a time", async () => {
   await pg.locator(".ow2-kpi").nth(0).click();
-  await pg.waitForSelector(".ow2-tile");
-  const n = await pg.locator(".ow2-tile").count();
+  await pg.waitForSelector(".tdk");
+  const n = await pg.locator(".tdk").count();
   await pg.keyboard.press("Escape");
   await pg.waitForTimeout(350);
   return n === 1 ? true : `${n} sheets open at once`;
@@ -188,8 +188,8 @@ await chk("P20868", "each popup's footer link carries the scope, the range and t
   const seen = [];
   for (const [label] of POPUPS) {
     await pg.locator(".ow2-kpi", { hasText: new RegExp(label, "i") }).first().click();
-    await pg.waitForSelector(".ow2-tile");
-    const href = await pg.locator(".ow2-tile .full").getAttribute("href").catch(() => null);
+    await pg.waitForSelector(".tdk");
+    const href = await pg.locator(".tdk .full").getAttribute("href").catch(() => null);
     seen.push([label, href]);
     await pg.keyboard.press("Escape");
     await pg.waitForTimeout(300);
@@ -199,8 +199,8 @@ await chk("P20868", "each popup's footer link carries the scope, the range and t
 });
 await chk("P40268", "the Today popup's link carries range=today, not the dropdown's range", async () => {
   await pg.locator(".ow2-kpi", { hasText: /TODAY SO FAR/i }).first().click();
-  await pg.waitForSelector(".ow2-tile");
-  const href = await pg.locator(".ow2-tile .full").getAttribute("href");
+  await pg.waitForSelector(".tdk");
+  const href = await pg.locator(".tdk .full").getAttribute("href");
   await pg.keyboard.press("Escape");
   await pg.waitForTimeout(300);
   return /range=today/.test(href) && /open=daysummary/.test(href)

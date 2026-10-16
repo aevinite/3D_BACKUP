@@ -205,8 +205,8 @@ await chk(nextId(), "the On hand tile really is Revenue minus Expenses, as its o
 });
 await chk(nextId(), "the Today tile's open-table count matches the estate table's Open column", async () => {
   await E.locator(".ow2-kpi").nth(2).click();
-  await E.waitForSelector(".ow2-tile", { timeout: 10000 });
-  const rows = await E.locator(".ow2-tile .r").allInnerTexts();
+  await E.waitForSelector(".tdk", { timeout: 10000 });
+  const rows = await E.$$eval(".tdk .rows .r", (rs) => rs.map((r) => (r.querySelector(".l")?.textContent || "").trim() + "\n" + (r.querySelector(".v")?.textContent || "").trim()));
   const popup = Number(String(rows.find((r) => /Tables open now/.test(r)) || "").split("\n").pop());
   await E.keyboard.press("Escape");
   await E.waitForTimeout(400);
@@ -217,8 +217,8 @@ await chk(nextId(), "each popup's own rows add up to the total it prints", async
   const problems = [];
   for (const [i, name] of [[3, "Expenses"], [4, "On hand"]]) {
     await E.locator(".ow2-kpi").nth(i).click();
-    await E.waitForSelector(".ow2-tile", { timeout: 10000 });
-    const rows = await E.locator(".ow2-tile .r").allInnerTexts();
+    await E.waitForSelector(".tdk", { timeout: 10000 });
+    const rows = await E.$$eval(".tdk .rows .r", (rs) => rs.map((r) => (r.querySelector(".l")?.textContent || "").trim() + "\n" + (r.querySelector(".v")?.textContent || "").trim()));
     const parsed = rows.map((r) => { const p = r.split("\n"); return { label: p[0].trim(), value: num(p[p.length - 1]) }; });
     const total = parsed[parsed.length - 1];
     const parts = parsed.slice(0, -1).filter((x) => Number.isFinite(x.value));
@@ -240,8 +240,8 @@ await chk(nextId(), "every popup on the estate names the ESTATE, not one restaur
   const wrong = [];
   for (let i = 0; i < 5; i++) {
     await E.locator(".ow2-kpi").nth(i).click();
-    await E.waitForSelector(".ow2-tile", { timeout: 10000 });
-    const who = (await E.locator(".ow2-tile .who").innerText()).trim();
+    await E.waitForSelector(".tdk", { timeout: 10000 });
+    const who = (await E.locator(".tdk header i").innerText()).trim();
     if (!/all 5 restaurants/i.test(who)) wrong.push(who);
     await E.keyboard.press("Escape");
     await E.waitForTimeout(350);
@@ -252,8 +252,8 @@ await chk(nextId(), "…and every popup's report link says view=all from the est
   const bad = [];
   for (let i = 0; i < 5; i++) {
     await E.locator(".ow2-kpi").nth(i).click();
-    await E.waitForSelector(".ow2-tile", { timeout: 10000 });
-    const href = await E.locator(".ow2-tile .full").getAttribute("href").catch(() => null);
+    await E.waitForSelector(".tdk", { timeout: 10000 });
+    const href = await E.locator(".tdk .full").getAttribute("href").catch(() => null);
     if (!href || !/view=all/.test(href)) bad.push(href);
     await E.keyboard.press("Escape");
     await E.waitForTimeout(350);
@@ -357,8 +357,8 @@ for (const period of PERIODS) {
   });
   await chk(nextId(), `${period}, one restaurant: the Orders popup's paid + open equals its own total`, async () => {
     await S.locator(".ow2-kpi").nth(1).click();
-    await S.waitForSelector(".ow2-tile", { timeout: 10000 });
-    const rows = await S.locator(".ow2-tile .r").allInnerTexts();
+    await S.waitForSelector(".tdk", { timeout: 10000 });
+    const rows = await S.$$eval(".tdk .rows .r", (rs) => rs.map((r) => (r.querySelector(".l")?.textContent || "").trim() + "\n" + (r.querySelector(".v")?.textContent || "").trim()));
     const pick = (l) => { const r = rows.find((x) => x.split("\n")[0].trim() === l); return r ? num(r.split("\n").pop()) : NaN; };
     const total = pick("Orders"), paid = pick("Paid"), open_ = pick("Still open");
     await S.keyboard.press("Escape");

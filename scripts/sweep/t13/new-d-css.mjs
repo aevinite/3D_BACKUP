@@ -338,9 +338,9 @@ await chk(nextId(), "…and the desktop header has as many columns as the body h
 // ── the overlays: opened, then measured ──────────────────────────────────────────────────────
 await chk(nextId(), "the tile popup computes as a fixed sheet no card can clip", async () => {
   await single.locator(".ow2-kpi").first().click();
-  await single.waitForSelector(".ow2-tile", { timeout: 10000 });
+  await single.waitForSelector(".tdk", { timeout: 10000 });
   const r = await single.evaluate(() => {
-    const w = document.querySelector(".ow2-tile-wrap"), t = document.querySelector(".ow2-tile");
+    const w = document.querySelector(".tdk-wrap"), t = document.querySelector(".tdk");
     return { pos: getComputedStyle(w).position, z: getComputedStyle(w).zIndex,
              overflow: getComputedStyle(t).overflowY, maxH: getComputedStyle(t).maxHeight };
   });
@@ -349,7 +349,7 @@ await chk(nextId(), "the tile popup computes as a fixed sheet no card can clip",
 });
 await chk(nextId(), "…and it fits inside the viewport rather than growing past it", async () => {
   const r = await single.evaluate(() => {
-    const t = document.querySelector(".ow2-tile").getBoundingClientRect();
+    const t = document.querySelector(".tdk").getBoundingClientRect();
     return { top: Math.round(t.top), bottom: Math.round(t.bottom), vh: innerHeight, vw: innerWidth, right: Math.round(t.right) };
   });
   return r.top >= -1 && r.bottom <= r.vh + 1 && r.right <= r.vw + 1
@@ -358,7 +358,7 @@ await chk(nextId(), "…and it fits inside the viewport rather than growing past
 await chk(nextId(), "…and its total row is marked by weight and a border, not by colour alone", async () => {
   const r = await single.evaluate(() => {
     // the Revenue popup has no total; open the one that does by reading the rows we have
-    const last = document.querySelector(".ow2-tile .r.last");
+    const last = document.querySelector(".tdk .r.total");
     if (!last) return { none: true };
     const cs = getComputedStyle(last);
     return { borderTop: cs.borderTopWidth, weight: getComputedStyle(last.querySelector(".l")).fontWeight };
@@ -369,7 +369,7 @@ await chk(nextId(), "…and its total row is marked by weight and a border, not 
 });
 await chk(nextId(), "the popup's close button is a real, labelled control of a usable size", async () => {
   const r = await single.evaluate(() => {
-    const x = document.querySelector(".ow2-tile .x");
+    const x = document.querySelector(".tdk .x");
     const b = x.getBoundingClientRect();
     return { tag: x.tagName, label: x.getAttribute("aria-label"), w: Math.round(b.width), h: Math.round(b.height) };
   });
@@ -378,14 +378,14 @@ await chk(nextId(), "the popup's close button is a real, labelled control of a u
 });
 await chk(nextId(), "…and the backdrop covers the whole screen", async () => {
   const r = await single.evaluate(() => {
-    const b = document.querySelector(".ow2-tile-back").getBoundingClientRect();
+    const b = document.querySelector(".tdk-back").getBoundingClientRect();
     return { w: Math.round(b.width), h: Math.round(b.height), vw: innerWidth, vh: innerHeight };
   });
   return r.w >= r.vw - 1 && r.h >= r.vh - 1 ? true : `backdrop ${r.w}x${r.h} over ${r.vw}x${r.vh}`;
 });
 await chk(nextId(), "…and the sheet sits ABOVE the backdrop", async () => {
   const r = await single.evaluate(() => {
-    const t = document.querySelector(".ow2-tile"), b = document.querySelector(".ow2-tile-back");
+    const t = document.querySelector(".tdk"), b = document.querySelector(".tdk-back");
     return { tPos: getComputedStyle(t).position, bPos: getComputedStyle(b).position,
              order: Array.prototype.indexOf.call(t.parentElement.children, t) > Array.prototype.indexOf.call(b.parentElement.children, b) };
   });
@@ -394,7 +394,7 @@ await chk(nextId(), "…and the sheet sits ABOVE the backdrop", async () => {
 await single.keyboard.press("Escape");
 await single.waitForTimeout(400);
 await chk(nextId(), "…and Escape really removes it from the DOM, not merely hides it", async () =>
-  (await single.locator(".ow2-tile").count()) === 0 ? true : "the sheet is still in the DOM after Escape");
+  (await single.locator(".tdk").count()) === 0 ? true : "the sheet is still in the DOM after Escape");
 
 await chk(nextId(), "the estate drawer computes as a right-hand sheet the full height of the screen", async () => {
   await estateWide.locator(".hq-table tr.hq-row").first().click();
