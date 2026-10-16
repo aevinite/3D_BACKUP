@@ -561,7 +561,7 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
         "on a tax invoice the words are the controlling figure — they must name the same amount AND the currency");
   }
 
-  // 9b. A MIXED-RATE BILL KEEPS THE RESTAURANT'S OWN TAX COMPONENTS (T7 F1, 2026-08-11).
+  // 9b. A MIXED-RATE BILL NAMES EACH RATE WITH THE RESTAURANT'S OWN LINES (T7 F1 2026-08-11; re-decided 2026-10-16).
   //     It used to print one flat "GST 18%" / "GST 5%" line per rate, dropping the central/state
   //     split every other bill from the same printer shows. The first fix scaled the CGST/SGST
   //     HALVES, which silently lost a third component — a restaurant on CGST+SGST+CESS printed
@@ -575,15 +575,41 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
     const os = [food(0.06), banq()];
     const d = BILLDOC.billData({ settings: S3, restaurant: {}, orders: os, session: {} });
     const money = BILLDOC.billMoney(os, S3);
-    const labels = d.taxRows.map((r) => r.label);
+    // RE-DECIDED 2026-10-16 (owner delegated item 14 to sweep #10 T14: "you choose it"). Stretching the
+    // 6% set's SHAPE onto the 18% slice printed "CESS 3%" — a rate the restaurant never set for that slice
+    // — and named the same 18% food two ways (alone: CGST 9 + SGST 9; beside a 6% order: 7.5 + 7.5 + 3).
+    // Now each slice uses the restaurant's own named lines whose rates add up to THAT rate (dine-in, then
+    // banquet — billdoc namedLinesFor), else the CGST/SGST halves. So: the 6% slice keeps its CESS, the
+    // 18% slice reads CGST 9 + SGST 9 here (no 18% set named), and the same as it would alone.
+    const labels = d.taxRows.map((r) => r.label + " " + r.rate);
     const sum = d.taxRows.reduce((a, r) => a + r.amt, 0);
-    const keptCess = labels.filter((l) => l === "CESS").length === 2;   // one per rate bucket
-    const noFlatGst = !labels.includes("GST");
+    const six = labels.includes("CGST 2.5") && labels.includes("SGST 2.5") && labels.includes("CESS 1");
+    const eighteen = labels.includes("CGST 9") && labels.includes("SGST 9") && labels.filter((l) => /^CESS/.test(l)).length === 1;
+    const alone = BILLDOC.billData({ settings: S3, restaurant: {}, orders: [banq()], session: {} }).taxRows.map((r) => r.label + " " + r.rate).join("|");
+    const noFlatGst = !d.taxRows.some((r) => r.label === "GST");
     const foots = sum === Math.round(money.tax);
-    keptCess && noFlatGst && foots
-      ? ok("a mixed-rate bill splits EACH rate by the restaurant's own components (a cess survives) and still foots")
-      : bad(`mixed rows = ${d.taxRows.map((r) => `${r.label} ${r.rate}% ${r.amt}`).join(" | ")} (sum ${sum}, tax ${money.tax})`,
-        "a tax invoice states WHICH taxes were charged — dropping a component on a two-rate bill understates the split");
+    // …and where the restaurant DID name an 18% set (its banquet lines), the slice uses those names.
+    const S4 = { ...S3, banquet_tax_components: [{ label: "IGST", rate: 18 }] };
+    const named = BILLDOC.billData({ settings: S4, restaurant: {}, orders: os, session: {} }).taxRows.map((r) => r.label + " " + r.rate);
+    six && eighteen && alone === "CGST 9|SGST 9" && noFlatGst && foots && named.includes("IGST 18")
+      ? ok("a mixed-rate bill names EACH rate with the restaurant's own lines for that rate (a 6% cess stays on the 6% slice), the same as that rate alone, and still foots")
+      : bad(`mixed rows = ${d.taxRows.map((r) => `${r.label} ${r.rate}% ${r.amt}`).join(" | ")} (sum ${sum}, tax ${money.tax}) · alone = ${alone} · with an 18% set = ${named.join(" | ")}`,
+        "one rate must be named the same way on every bill — by the restaurant's own lines for that rate, else the halves");
+  }
+
+  // 9c. …AND THE BANQUET SHEET NAMES ITS RATE THE SAME WAY (item 14, 2026-10-16: "if the bill has it and
+  //     the banquet bill doesn't, then do the same for banquet"). A sheet with no frozen lines (written
+  //     before mig 239) takes the restaurant's own named set for its rate — dine-in OR banquet.
+  {
+    const bill = { subtotal: 1000, discount: 0, tax: 180, total: 1180 };
+    const lines = [{ title: "Hall", qty: 1, price: 1000 }];
+    const viaDineIn = BILLDOC.banquetDocHtml({ bill, lines, settings: { gstin: "X", tax_components: [{ label: "IGST", rate: 18 }] }, autoPrint: false });
+    const viaBanquet = BILLDOC.banquetDocHtml({ bill, lines, settings: { gstin: "X", tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }], banquet_tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] }, autoPrint: false });
+    const ok1 = /<span>IGST 18%<\/span>/.test(viaDineIn), ok2 = /<span>CGST 9%<\/span>/.test(viaBanquet) && /<span>SGST 9%<\/span>/.test(viaBanquet);
+    ok1 && ok2
+      ? ok("the banquet sheet names its rate with the restaurant's own lines for that rate — dine-in or banquet — like the bill")
+      : bad(`banquet naming: dine-in-named 18% → ${ok1 ? "ok" : "missing IGST"}, banquet-named 18% → ${ok2 ? "ok" : "missing CGST/SGST 9%"}`,
+        "the bill and the banquet sheet must name one rate the same way");
   }
 
   // 10. THE BANQUET TAX COLUMNS FOOT — on a MULTI-LINE bill, exactly.

@@ -1369,6 +1369,34 @@
     if (Object.prototype.hasOwnProperty.call(s, "gstin")) return String(s.gstin == null ? "" : s.gstin).trim() !== "";
     return true;
   }
+  /* namedLinesFor(pct, settings) — THE RESTAURANT'S OWN NAMED TAX LINES FOR ONE RATE, or null (owner,
+     2026-10-16, item 14: "right now I can put any text … I can name also different taxes … if the bill
+     has it and the banquet bill doesn't, then do the same for banquet").
+     A restaurant names its lines twice — Settings › Billing (dine-in) and the Banquet screen — and each
+     set adds up to a rate. Whatever rate a slice of a bill was charged at, the paper names it with the
+     set whose rates add up to THAT rate: dine-in first, then banquet. No set matches → null, and the
+     caller keeps its own fallback (the CGST/SGST halves). One rule for the single-rate bill, each slice
+     of a mixed bill, and the banquet sheet — which is what used to differ: an 18% slice was printed
+     CGST 9 + SGST 9 on its own, but CGST 7.5 + SGST 7.5 + CESS 3 beside a 6% order, because the mixed
+     branch STRETCHED the 6% set's shape onto 18% and so named a CESS rate nobody had set. */
+  function namedLinesFor(pct, settings) {
+    var s = settings || {};
+    var clean = function (list) {
+      return (Array.isArray(list) ? list : [])
+        .map(function (c) { return { label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }; })
+        .filter(function (c) { return c.label && c.rate > 0; });
+    };
+    var want = Number(pct) || 0;
+    if (want <= 0) return null;
+    var sets = [clean(s.tax_components), clean(s.banquet_tax_components)];
+    for (var i = 0; i < sets.length; i++) {
+      var set = sets[i];
+      if (!set.length) continue;
+      var sum = set.reduce(function (a, c) { return a + c.rate; }, 0);
+      if (Math.abs(sum - want) < 0.005) return set;
+    }
+    return null;
+  }
   function taxModel(settings) {
     var s = settings || {};
     var comps = Array.isArray(s.tax_components) ? s.tax_components
@@ -1733,9 +1761,8 @@
 
     var sess = a.session || {};
     var pct = Math.round(m.rate * 10000) / 100;
-    var taxComps = (m.taxComponents && m.taxComponents.length)
-      ? m.taxComponents
-      : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
+    // The restaurant's own named lines for this bill's rate (dine-in, else banquet — item 14), else halves.
+    var taxComps = namedLinesFor(pct, s) || [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
     var inside = String(s.mrp_tax_treatment) === "inclusive" ? mrpTaxInside(live, m.rate) : 0;
     // A REPRINT KEEPS THE BILL'S OWN DATE (2026-08-05). This was always `new Date()` and no caller
     // ever passed `a.now`, so reprinting last June's invoice stamped today on it — beside an invoice
@@ -1794,14 +1821,12 @@
     // CGST 2.5 + SGST 2.5 + CESS 1 printed "CGST 9% / SGST 9%" on the 18% slice and lost its cess
     // altogether. So the shape is read from the settings, and only a restaurant that has
     // configured none falls back to halves — the same answer the single-rate branch gives.
-    var shapeComps = (taxModel(s).components || []);
+    // RE-DECIDED (owner delegated it, 2026-10-16 — item 14): each slice is named exactly as a bill on
+    // that rate alone would be — namedLinesFor(), else the halves. The old answer STRETCHED the dine-in
+    // set's shape onto every slice (T7 F1, 2026-08-11, to keep a third CESS line), which printed a CESS
+    // rate the restaurant never set for that slice, and named the same 18% food two different ways.
     var scaleComps = function (bucketPct) {
-      var shape = shapeComps.length ? shapeComps : [{ label: "CGST", rate: 1 }, { label: "SGST", rate: 1 }];
-      var sum = shape.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
-      if (!sum) return [{ label: bi.taxLabel, rate: bucketPct }];   // one word — see mrpNote below
-      return shape.map(function (c) {
-        return { label: c.label, rate: Math.round(((Number(c.rate) || 0) / sum) * bucketPct * 100) / 100 };
-      });
+      return namedLinesFor(bucketPct, s) || [{ label: "CGST", rate: bucketPct / 2 }, { label: "SGST", rate: bucketPct / 2 }];
     };
     var addRows = (m.composition || addWhole <= 0)
       ? []
@@ -2099,7 +2124,10 @@ function banquetDocHtml(a) {
   const cPct = (tmB.components || []).reduce((a, c) => a + (Number(c.rate) || 0), 0);
   const cMatch = (tmB.components || []).length > 0 && Math.abs(cPct / 100 - billRate) < 0.0005;
   const halvesMatch = Math.abs(tmB.pct / 100 - billRate) < 0.0005;
-  const comps = cMatch ? tmB.components
+  // item 14 (2026-10-16): the same rule as the bill — the restaurant's own named lines for this sheet's
+  // rate, dine-in or banquet; only then the halves, or one line at the sheet's exact rate.
+  const named = namedLinesFor(Math.round(billRate * 10000) / 100, s);
+  const comps = named ? named : cMatch ? tmB.components
     : (halvesMatch
       ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
       : [{ label: bi.taxLabel, rate: Math.round(billRate * 10000) / 100 }]);   // one word — see billData's mrpNote
@@ -2390,6 +2418,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     kotWhen: kotWhen,
     billIdentity: billIdentity,
     moduleOn: moduleOn,
+    namedLinesFor: namedLinesFor,
     gstRegistered: gstRegistered,
     splitTax: splitTax,
     discPct: discPct,

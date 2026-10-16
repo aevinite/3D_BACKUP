@@ -185,6 +185,9 @@ export function moduleOn(settings: Record<string, unknown> | null | undefined, k
 /** May this restaurant collect GST at all? No GSTIN → no (mig 425), from `gstin` or `gst_registered`.
  *  An object with neither key keeps the old answer (registered). Twin of lib/tax.ts gstRegistered. */
 export function gstRegistered(settings: Record<string, unknown> | null | undefined): boolean;
+/** The restaurant's own named tax lines whose rates add up to `pct` (dine-in first, then banquet), or
+ *  null when no set it named matches — the caller then uses its own fallback. Item 14, 2026-10-16. */
+export function namedLinesFor(pct: number, settings: Record<string, unknown> | null | undefined): { label: string; rate: number }[] | null;
 export function splitTax(
   taxWhole: number,
   comps: { label?: string; rate?: number }[],
