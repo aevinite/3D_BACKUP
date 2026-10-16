@@ -35,7 +35,7 @@
 // renames nothing, silently.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { tget, tset } from "./tenantStorage";
+import { tget, tset, tkey } from "./tenantStorage";
 import { getDeviceId } from "./device";
 import { renameMyReviews } from "./menu";
 
@@ -86,7 +86,13 @@ export function setGuestName(name: string, restaurantId?: string): boolean {
     // (a preference must never cost the page), so the old `catch { return false }` here could never
     // run: in a private window every review answered "changed" and the toast said "saved as your
     // name" — a promise the next visit broke, because nothing had been saved. Kept = it is there now.
-    kept = getGuestName() === tidy;
+    //
+    // …ON THE PHONE, NOT IN THE PAGE (2026-10-16). Since sweep #10 T3 round 4's item 47, tset keeps a
+    // write the phone refuses in the page's memory (so a basket survives a full or blocked storage),
+    // and getGuestName() reads that copy back — so this read-back always passed again, and a private
+    // window was once more told "saved as your name" for a name the next visit will not have. The
+    // promise is about the next visit, so it is checked against the phone's own storage.
+    kept = tidyGuestName(localStorage.getItem(tkey(KEY)) || "") === tidy;
   } catch { /* storage blocked outright — kept stays false */ }
   try {
     window.dispatchEvent(new CustomEvent(GUEST_NAME_EVENT, { detail: { name: tidy } }));

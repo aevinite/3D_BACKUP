@@ -877,15 +877,19 @@ flush();
   check("there is ONE module that owns the diner's name",
     /export function getGuestName\(\)/.test(gname) && /export function setGuestName\(/.test(gname));
   check("…and it is tenant-scoped, like every other guest key",
-    /import \{ tget, tset \} from "\.\/tenantStorage";/.test(gname) && /const KEY = "lfh_my_name";/.test(gname));
+    /import \{ tget, tset, tkey \} from "\.\/tenantStorage";/.test(gname) && /const KEY = "lfh_my_name";/.test(gname));
   check("…with one definition of what a tidy name is, used on the way in and out",
     /export const tidyGuestName/.test(gname) && /GUEST_NAME_MAX = 40/.test(gname));
   check("…and it only announces a name that actually CHANGED",
     /if \(getGuestName\(\) === tidy\) return false;/.test(gname));
   // sweep #10 T4 item 10 (2026-10-13): …and that the phone KEPT — tset swallows a refused write, so
   // the answer is read back, or a private window is told "saved as your name" after every review.
+  // 2026-10-16: …read back from the PHONE's storage, not through getGuestName(), which since sweep #10 T3 round 4
+  // item 47 also sees the page-memory copy of a refused write — so the read-back always passed again.
   check("…and only one the phone actually KEPT (read back after the write — a private window keeps nothing)",
-    /tset\(KEY, tidy\);[\s\S]{0,600}?kept = getGuestName\(\) === tidy;/.test(gname) && /return kept;\s*\}\s*$/.test(gname.trim() + "\n"));
+    /tset\(KEY, tidy\);[\s\S]{0,1200}?kept = tidyGuestName\(localStorage\.getItem\(tkey\(KEY\)\) \|\| ""\) === tidy;/.test(gname) && /return kept;\s*\}\s*$/.test(gname.trim() + "\n"));
+  check("…and never through the page's memory copy (getGuestName) — that copy is gone on the next visit",
+    !/kept = getGuestName\(\) === tidy;/.test(codeOnly(gname)));
   check("the review box fills itself in from that one name",
     /getGuestName\(\)/.test(item) && /window\.addEventListener\(GUEST_NAME_EVENT, fill\)/.test(item));
   check("…in an EFFECT, never during render, because that page is server-rendered",
