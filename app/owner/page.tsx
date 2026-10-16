@@ -2479,13 +2479,19 @@ export default function OwnerDashboard() {
           tileSide = (pay?.paymentMethods || []).filter((m) => m.orders > 0)   // see the note above
             .map((m) => ({ k: m.method, v: m.orders, t: m.orders.toLocaleString("en-IN") }));
           tileSideTitle = "Orders by method";
-        } else if (tileOpen === "today" && restCount > 1) {
+        // ── A SHEET ABOUT ONE RESTAURANT DRAWS ONLY THAT RESTAURANT (sweep #10 T20, item 4) ───────
+        // This was `restCount > 1`, which is true on a two-restaurant estate even after he has drilled
+        // into ONE of them — so the French House sheet charted Pizza Palace's takings beside it. Only
+        // the all-restaurants view compares restaurants, and only when two of them can be compared.
+        } else if (tileOpen === "today" && !activeRid) {
           const rs = (ov?.restaurants || []).filter((r) => !r.reportsOff);
           // `compare`: restaurants side by side, not a trend — one trading beside two at ₹0 is a
           // fair picture, so the docket's two-real-days gate does not apply here.
-          tileChart = { kind: "bars", compare: true, pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
-            hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
-          tileChartTitle = "Taken today, by restaurant";
+          if (rs.length >= 2) {
+            tileChart = { kind: "bars", compare: true, pts: rs.map((r) => ({ x: r.name, v: r.revenueToday,
+              hint: `${r.name} · ${inr(r.revenueToday)} from ${r.ordersToday} order${r.ordersToday === 1 ? "" : "s"}` })) };
+            tileChartTitle = "Taken today, by restaurant";
+          }
         } else if (tileOpen === "expenses") {
           // ── NO FUDGE FACTOR NOW THAT THE BAR MEANS A SHARE (2026-10-04) ──────────────
           // `v` used to be Math.max(foodLost, staffOut * 0.004) — a floor so a tiny figure still
@@ -2503,12 +2509,17 @@ export default function OwnerDashboard() {
             { k: `Less food binned · ${inr(foodLost)}`, s: "− Food", v: -foodLost },
             { k: `On hand · ${inr(onHand)}`, s: "On hand", v: onHand, total: true }] };
           tileChartTitle = "How it was reached";
-          tileSide = (ov?.restaurants || []).filter((r) => r.revenueAll > 0)   // see the note above
+          // "Earned where" splits the money ACROSS restaurants, so it belongs to the all-restaurants
+          // view only (item 4, above) and only when two of them earned — a one-restaurant owner was
+          // shown a single slice reading "100%", a share bar of one, which is not a picture.
+          const earned = !activeRid ? (ov?.restaurants || []).filter((r) => r.revenueAll > 0) : [];   // see the note above
+          if (earned.length >= 2) {
             // ONE COLOUR PER RESTAURANT, here too — the share bar is the fourth surface that
             // names these three, and it has to agree with the sidebar and the league table.
-            .map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll),
+            tileSide = earned.map((r) => ({ k: r.name, v: r.revenueAll, t: inr(r.revenueAll),
                            c: restaurantColor(r.id, (ov?.restaurants || []).map((x) => x.id)) }));
-          tileSideTitle = "Earned where (all time)";
+            tileSideTitle = "Earned where (all time)";
+          }
         }
         return (
           // ── THE DOCKET (owner, 2026-10-04; he picked it from five) ──────────────────────

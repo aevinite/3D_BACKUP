@@ -1196,6 +1196,14 @@ console.log("\nT11-E · saying so when a read failed");
     /const who = activeRid\s*\n?\s*\? \(ov\?\.restaurants\.find\(\(r\) => r\.id === activeRid\)\?\.name \?\? "this restaurant"\)\s*\n?\s*: restScopeText;/.test(dashPage),
     "app/owner/page.tsx — the docket heading must use restScopeText, which counts only the reported set.",
   );
+  // item 4 — a sheet about ONE restaurant drew the whole estate (Today's bars, On hand's 'Earned where'),
+  // and a one-restaurant owner got a one-slice 100% share bar.
+  check(
+    "item 4 · Today's restaurant bars and On hand's 'Earned where' appear only on the estate view, with 2+ restaurants",
+    /tileOpen === "today" && !activeRid\)/.test(dashPage) && /if \(rs\.length >= 2\)/.test(dashPage) &&
+      /const earned = !activeRid \?/.test(dashPage) && /if \(earned\.length >= 2\)/.test(dashPage),
+    "app/owner/page.tsx — a drilled restaurant's sheet must not chart its neighbours, and one bar is not a chart.",
+  );
 }
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
