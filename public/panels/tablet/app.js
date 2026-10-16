@@ -4266,13 +4266,22 @@ async function renderLoyalty(ov, t, phone) {
       // ONE request: the server spends the points AND takes the money off, so a failure can never
       // leave the guest short of points with no discount to show for it.
       const r = await api("POST", `/tables/${t}/loyalty-redeem`, { phone, points: bal });
+      // SAVED ON THE DEVICE IS NOT SPENT (sweep #10 T12 round 3, item 3). Offline, api() keeps this and
+      // answers { ok: true, queued: true } with no `rupees` or `spent`, so this said "⭐ ₹0 off —
+      // undefined points used" and redrew the strip as if the points had gone. The manager panel was
+      // fixed for the same line (T39 item 16): say it is saved, and let the strip wait for the server.
+      // A replay cannot double-spend — the ledger allows ONE redeem per bill (mig 401).
+      if (isQueued(r)) { toast(savedMsg(r)); btn.textContent = "Saved — sends when back online"; return; }
       if (r && r.ok) {
         toast(`⭐ ₹${Math.round(Number(r.rupees) || 0)} off — ${r.spent} points used`);
         renderLoyalty(ov, t, phone);
-      } else { btn.disabled = false; btn.textContent = `Use ₹${worth} off`; }
+      } else { btn.disabled = false; btn.textContent = `Use ₹${worth} off`; toast("The points weren't used — try again.", false); }
     } catch (e) {
-      // The route already sends a sentence a cashier can read out loud; api() surfaces it.
+      // …AND A REFUSAL IS SAID (same item). The comment here promised "api() surfaces" the route's
+      // sentence — the MANAGER's api() does, this panel's does not; it throws and shows nothing. So
+      // the button quietly reset and a guest's points tap vanished. The route's own sentence, out loud.
       btn.disabled = false; btn.textContent = `Use ₹${worth} off`;
+      toast(errText(e), false);
     }
   };
 }

@@ -1571,6 +1571,17 @@ for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
   );
 }
 
+// ── THE POINTS BUTTON SAYS WHAT HAPPENED (sweep #10 T12 round 3, item 3) ────────────────────────────
+{
+  const i = src.indexOf("async function renderLoyalty("), body = src.slice(i, src.indexOf("\n}\n", i));
+  check(
+    "tablet: 'Use points' saved offline says Saved (never 'undefined points used'), and a refusal is said out loud",
+    /if \(isQueued\(r\)\) \{ toast\(savedMsg\(r\)\); btn\.textContent = "Saved — sends when back online"; return; \}/.test(body)
+      && /\} catch \(e\) \{[\s\S]*?toast\(errText\(e\), false\);/.test(body),
+    `${TABLET} renderLoyalty: the queue's { ok:true, queued:true } is not the server's answer, and this panel's api() shows nothing by itself.`,
+  );
+}
+
 if (fails.length) {
   console.error(`\n${fails.length} of ${checks.length} waiter-tablet checks FAILED:\n\n  - ${fails.join("\n\n  - ")}\n`);
   console.error("Background: scripts/verify-tablet-taps.mjs header (sweep #6, T7).");
