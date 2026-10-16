@@ -29,7 +29,7 @@ const RAW = /TypeError|Failed to fetch|NetworkError|\bundefined\b|\[object |\bNa
 const BLAMES_INTERNET = /no internet|check your (internet|connection)|you(?:'| a)re offline/i;
 let browser = null, upChecked = false;
 
-export async function openPanel(role, dir, fault) {
+export async function openPanel(role, dir, fault, beforeLoad) {
   if (!upChecked) { await requireUp(BASE, "the manager, kitchen and tablet panels (round-3 family G)"); upChecked = true; }
   browser ||= await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
@@ -62,6 +62,7 @@ export async function openPanel(role, dir, fault) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 160)));
   page.on("frameattached", (fr) => fr.page().on("pageerror", () => {}));
+  if (beforeLoad) beforeLoad(page);   // e.g. family H's socket watcher — attached BEFORE the panel connects
   await page.goto(BASE + "/" + role, { waitUntil: "domcontentloaded" });
   const frame = async () => { for (let i = 0; i < 60; i++) { const f = page.frames().find((x) => x.url().includes(`/panels/${dir}/`)); if (f) return f; await page.waitForTimeout(250); } return null; };
   return { ctx, page, errors, seen, frame, close: async () => { await covStop(page); await ctx.close().catch(() => {}); } };

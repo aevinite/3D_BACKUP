@@ -60,9 +60,12 @@ const browsers = {};
 /** open(path, { engine, viewport, touch, dark, clock, init }) → { page, ctx, errors, close } */
 export async function open(path, o = {}) {
   const eng = o.engine || "chromium";
-  browsers[eng] = browsers[eng] || await ENGINES[eng].launch();
-  const ctx = await browsers[eng].newContext({ viewport: o.viewport || { width: 1280, height: 860 }, deviceScaleFactor: o.dpr || 1,
+  // o.media: Chromium with its built-in FAKE microphone and camera (no real device is opened, no prompt).
+  const key = eng + (o.media ? "+media" : "");
+  browsers[key] = browsers[key] || await ENGINES[eng].launch(o.media ? { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] } : {});
+  const ctx = await browsers[key].newContext({ viewport: o.viewport || { width: 1280, height: 860 }, deviceScaleFactor: o.dpr || 1,
     hasTouch: !!o.touch, isMobile: !!o.touch && eng !== "firefox", colorScheme: o.dark ? "dark" : "light" });
+  if (o.media) await ctx.grantPermissions(["microphone"], { origin: BASE });
   if (o.init) await ctx.addInitScript(o.init);
   const p = await ctx.newPage();
   if (eng === "chromium") await covStart(p);
