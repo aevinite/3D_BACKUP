@@ -418,6 +418,26 @@ async function istClocks() {
   rest.length <= 2
     ? ok(`the rest of the panel adds no new unpinned clock (${rest.length} known, owned by later sweep terminals)`)
     : bad(`the rest of the panel now has ${rest.length} unpinned clocks (2 were known on 2026-10-12)`, "pin the new one: { …, timeZone: \"Asia/Kolkata\" }");
+  // THE MIDDLE THIRD (printZReport → openShiftPicker), held at ZERO with a WIDER net (sweep #10 T7,
+  // 2026-10-16). The pattern above only sees `new Date(…).toLocale…`, so a clock written through a
+  // variable — `d.toLocaleString([], …)` in the Audit list, `x.toLocaleDateString(undefined, …)` in
+  // the removal story — slipped past it, and whenLabel()'s date had no zone. Any .toLocale… call in
+  // this stretch must name a timeZone in the same call.
+  {
+    const s = app.indexOf("async function printZReport("), e = app.indexOf("\nfunction openShiftPicker(");
+    const mid = s > 0 && e > s ? app.slice(s, e) : "";
+    if (!mid) bad("printZReport / openShiftPicker moved — re-point the middle-third clock check");
+    else {
+      const startLine = app.slice(0, s).split("\n").length;
+      const calls = [...mid.matchAll(/\.toLocale(?:String|DateString|TimeString)\(([^;]*?)\)(?=[\s;),+.]|$)/g)];
+      const loose = calls.filter((m) => /\{/.test(m[1]) ? !/timeZone/.test(m[1]) : /^\s*$|^\s*(\[\]|undefined|"en-[A-Z]{2}")\s*$/.test(m[1]));
+      // A number's toLocaleString("en-IN") carries no clock, so only date-shaped receivers count.
+      const dated = loose.filter((m) => /(?:Date\([^)]*\)|\bd|\bx|\bnow|\bdt|\bdate)\s*$/.test(mid.slice(Math.max(0, m.index - 40), m.index)));
+      dated.length === 0
+        ? ok(`the middle third prints every clock in the restaurant's zone (${calls.length} toLocale calls read)`)
+        : bad(`${dated.length} clock(s) in the middle third print the READER's zone`, dated.map((m) => "app.js:" + (startLine + mid.slice(0, m.index).split("\n").length - 1)).join(", "));
+    }
+  }
   // Behaviour: lift fmtDate and run it under a New York clock.
   const line = (app.match(/^const fmtDate = .*$/m) || [""])[0];
   if (!line) { bad("fmtDate() is gone from the panel — re-point this check"); return; }
@@ -476,7 +496,278 @@ async function gstEmptyLine() {
   /No paid bills in this month\./.test(g.slice(0, 9000)) ? bad("the GST report still prints 'in this month' whatever the window") : ok("…and 'in this month' is no longer printed under a today-only heading");
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine];
+// ── L · A FUNCTION IS NEVER A YES/NO (sweep #10 T7, 2026-10-16) ──────────────────────────────────
+// The table popup's ✎ Edit button vanished for a month (2026-09-17 → 2026-10-16). tablePanelParts()
+// declares `const allOut = <is every dish out?>`, and the one-bill redesign declared a SECOND
+// `const allOut = (r) => …` inside the orders block, which shadowed it. The Edit toggle below read
+// `allOut ? "" : <the button>` — a FUNCTION, always truthy — so the button never drew. Nothing
+// failed: the screen simply lacked a control. So this resolves every yes/no test in the manager
+// panel (if / ?: / && / || / !) through real scopes (acorn + eslint-scope, the parser
+// verify:panel-names uses) and fails if one is a name that holds a FUNCTION. Then it asserts the
+// Edit toggle's own test resolves to the table-wide boolean.
+async function functionAsCondition() {
+  console.log("\nL. a yes/no test in the manager panel never reads a function (the ✎ Edit toggle)");
+  const acorn = await import("acorn");
+  const { analyze } = await import("eslint-scope");
+  const app = src("public/panels/editor/app.js");
+  const ast = acorn.parse(app, { ecmaVersion: 2024, sourceType: "script", locations: true, ranges: true });
+  const sm = analyze(ast, { ecmaVersion: 2024, sourceType: "script" });
+  const isFn = (v) => v && v.defs.some((d) => d.type === "FunctionName"
+    || (d.type === "Variable" && d.node.init && /^(ArrowFunctionExpression|FunctionExpression)$/.test(d.node.init.type) && d.parent && d.parent.kind === "const"));
+  const refAt = new Map();
+  for (const sc of sm.scopes) for (const r of sc.references) refAt.set(r.identifier, r);
+  const tests = [];
+  const walk = (n, parent) => {
+    if (!n || typeof n.type !== "string") return;
+    if (n.type === "IfStatement" || n.type === "ConditionalExpression" || n.type === "WhileStatement") tests.push(n.test);
+    if (n.type === "UnaryExpression" && n.operator === "!") tests.push(n.argument);
+    if (n.type === "LogicalExpression" && parent && (parent.type === "IfStatement" || parent.type === "ConditionalExpression" || (parent.type === "UnaryExpression" && parent.operator === "!"))) { tests.push(n.left); tests.push(n.right); }
+    for (const k of Object.keys(n)) { if (k === "parent") continue; const v = n[k]; if (Array.isArray(v)) v.forEach((c) => walk(c, n)); else if (v && typeof v.type === "string") walk(v, n); }
+  };
+  walk(ast, null);
+  const hits = [];
+  for (const t of tests) {
+    if (!t || t.type !== "Identifier") continue;
+    const r = refAt.get(t);
+    if (r && r.resolved && isFn(r.resolved)) hits.push(`${t.name} at line ${t.loc.start.line}`);
+  }
+  hits.length
+    ? bad("a yes/no test reads a FUNCTION, so it is always yes", hits.slice(0, 6).join(", "))
+    : ok(`none of ${tests.length} yes/no tests in the manager panel reads a function`);
+  // The Edit toggle itself: its test must resolve to the table-wide boolean, and it must be offered
+  // where it unlocks something (a waiting ticket) — never on every table, never on none.
+  let decl = null;
+  const find = (n) => { if (!n || typeof n.type !== "string" || decl) return; if (n.type === "VariableDeclarator" && n.id.name === "editToggle") { decl = n; return; } for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach(find); else if (v && typeof v.type === "string") find(v); } };
+  find(ast);
+  if (!decl) { bad("the table popup's editToggle is gone — re-point this check"); return; }
+  const names = [];
+  const collect = (n) => { if (!n || typeof n.type !== "string") return; if (n.type === "Identifier") names.push(n); for (const k of Object.keys(n)) { const v = n[k]; if (Array.isArray(v)) v.forEach(collect); else if (v && typeof v.type === "string" && k !== "consequent" && k !== "alternate") collect(v); } };
+  collect(decl.init.type === "ConditionalExpression" ? decl.init.test : decl.init);
+  const allOutRef = names.find((x) => x.name === "allOut");
+  const res = allOutRef && refAt.get(allOutRef) && refAt.get(allOutRef).resolved;
+  res && !isFn(res) && res.defs[0].node.init && res.defs[0].node.init.type === "LogicalExpression"
+    ? ok("the ✎ Edit toggle's 'is every dish out?' resolves to the table-wide boolean, not a per-row function")
+    : bad("the ✎ Edit toggle's test does not read the table-wide allOut", res ? `resolves to the declaration at line ${res.defs[0].node.loc.start.line}` : "no allOut in its test");
+  names.some((x) => x.name === "newOrders") && names.some((x) => x.name === "editing")
+    ? ok("…and it is offered while a ticket is waiting (its extras draw only there) or while Edit is on")
+    : bad("the ✎ Edit toggle no longer asks whether a ticket is waiting", "it would ask about the kitchen and then unlock nothing");
+}
+
+// ── M · EVERY ✕ CANCEL THE TABLE POPUP OFFERS IS ONE THE SERVER WILL ACCEPT (sweep #10 T7, 2026-10-16)
+// The waiting ticket's ✕ Cancel asked "served? on the printed bill?" but not "paid?", while the
+// editor route refuses to cancel a paid order — and 💳 Mark all paid settles a ticket that is still
+// waiting. So a paid waiting ticket wore a ✕ that could only be refused. Both of the popup's cancel
+// offers (the waiting box's cancelBtn and the dish sheet's canCancel) are run here with stand-ins
+// for what they close over, and must refuse a paid ticket and offer an ordinary one.
+async function cancelOffers() {
+  console.log("\nM. every ✕ Cancel the table popup offers is one the server will accept");
+  const app = src("public/panels/editor/app.js");
+  const route = src("app/api/editor/[...path]/route.ts");
+  /patch\.status === "cancelled" && cur\.payment_status === "paid"/.test(route)
+    ? ok("the server still refuses to cancel a paid order — the rule both offers must match")
+    : bad("the server's paid-order refusal moved — re-point this check");
+  const grab = (re, label) => { const m = app.match(re); if (!m) { bad(`${label} is gone — re-point this check`); return null; } return m[1]; };
+  const cb = grab(/const cancelBtn = (\(o\) => \(\([^\n]*?\) \? "" : `)/, "the waiting box's cancelBtn");
+  const cc = grab(/const canCancel = (\(p\) => \{[^\n]*?\};)/, "the dish sheet's canCancel");
+  if (!cb || !cc) return;
+  const anyServed = (o) => !!o.served, invoiceLocksOrder = () => false, sess = {};
+  const offer = new Function("anyServed", "invoiceLocksOrder", "sess", `return ${cb}x\`);`)(anyServed, invoiceLocksOrder, sess);
+  const paid = { id: "a", payment_status: "paid" }, open = { id: "b", payment_status: "pending" };
+  offer(paid) === "" && offer(open) !== ""
+    ? ok("the waiting ticket's ✕ Cancel is not offered on a paid ticket, and is on an unpaid one")
+    : bad("the waiting ticket's ✕ Cancel is offered on a PAID ticket — the server can only refuse it");
+  const liveOrders = [paid, open];
+  const can = new Function("liveOrders", "anyServed", "invoiceLocksOrder", "sess", `return ${cc.replace(/;$/, "")};`)(liveOrders, anyServed, invoiceLocksOrder, sess);
+  !can({ _oid: "a" }) && can({ _oid: "b" })
+    ? ok("…and the dish sheet's ✕ Cancel ticket agrees")
+    : bad("the dish sheet's ✕ Cancel ticket disagrees with the server about a paid ticket");
+}
+
+// ── N · EVERY DIRECT fetch() IN THE MANAGER PANEL HAS AN END (sweep #10 T7, 2026-10-16) ──────────
+// Writes go through api() and the outbox, which carry a deadline. The dish-photo upload cannot (a
+// File does not fit in the JSON queue), so it is a plain fetch — and it had NO deadline: on a stalled
+// network "📷 Upload a photo" sat on "Uploading…", greyed, for ever. Every fetch( in app.js must
+// either go through LFH_NET (its own 15s read ceiling) or pass a signal, and the photo's timeout
+// must be read in words.
+async function fetchesEnd() {
+  console.log("\nN. every direct fetch() in the manager panel has an end");
+  const app = src("public/panels/editor/app.js");
+  const calls = [...app.matchAll(/(?<![\w.$])fetch\(([^\n]*)/g)].map((m) => ({ line: app.slice(0, m.index).split("\n").length, txt: m[1] }));
+  const bare = calls.filter((c) => !/signal\s*:/.test(c.txt) && !/LFH_NET/.test(app.split("\n")[c.line - 1]));
+  // The middle third (printZReport → openShiftPicker) is held at ZERO. The other thirds are other
+  // sweep terminals' ground: six there on 2026-10-16 (the staff and table-section reads, the print
+  // claim, the two act-as clears) — a RATCHET, so that number may fall and may not rise.
+  const lineOf = (needle) => app.slice(0, app.indexOf(needle)).split("\n").length;
+  const s = lineOf("async function printZReport("), e = lineOf("\nfunction openShiftPicker(") + 1;
+  const mid = bare.filter((c) => c.line >= s && c.line < e), rest = bare.filter((c) => c.line < s || c.line >= e);
+  mid.length === 0
+    ? ok(`every direct fetch() in the middle third carries a signal or rides LFH_NET (${calls.length} in the file)`)
+    : bad(`${mid.length} direct fetch() call(s) in the middle third can wait for ever`, mid.map((c) => "app.js:" + c.line).join(", "));
+  rest.length <= 6
+    ? ok(`…and the rest of the panel adds no new one (${rest.length} known, owned by the other thirds' terminals)`)
+    : bad(`the rest of the panel now has ${rest.length} direct fetch() calls with no end (6 were known on 2026-10-16)`, rest.map((c) => "app.js:" + c.line).join(", "));
+  const up = app.slice(app.indexOf('const photoInput = document.getElementById("dishPhotoFile");'), app.indexOf('const ms = $("#membSearch");'));
+  /typeof AbortSignal\.timeout === "function" \? AbortSignal\.timeout\(30000\)/.test(up) && /signal: deadline/.test(up)
+    ? ok("the dish-photo upload asks for a 30s deadline (feature-tested, like issue-raise.js)")
+    : bad("the dish-photo upload has no deadline again — a stalled network leaves 'Uploading…' for ever");
+  /e\.name === "TimeoutError"/.test(up) && /The upload took too long/.test(up)
+    ? ok("…and when it fires the person reads it in words, not 'signal timed out'")
+    : bad("the dish-photo timeout would print the browser's own words");
+}
+
+// ── O · THE BILL'S COURSE ORDER FOLLOWS THE MENU AS IT IS NOW (sweep #10 T7, 2026-10-16) ─────────
+// The table popup sorts a bill's dishes into the menu's own course order (menuSeq / courseOfRow).
+// Its cache was keyed on counts and the first ids, so reordering categories, recolouring one, or
+// moving a dish to another course left every bill in the OLD order until a reload. Lifted from the
+// shipped file and run: after the menu arrives again with the same counts and first ids but a new
+// order, the course must move.
+async function courseOrderFollowsMenu() {
+  console.log("\nO. the bill's course order follows the menu as it is now");
+  const code = lift("public/panels/editor/app.js", "const NO_COURSE = ", "\nconst spineKey", "menuSeq") || "";
+  const body = code.replace(/\nconst spineKey$/, "");
+  const run = new Function("state", "nameOf", "SPINE_TINTS", `${body}\nreturn { menuSeq, courseOfRow };`);
+  const state = { data: {} };
+  const set = (cats, items) => { state.data = { categories: cats, items }; };
+  const { courseOfRow } = run(state, (n, slug) => (typeof n === "string" ? n : slug), ["#111", "#222", "#333", "#444"]);
+  const cats = [{ slug: "starters", name: "Starters", sort_order: 1 }, { slug: "mains", name: "Mains", sort_order: 2 }, { slug: "desserts", name: "Desserts", sort_order: 3 }];
+  const items = [{ id: "a", title: "Soup", category: "starters" }, { id: "b", title: "Steak", category: "mains" }, { id: "c", title: "Tart", category: "desserts" }];
+  set(cats, items);
+  const before = courseOfRow({ title: "Tart" }).seq;
+  // The same menu re-read after "Desserts" was dragged to second place: new arrays, same counts,
+  // same first dish, same first category — the shape the old cache key could not see.
+  set(cats.map((c) => ({ ...c, sort_order: c.slug === "desserts" ? 1.5 : c.sort_order })), items.map((i) => ({ ...i })));
+  const afterReorder = courseOfRow({ title: "Tart" }).seq;
+  set(state.data.categories.map((c) => ({ ...c })), state.data.items.map((i) => (i.id === "c" ? { ...i, category: "mains" } : { ...i })));
+  const afterMove = courseOfRow({ title: "Tart" }).slug;
+  before === 3 && afterReorder === 2
+    ? ok("a category reorder reaches the bill's course order at once (Desserts 3rd → 2nd)")
+    : bad("the bill keeps the OLD course order after a reorder", `before ${before}, after ${afterReorder} — expected 3 then 2`);
+  afterMove === "mains"
+    ? ok("…and a dish moved to another course is filed under its new course")
+    : bad("a dish moved to another course stays under its old one on the bill", `got ${afterMove}`);
+}
+
+// ── P · A DISH'S TAG LIST IS SAVED FIRST-SAVE-WINS (sweep #10 T7, 2026-10-16) ─────────────────────
+// The kitchen's 🚫 Sold out is a TAG. Both manager-side writes of a dish's tag list (the dish form's
+// Save and Menu → Tags → the dish ticks) sent the list from this device's copy with no expectation,
+// so a stale copy could take `sold-out` off and put the dish back on sale. buildEditExpect is lifted
+// from the shipped file and must now carry `tags` (a set), and still leave other lists out.
+async function tagsFirstSaveWins() {
+  console.log("\nP. a dish's tag list is saved first-save-wins");
+  const code = lift("public/panels/editor/app.js", "const EXPECT_TABLE = ", "\nasync function save()", "buildEditExpect").replace(/\nasync function save\(\)$/, "");
+  const buildEditExpect = new Function(`${code}\nreturn buildEditExpect;`)();
+  const e = buildEditExpect("items", { tags: ["spicy"] }, JSON.stringify({ id: "d1", tags: ["sold-out"] }));
+  e && e.table === "menu_items" && e.id === "d1" && JSON.stringify(e.fields.tags) === JSON.stringify(["sold-out"])
+    ? ok("the dish form's Save sends the tag list it started from")
+    : bad("the dish form's Save sends a tag list with no expectation", JSON.stringify(e));
+  const o = buildEditExpect("items", { options: [{ label: "Large" }] }, JSON.stringify({ id: "d1", options: [] }));
+  o === null ? ok("…and still leaves an ordered list (options) out") : bad("an ordered list is now compared as a set", JSON.stringify(o));
+  const app = src("public/panels/editor/app.js");
+  const t = app.slice(app.indexOf("async function toggleTagMembership("), app.indexOf("function updateMembCount("));
+  /const tagsBefore = dish\.tags\.slice\(\);/.test(t) && /expect: \{ table: "menu_items", id: dish\.id, fields: \{ tags: tagsBefore \}/.test(t)
+    ? ok("Menu → Tags → a dish tick sends the list it started from (taken BEFORE the tick changes it)")
+    : bad("the Tags screen's tick writes a dish's whole tag list with no expectation");
+}
+
+// ── Q · A REFUSED LOG-RETENTION CHANGE PUTS THE DROPDOWN BACK (sweep #10 T7, 2026-10-16) ─────────
+// Only the two "locked" codes reset the box; any other refusal left it on the window just refused.
+// saveRetention is lifted and run against a server that refuses three different ways.
+async function retentionResets() {
+  console.log("\nQ. a refused log-retention change puts the dropdown back");
+  const code = lift("public/panels/editor/app.js", "async function saveRetention(", "\n}\n", "saveRetention");
+  for (const [label, err] of [["a server error", Object.assign(new Error("boom"), { status: 500, data: {} })], ["an Aevidine lock", Object.assign(new Error("Aevidine set this."), { status: 403, data: { code: "retention_locked" } })], ["no answer at all", new Error("Failed to fetch")]]) {
+    const sel = { value: "7" };
+    const toasts = [];
+    const run = new Function("api", "state", "document", "toast", "okToast", "errText", "RETENTION_OPTS", `${code}\nreturn saveRetention;`)(
+      async () => { throw err; }, { data: { settings: { oplog_retention_days: 90 } } }, { querySelector: () => sel },
+      (m) => toasts.push(m), () => {}, (e) => e.message, []);
+    await run("oplog_retention_days", "7");
+    sel.value === "90"
+      ? ok(`${label}: the box goes back to the 90 days really kept (${toasts[0]})`)
+      : bad(`${label}: the box still shows the refused ${sel.value} days`);
+  }
+}
+
+// ── R · A "FIRST SAVE WINS" REFUSAL IS READ IN WORDS (sweep #10 T7, 2026-10-16) ───────────────────
+// On a live write the server refuses a clash with { error: "clash_changed_elsewhere", clash: { plain,
+// todo } }, and api() throws with e.message = that CODE. The menu editor's Save — the write the
+// expectation exists for — printed "Save failed: clash_changed_elsewhere". Every function in the
+// manager panel that sends an expectation must say its refusal through errText() or clash.plain,
+// never a bare e.message.
+async function clashInWords() {
+  console.log("\nR. a first-save-wins refusal is read in words, never as its code");
+  const app = src("public/panels/editor/app.js");
+  // For every write that sends an expectation, the catch that answers it (the first one within 30
+  // lines after the call) must say the refusal through errText() or clash.plain.
+  const lines = app.split("\n");
+  const bad1 = [];
+  let n = 0;
+  lines.forEach((l, i) => {
+    if (!/api\("(POST|PATCH|DELETE)"[^\n]*\{ expect: /.test(l)) return;
+    n++;
+    for (let j = i; j < Math.min(lines.length, i + 30); j++) {
+      if (!/catch \(e\) \{/.test(lines[j])) continue;
+      const c = lines.slice(j, j + 6).join("\n");
+      if (/\+ e\.message/.test(c) && !/errText\(e\)|clash\.plain|\.clash/.test(c)) bad1.push("app.js:" + (i + 1));
+      break;
+    }
+  });
+  bad1.length === 0 && n >= 5
+    ? ok(`all ${n} writes that send an expectation say a refusal in words`)
+    : bad("a write that sends an expectation answers a refusal with e.message — a clash reads as its code", bad1.join(", ") || `only ${n} found`);
+  const sv = app.slice(app.indexOf("\nasync function save() {"), app.indexOf("\nasync function removeRecord("));
+  /const clash = !!\(e && e\.data && e\.data\.clash\);\s*\n\s*toast\(clash \? errText\(e\)/.test(sv)
+    ? ok("the menu editor's Save says the server's sentence on a clash, and holds it 9 seconds")
+    : bad("the menu editor's Save no longer words a clash");
+}
+
+// ── S · AN ORDER HANDED BACK SHOWS EVERYTHING IT STILL CARRIES (sweep #10 T7, 2026-10-16) ─────────
+// A refused order re-opens the builder with `restore`: the lines, the allergens, the held discount
+// and the kitchen note all come back. The note came back into the VARIABLE but the box was drawn
+// empty, so the screen said "no note" while the note rode along on the next Send. Every piece of
+// `restore` the builder reads must be drawn: the note box is filled from orderNote at build.
+async function handBackShowsAll() {
+  console.log("\nS. an order handed back shows everything it still carries");
+  const app = src("public/panels/editor/app.js");
+  const to = app.slice(app.indexOf("\nfunction openTakeOrder("), app.indexOf("\nfunction openShiftPicker("));
+  /orderNote = rs\.note \|\| "";/.test(to)
+    ? ok("the refused order's kitchen note is put back (restore.note)")
+    : bad("restore no longer puts the kitchen note back — re-point this check");
+  /const noteBox = wrap\.querySelector\("\.to-note"\);\s*\n\s*noteBox\.value = orderNote;/.test(to)
+    ? ok("…and the note box is DRAWN with it, so what is on screen is what will be sent")
+    : bad("the note box is drawn empty over a note that will still be sent", "set .to-note's value from orderNote when the builder is built");
+}
+
+// ── T · THE MANAGER'S FLOOR AND THE WAITER'S FLOOR DRAW THE SAME TABLES (sweep #10 T7, 2026-10-16) ──
+// Both say they share floorTableList's rule. The manager's had drifted: an off-plan table holding an
+// open party nobody joined ("waiting", drawn as Free) earned a phantom "34 · Free" tile and the header
+// read "0/31" on a 30-table floor, while the tablet drew 30. Both functions are lifted from the shipped
+// files and fed the same summary.
+async function floorsAgree() {
+  console.log("\nT. the manager's floor and the waiter's floor draw the same tables");
+  const mgr = lift("public/panels/editor/app.js", "function floorTableList(baseN) {", "\n}\n", "manager floorTableList");
+  const tab = lift("public/panels/tablet/app.js", "function floorTableList() {", "\n}\n", "tablet floorTableList");
+  const cases = [
+    ["nothing above the plan", {}],
+    ["a cooking table above the plan", { 34: { state: "prep" } }],
+    ["a FREE stray above the plan", { 40: { state: "free" } }],
+    ["an open party nobody joined, above the plan", { 34: { state: "waiting" } }],
+    ["a merged child above the plan (its state reads free)", { 33: { state: "free" } }],
+    ["a merged PARENT above the plan", { 35: { state: "prep" } }],
+  ];
+  const merges = { 33: "7" }, kids = { 35: ["8"] };
+  for (const [label, tiles] of cases) {
+    const state = { summary: { tiles } };
+    const parent = (k) => merges[String(k)] || null, children = (k) => kids[String(k)] || [];
+    const m = new Function("state", "mergeParentOf", "mergeChildrenOf", `${mgr}\nreturn floorTableList(30);`)(state, parent, children);
+    const t = new Function("state", "mergeParentOf", "mergeChildrenOf", "tableCount", `${tab}\nreturn floorTableList();`)(state, parent, children, () => 30);
+    JSON.stringify(m) === JSON.stringify(t)
+      ? ok(`${label}: both floors draw ${m.length} tables`)
+      : bad(`${label}: the manager draws ${m.length}, the waiter ${t.length}`, `manager ends ${m.slice(-2).join(",")} · tablet ends ${t.slice(-2).join(",")}`);
+  }
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes, istClocks, rangeWords, gstEmptyLine, functionAsCondition, cancelOffers, fetchesEnd, courseOrderFollowsMenu, tagsFirstSaveWins, retentionResets, clashInWords, handBackShowsAll, floorsAgree];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

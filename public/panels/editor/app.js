@@ -7861,7 +7861,15 @@ function bindEditor() {
       // What this photo replaces, so the route can drop the old file instead of leaving one
       // behind for every re-photograph. It only ever acts on an address in our own bucket.
       if (state.sel && state.sel.image) fd.append("replaces", String(state.sel.image));
-      const res = await fetch("/api/editor" + ridQ("/dish-photo"), { method: "POST", body: fd });
+      // A DEADLINE, ASKED FOR (sweep #10 T7, item 4). This was the one write in the panel with none:
+      // on a database that is up but answering nothing (30–90s measured on 2026-07-31) or a stalled
+      // restaurant Wi-Fi, the button sat on "Uploading…", greyed, with no end — the exact fault
+      // issue-raise.js's photo upload was given a 30s ceiling for. Same 30s, same reason (a photo is
+      // a slower request than a JSON write), and AbortSignal.timeout is feature-tested because
+      // READING it throws on an older phone (verify:abort-guard).
+      let deadline;
+      try { deadline = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(30000) : undefined; } catch (e) { deadline = undefined; }
+      const res = await fetch("/api/editor" + ridQ("/dish-photo"), { method: "POST", body: fd, signal: deadline });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.url) throw new Error(j.error || "Couldn't upload that photo.");
       setPath(state.sel, "image", j.url);
@@ -7870,11 +7878,14 @@ function bindEditor() {
     } catch (e) {
       // No reply at all = no internet. Say that, rather than the browser's own wording.
       const offline = !navigator.onLine || (e && e.name === "TypeError");
+      // Our own deadline firing says so in words, never the browser's "signal timed out".
+      const slow = !!e && (e.name === "TimeoutError" || e.name === "AbortError");
       if (btn) { btn.disabled = false; btn.textContent = "📷 Upload a photo"; }
       say(offline
         ? "No internet, so the photo couldn't be uploaded — try again once you're back online."
+        : slow ? "The upload took too long, so it was stopped — the photo wasn't saved. Try again."
         : (e && e.message) || "Couldn't upload that photo.");
-      toast(offline ? "No internet — the photo wasn't uploaded." : ((e && e.message) || "Couldn't upload that photo."), "err");
+      toast(offline ? "No internet — the photo wasn't uploaded." : slow ? "The upload took too long — the photo wasn't saved." : ((e && e.message) || "Couldn't upload that photo."), "err");
     }
   };
 
@@ -8104,6 +8115,13 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
   const dish = (state.data.items || []).find((d) => d.id === dishId);
   if (!dish || !filterSlug) return;
   dish.tags = dish.tags || [];
+  // FIRST SAVE WINS ON A DISH'S TAG LIST (sweep #10 T7, item 6). This write sends the WHOLE list,
+  // built from this device's copy — and the kitchen's 🚫 Sold out is one of those tags. So ticking
+  // a dish into "spicy" moments after the kitchen marked it sold out wrote the list back WITHOUT
+  // `sold-out`, and the dish quietly went back on sale. The list we started from now travels as the
+  // expectation; lib/clashCompare.ts compares a list as a SET, so only a real change elsewhere
+  // refuses it — and the refusal says so, and the menu is re-read.
+  const tagsBefore = dish.tags.slice();
   const i = dish.tags.indexOf(filterSlug);
   const adding = i < 0;
   if (adding) dish.tags.push(filterSlug);
@@ -8115,7 +8133,7 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
     // Send ONLY id + tags, not the whole dish snapshot — posting the full (possibly stale)
     // row here reverted a price/name someone else had just edited on this dish. The server
     // upsert updates only the columns we send (onConflict=id), so this touches tags alone.
-    const _wq = await api("POST", "/items", { id: dish.id, tags: dish.tags });
+    const _wq = await api("POST", "/items", { id: dish.id, tags: dish.tags }, { expect: { table: "menu_items", id: dish.id, fields: { tags: tagsBefore }, label: "this dish's tags" } });
     okToast(_wq, `${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`);
   } catch (e) {
     // revert on failure
@@ -8124,7 +8142,10 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
     if (inputEl) inputEl.checked = !adding;
     if (row) row.classList.toggle("on", !adding);
     updateMembCount(filterSlug);
-    toast("Save failed: " + e.message, "err");
+    const clash = e && e.data && e.data.clash;
+    toast(clash ? clash.plain + (clash.todo ? " " + clash.todo : "") : "Save failed: " + errText(e), "err", undefined, clash ? 9000 : undefined);
+    // Someone else changed this dish's tags: show what they are NOW before anyone ticks again.
+    if (clash) { try { await loadAll(); renderList(); renderEditor(); } catch {} }
   }
 }
 // updateMembCount: refresh the "· N selected" counter next to a tag's dish list.
@@ -8197,7 +8218,11 @@ function buildEditExpect(kind, payload, pristineJson) {
     // compared as SETS there, which is right for allergens but wrong for an ordered list.
     const t = typeof was;
     const objectOk = t === "object" && was !== null && !Array.isArray(was);
-    if (was !== null && !objectOk && t !== "string" && t !== "number" && t !== "boolean") continue;
+    // …EXCEPT A DISH'S TAGS, which ARE a set (sweep #10 T7, item 6): the kitchen's 🚫 Sold out lives
+    // in that list, so a form saved from a stale copy could take `sold-out` off and put the dish
+    // back on sale. A set compared as a set is exactly what lib/clashCompare.ts does.
+    const setOk = k === "tags" && Array.isArray(was) && was.every((x) => typeof x === "string");
+    if (was !== null && !objectOk && !setOk && t !== "string" && t !== "number" && t !== "boolean") continue;
     fields[k] = was;
     if (Object.keys(fields).length >= 8) break;          // the server caps at 8 too
   }
@@ -8297,7 +8322,13 @@ async function save() {
     renderList();
     renderEditor();
   } catch (e) {
-    toast("Save failed: " + e.message, "err");
+    // IN WORDS (sweep #10 T7, item 8). This is the write buildEditExpect exists for, so it is the
+    // place a "first save wins" refusal is MOST likely to land — and e.message on a live refusal is
+    // the server's CODE, so the second manager read "Save failed: clash_changed_elsewhere". errText()
+    // says the server's own sentence ("Someone else changed Price while you had it open — it now
+    // says …"), and a refusal like that is held on screen long enough to read.
+    const clash = !!(e && e.data && e.data.clash);
+    toast(clash ? errText(e) : "Save failed: " + errText(e), "err", undefined, clash ? 9000 : undefined);
   } finally {
     // renderEditor() rebuilds the Save button on success; re-query so we re-enable
     // whatever button now exists (important on the failure path, where nothing re-rendered).
@@ -8392,7 +8423,10 @@ function whenLabel(ts) {
   if (secs < 86400) return Math.floor(secs / 3600) + "h ago";
   const days = Math.floor(secs / 86400);
   if (days < 3) return days === 1 ? "yesterday" : days + " days ago";
-  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  // The restaurant's calendar day, never the reader's (sweep #10 T7, item 3) — fullWhen() below was
+  // pinned on 2026-07-06; this half of the same pair was not, so an owner abroad saw a log row near
+  // midnight dated a day off from the detail card that opens from it.
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 // fullWhen: the exact date + time for the click-to-open detail card, e.g.
@@ -8657,16 +8691,18 @@ async function saveRetention(which, val) {
     // api() carries the parsed reply on `e.data` (with `e.status`) — that is this panel's
     // contract for every call, so read the code from there and nowhere else.
     const code = (e && e.data && e.data.code) || "";
+    // Put the dropdown back on the value that is really stored, so the screen never keeps
+    // showing a window the restaurant is not on. Done to the element rather than through a
+    // full redraw: this runs inside a tab whose own redraw would also refetch the log.
+    // ON EVERY REFUSAL (sweep #10 T7, item 7) — it used to happen only for the two lock codes, so a
+    // server error left the box on the window just refused, under a toast saying it wasn't saved.
+    const sel = document.querySelector('.ret-select[data-ret="' + which + '"]');
+    if (sel) sel.value = String(Number((state.data.settings || {})[which]) || 90);
     if (code === "retention_locked" || code === "retention_manager_blocked") {
       toast(e.message || "That's not yours to change.", "err");
-      // Put the dropdown back on the value that is really stored, so the screen never keeps
-      // showing a window the restaurant is not on. Done to the element rather than through a
-      // full redraw: this runs inside a tab whose own redraw would also refetch the log.
-      const sel = document.querySelector('.ret-select[data-ret="' + which + '"]');
-      if (sel) sel.value = String(Number((state.data.settings || {})[which]) || 90);
       return;
     }
-    toast("Couldn't save retention: " + e.message, "err");
+    toast("Couldn't save retention: " + errText(e), "err");
   }
 }
 
@@ -9068,7 +9104,10 @@ function auditHtml() {
         r.table_number && "table " + r.table_number, r.item_title, r.actor, r.reason_note, r.reason_code,
         (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
   const shownMoney = AS ? AS.sumAmount(list) : 0;
-  const when = (t) => { const d = new Date(t); return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  // The restaurant's clock (sweep #10 T7, item 3): this printed in the READER's zone and locale, so
+  // the same removal read 21:30 here and 11:00 am on an owner's laptop in Europe — the one list a
+  // person checks against the paper. fmtWhen() is the panel's one India-pinned date + time.
+  const when = (t) => fmtWhen(t);
   return `<div class="ed-head"><h2>Audit · what was removed <span class="sub">· ${rows.length}</span></h2>
       <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
     <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
@@ -9203,8 +9242,10 @@ async function openRemovalDetail(id) {
   const items = (w && Array.isArray(w.items)) ? w.items : [];
   const row = (k, v) => v == null || v === "" ? "" : `<div class="au-d-row"><span>${esc(k)}</span><b>${v}</b></div>`;
   const whenLong = (iso) => { if (!iso) return ""; try { const x = new Date(iso);
-    return esc(x.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })
-      + " · " + x.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { return esc(iso); } };
+    // Asia/Kolkata, like every other clock in this panel (sweep #10 T7, item 3) — the story of a
+    // removal is evidence; its time must be the restaurant's, whoever opens it and wherever.
+    return esc(x.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })
+      + " · " + x.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })); } catch { return esc(iso); } };
   const optTxt = (o) => Array.isArray(o) ? o.map((x) => typeof x === "string" ? x : ((x && x.label) || "")).filter(Boolean).join(", ") : "";
   const label = (AUDIT_KIND[d.kind] || ["•", d.kind])[1];
   const lines = items.map((it) => {
@@ -9936,11 +9977,17 @@ function orderItemRows(o) {
 const STLABEL_SP = { received: "new", preparing: "preparing", ready: "ready", served: "served", cancelled: "cancelled" };
 const SPINE_TINTS = ["#c2410c", "#b45309", "#15803d", "#a16207", "#7c3aed", "#be185d", "#0e7490", "#1d4ed8", "#9f1239", "#0f766e"];
 const NO_COURSE = { slug: "", name: "Not on the menu now", abbr: "—", tint: "var(--muted)", seq: 9990 };
-let _menuSeq = null, _menuSeqKey = "";
+// REBUILT WHENEVER THE MENU IS RE-READ (sweep #10 T7, item 5). The cache used to be keyed on the
+// two COUNTS plus the first dish's id and the first category's slug, so a change that kept those —
+// categories reordered, a course recoloured or renamed, a dish moved to another course — left every
+// table's bill in the OLD course order and tint until the page was reloaded (measured: desserts
+// moved from 9th to 2nd still read course 9). The menu only ever arrives as NEW arrays (loadAll
+// replaces state.data wholesale, on a save here and on the realtime "menu" event from any other
+// device), so the arrays' own identity is the exact signal: a new menu, a new sequence.
+let _menuSeq = null, _menuSeqItems = null, _menuSeqCats = null;
 function menuSeq() {
   const items = state.data.items || [], cats = state.data.categories || [];
-  const key = `${items.length}:${cats.length}:${(items[0] || {}).id || ""}:${(cats[0] || {}).slug || ""}`;
-  if (_menuSeq && _menuSeqKey === key) return _menuSeq;  // rebuilt only when the menu itself changes
+  if (_menuSeq && _menuSeqItems === state.data.items && _menuSeqCats === state.data.categories) return _menuSeq;
   const catBySlug = new Map();
   [...cats].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).forEach((c, i) => {
     const name = nameOf(c.name, c.slug) || c.slug || "—";
@@ -9956,7 +10003,7 @@ function menuSeq() {
     const k = String(it.title || "").trim().toLowerCase();
     if (k && !byTitle.has(k)) byTitle.set(k, { cat: it.category, itemSeq: Number(it.sort_order) || 0 });
   });
-  _menuSeqKey = key;
+  _menuSeqItems = state.data.items; _menuSeqCats = state.data.categories;
   return (_menuSeq = { catBySlug, byTitle });
 }
 // The course a dish row belongs to, with everything the line needs to say it in three letters.
@@ -10523,7 +10570,11 @@ function floorTableList(baseN) {
     // `belong` CTE needs a session id). Without the merge test, a merged child numbered above the
     // table count fell through this filter and vanished off the floor while its party was live,
     // taking the one tile that reaches its Unmerge with it.
-    .filter((k) => { const st = (tiles[String(k)] || {}).state; return (st && st !== "free") || !!mergeParentOf(k); })
+    // "waiting" (an open party nobody has joined) is drawn as FREE by normalizeTileState, so it has
+    // no money to hide either — it is excluded exactly as the waiter tablet's twin excludes it
+    // (sweep #10 T7, item 10: a 30-table floor drew a phantom "34 · Free" and read "0/31", while the
+    // tablet drew 30). A merged PARENT above the count is kept too, as the tablet keeps it.
+    .filter((k) => { const st = (tiles[String(k)] || {}).state; return (st && st !== "free" && st !== "waiting") || !!mergeParentOf(k) || mergeChildrenOf(String(k)).length > 0; })
     .sort((a, b) => a - b);
   return out.concat(extras);
 }
@@ -12225,7 +12276,12 @@ function tablePanelParts(t, host = "float") {
     // sale on the books. The server refuses it as well (invoiceLockedByOrder in the editor route);
     // this only stops offering a button that would be refused, because hiding is never the guard.
     // A VOIDED invoice does not lock: that bill was reopened on purpose.
-    const cancelBtn = (o) => ((anyServed(o) || invoiceLocksOrder(sess, o)) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
+    // NOR A PAID TICKET (sweep #10 T7, item 2). The server refuses it ("Can't cancel a paid order —
+    // mark it unpaid (refund) first.", the editor route's status PATCH), and 💳 Mark all paid settles
+    // every unpaid ticket on the table INCLUDING one still waiting to be accepted — so a paid
+    // ticket in the waiting box is an ordinary state, and it wore a ✕ Cancel that could only ever be
+    // refused. The dish sheet's own canCancel already asked this; the two now agree.
+    const cancelBtn = (o) => ((anyServed(o) || invoiceLocksOrder(sess, o) || o.payment_status === "paid") ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
     // ── THE WAITING TICKET, IN ONE LINE (owner, 2026-09-17) ───────────────────────────────────
     // An un-accepted order used to be a card with its own dish rows, its own head and its own
     // foot — three lines of furniture before you read a dish. It is now one line: when it came,
@@ -12329,10 +12385,15 @@ function tablePanelParts(t, host = "float") {
     // SERVED SINKS (owner, 2026-09-17: "which are mark as serve should go to bottom, only left one
     // on top"). What is still to come is what the screen is for; what is already on the table is
     // the record. Both halves keep the menu's order inside themselves.
-    const allOut = (r) => (r._parts ? r._parts.every((x) => x.status === "served") : r.status === "served");
+    // NAMED rowServed, NEVER allOut (sweep #10 T7, item 1). It was `allOut` from 2026-09-17, which
+    // SHADOWED the table-wide `allOut` boolean declared above tablePanelParts' orders block — so the
+    // Edit toggle further down read `allOut ? "" : …` against this FUNCTION, always truthy, and the
+    // ✎ Edit button never drew on any table for a month. verify:manager-behaviour (L) refuses the
+    // name coming back inside this block.
+    const rowServed = (r) => (r._parts ? r._parts.every((x) => x.status === "served") : r.status === "served");
     const shownRows = view === "kot"
       ? [...flat].sort((a, b) => ((a._kot || 0) - (b._kot || 0)) || byMenuOrder(a, b))
-      : mergeRows(flat).sort((a, b) => (allOut(a) ? 1 : 0) - (allOut(b) ? 1 : 0) || byMenuOrder(a, b));
+      : mergeRows(flat).sort((a, b) => (rowServed(a) ? 1 : 0) - (rowServed(b) ? 1 : 0) || byMenuOrder(a, b));
 
     // ONE LINE: spine · qty · dish (+ what to leave out) · course or ticket · money · serve · ✎.
     // Serve and ✎ are on EVERY line ("for particular item, edit button, serve button and
@@ -12453,7 +12514,12 @@ function tablePanelParts(t, host = "float") {
     // is NOT lost with it: every line keeps its own ✎ (which is allowed at any status, owner
     // 2026-07-03 — "allergy can be added to all items"); what Edit adds is per-TICKET "avoid in
     // all dishes" and ＋ Add dish.
-    const editToggle = allOut ? "" : (editing
+    // ONLY WHERE IT UNLOCKS SOMETHING (sweep #10 T7, item 1). Since the one-bill redesign
+    // (2026-09-17) those two per-ticket extras draw only inside a WAITING ticket's amber box —
+    // accepted dishes are merged lines with their own ✎ — so on a table with no waiting ticket the
+    // toggle would ask about the kitchen and then change nothing on screen. It shows while there
+    // is a waiting ticket, and while Edit is already on (so ✓ Done can always switch it off).
+    const editToggle = (allOut || (!newOrders.length && !editing)) ? "" : (editing
       ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done</button>`
       : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`);
     const shownN = newOrders.length + liveOrders.length;
@@ -13617,7 +13683,12 @@ function openTakeOrder(table, rerender, opts = {}) {
   }
   const search = wrap.querySelector(".to-search");
   search.oninput = () => { q = search.value; paintList(); };
-  wrap.querySelector(".to-note").oninput = (e) => { orderNote = e.target.value; };
+  // THE NOTE THAT CAME BACK IS SHOWN (sweep #10 T7, item 9). A refused order re-opens this builder
+  // with `restore`, and orderNote was put back — but the box was drawn empty, so the screen said
+  // "no note for the kitchen" while the old one still rode along on the next Send, unseen.
+  const noteBox = wrap.querySelector(".to-note");
+  noteBox.value = orderNote;
+  noteBox.oninput = (e) => { orderNote = e.target.value; };
   // The whole-order row. A TYPED allergy adds/removes a whole chip, so that case redraws
   // the row and rebinds; a standard chip only flips its class, which keeps the common
   // tap flicker-free. The row lives outside paintCart's markup, hence its own painter.
