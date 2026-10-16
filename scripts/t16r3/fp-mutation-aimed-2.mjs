@@ -26,10 +26,12 @@ C("P", "errlog.js", "a real crash in a script file names THAT file and line, wit
 });
 
 // ── the theme waits for a finger ──────────────────────────────────────────────────────────────
-C("P", "theme.js", "a theme change from another tab while a finger is DOWN waits for it to lift (a real touch, not a script event); a page with no theme button loads without an error", async () => {
+C("P", "theme.js", "a theme change from another tab applies at once when nobody is touching the screen, and while a finger is DOWN waits for it to lift (a real touch, not a script event); a page with no theme button loads without an error", async () => {
   const P = page("p-theme", { scripts: ["theme.js"], body: '<button id="themeToggle" style="width:200px;height:120px">t</button>' });
   const h = await open(P); const p = h.page;
   await p.evaluate(() => window.LFH_THEME.set("light"));
+  // With NO finger on the screen, another tab's choice applies at once (nothing waits for a tap).
+  const untouched = await p.evaluate(() => { window.dispatchEvent(new StorageEvent("storage", { key: "lfh_panel_theme", newValue: "dark" })); const t = window.LFH_THEME.get(); window.LFH_THEME.set("light"); return t; });
   const box = await p.locator("#themeToggle").boundingBox();
   await p.mouse.move(box.x + 10, box.y + 10); await p.mouse.down();
   await p.evaluate(() => window.dispatchEvent(new StorageEvent("storage", { key: "lfh_panel_theme", newValue: "dark" })));
@@ -38,7 +40,7 @@ C("P", "theme.js", "a theme change from another tab while a finger is DOWN waits
   const after = await p.evaluate(() => window.LFH_THEME.get());
   await h.close();
   const P2 = page("p-theme-nobtn", { scripts: ["theme.js"] }); const h2 = await open(P2); await sleep(200); const errs = h2.errors.slice(); await h2.close();
-  return ok(during === "light" && after === "dark" && !errs.length, JSON.stringify({ during, after, errs }));
+  return ok(untouched === "dark" && during === "light" && after === "dark" && !errs.length, JSON.stringify({ untouched, during, after, errs }));
 });
 
 // ── the figure shortener shrinks only as much as it must ──────────────────────────────────────
@@ -191,16 +193,18 @@ C("P", "auditsort.js", "the Activity log's 'Oldest first' really is oldest first
 });
 
 // ── the routes: the small words in their answers ──────────────────────────────────────────────
-C("P", "app/api/health + log/client-error + maintenance routes", "health says db:false when the database is down; a rate-limited report still answers ok:true; a filed crash keeps its message and the owner's alert names the SCREEN; a switch change answers canChange:true and logs the person's NAME", () => quiet(async () => {
+C("P", "app/api/health + log/client-error + maintenance routes", "a tap trail from a restaurant's menu address is filed under that restaurant; health says db:false when the database is down; a rate-limited report still answers ok:true; a filed crash keeps its message and the owner's alert names the SCREEN; a switch change answers canChange:true and logs the person's NAME", () => quiet(async () => {
   const out = {};
   await world({}); g().FAIL = { restaurants: "error" }; const hl = await call("health", "GET"); out.health = hl.json;
   const now = new Date().toISOString();
   await world({ actions: Array.from({ length: 40 }, (_, i) => ({ id: "t" + i, device_id: "d1", action: "ui_taps", created_at: now })) });
   out.taps = (await call("clientError", "POST", { body: { panel: "tablet", kind: "taps", detail: "[1]" }, headers: { cookie: "lfh_panel_device=d1" } })).json;
+  await world({}); await call("clientError", "POST", { body: { panel: "guest", kind: "taps", detail: "[1]", where: "/r/french-house/menu" } });
+  const tap = (g().WRITES || []).find((w) => w.table === "staff_actions"); out.tapRid = tap && (Array.isArray(tap.patch) ? tap.patch[0] : tap.patch).restaurant_id;
   await world({}); await call("clientError", "POST", { body: { panel: "owner", message: "Cannot read x", where: "/owner/feedback" } });
   const ins = (g().WRITES || []).find((w) => w.table === "staff_actions"); out.detail = ins && (Array.isArray(ins.patch) ? ins.patch[0] : ins.patch).detail;
   await new Promise((r) => setTimeout(r, 50)); out.alert = (g().ALERTS || [])[0] && g().ALERTS[0].text;
   await world({ who: "manager", access: { maintenance: { on: true, manager_opts: { who: "owner_manager" } } } });
   out.post = (await call("maintenance", "POST", { body: { on: true } })).json; out.log = (g().LOGS || [])[0];
-  return ok(out.health && out.health.db === false && out.taps.ok === true && /^Cannot read x @ \/owner\/feedback/.test(out.detail || "") && /Screen: (?!\/owner\/feedback(\n|$))\S/.test(out.alert || "") && out.post.canChange === true && out.log && out.log.actor === "Diag Manager", JSON.stringify(out));
+  return ok(out.tapRid === FH && out.health && out.health.db === false && out.taps.ok === true && /^Cannot read x @ \/owner\/feedback/.test(out.detail || "") && /Screen: (?!\/owner\/feedback(\n|$))\S/.test(out.alert || "") && out.post.canChange === true && out.log && out.log.actor === "Diag Manager", JSON.stringify(out));
 }));
