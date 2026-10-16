@@ -766,7 +766,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // ⚰️ WHAT STOOD HERE: `session-started` REPLAYED the whole reveal, deliberately, so the cards
     // animated themselves in over the camera feed. That is the thing he is asking to be rid of;
     // it is deleted rather than left switched off. The cards are hidden by one class for the
-    // length of the session — never unmounted, because the tags may not be removed (R44) and a
+    // length of the session — never unmounted, because the tags may not be removed (R57) and a
     // card that is taken out of the DOM cannot come back with the reveal that owns it.
     const handleARStatus = (e: any) => {
       const status = e.detail?.status;
@@ -1193,7 +1193,8 @@ export default function ViewerClient({ folder }: { folder: string }) {
   };
 
   // Triple-tap / triple-click the model to replay the reveal animation.
-  // (AR replays it automatically on entry via the ar-status handler above.)
+  // (Entering AR does NOT replay it any more — it hides the cards for the session instead, owner's
+  // R57 of 2026-09-20. This line said the opposite until sweep #10 T2's item 7.)
   useEffect(() => {
     if (loading || error) return;
     const target = mvRef.current;  // the model element to listen on

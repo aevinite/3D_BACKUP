@@ -276,6 +276,16 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
   );
 }
 
+// Sweep #10 T2, item 7: two notes on the 3D screen said the opposite of the code — one cited R44
+// (a bill-numbering rejection) for the tags rule, which is R57; one said AR replays the reveal,
+// which R57 deleted. A note is read as the decision, so a wrong one is how a fix gets undone.
+check(
+  "the 3D screen's notes cite the tags rule as R57 and no longer say AR replays the reveal",
+  !/tags may not be removed \(R44\)/.test(src[VIEWER]) && !/AR replays it automatically on entry/.test(src[VIEWER]) &&
+    /tags may not be removed \(R57\)/.test(src[VIEWER]),
+  `${VIEWER} → R44 is the bill-number rejection; the callout-tag rule is R57 (docs/REJECTED-IDEAS.md).`
+);
+
 // Sweep #10 T2, item 5: the six hotspot <button>s were six dead Tab stops before Add to order.
 {
   const pmv = src[PUBLIC_MV].replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
